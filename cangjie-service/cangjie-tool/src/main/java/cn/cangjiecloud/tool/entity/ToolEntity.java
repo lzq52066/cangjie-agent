@@ -1,0 +1,42 @@
+package cn.cangjiecloud.tool.entity;
+
+import com.baomidou.mybatisplus.annotation.TableName;
+import cn.cangjiecloud.common.mp.base.BaseEntity;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+
+@Data
+@EqualsAndHashCode(callSuper = true)
+@TableName(value = "tool", autoResultMap = true)
+public class ToolEntity extends BaseEntity {
+
+    /** 工具名称 */
+    private String name;
+
+    /** 工具描述 */
+    private String description;
+
+    /** 工具类型：tool / function / api */
+    private String type;
+
+    /** 函数名（function calling 用） */
+    private String functionName;
+
+    /** 参数定义（JSON） */
+    private String parameters;
+
+    /** 实现类全限定类名 */
+    private String implementation;
+
+    /** 配置（JSON） */
+    private String config;
+
+    /** 状态：active / inactive */
+    private String status;
+
+    /** 图标 */
+    private String icon;
+
+    /** 分类 */
+    private String category;
+}

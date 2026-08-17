@@ -1,0 +1,33 @@
+package cn.cangjiecloud.workflow.service;
+
+import com.baomidou.mybatisplus.extension.service.IService;
+import cn.cangjiecloud.workflow.entity.WorkflowEntity;
+import cn.cangjiecloud.workflow.entity.WorkflowExecutionEntity;
+
+import java.util.List;
+import java.util.Map;
+
+public interface IWorkflowService extends IService<WorkflowEntity> {
+
+    WorkflowEntity create(WorkflowEntity entity);
+
+    WorkflowEntity update(String id, WorkflowEntity entity);
+
+    void delete(String id);
+
+    List<WorkflowEntity> list(String keyword);
+
+    /**
+     * 发布工作流
+     */
+    WorkflowEntity publish(String id);
+
+    /**
+     * 执行工作流
+     *
+     * @param workflowId 工作流 ID
+     * @param inputs     输入参数
+     * @return 执行记录
+     */
+    WorkflowExecutionEntity execute(String workflowId, Map<String, Object> inputs);
+}

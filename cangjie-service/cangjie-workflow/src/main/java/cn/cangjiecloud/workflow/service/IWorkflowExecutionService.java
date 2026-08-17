@@ -1,0 +1,24 @@
+package cn.cangjiecloud.workflow.service;
+
+import com.baomidou.mybatisplus.extension.service.IService;
+import cn.cangjiecloud.workflow.entity.WorkflowExecutionEntity;
+
+import java.util.List;
+
+public interface IWorkflowExecutionService extends IService<WorkflowExecutionEntity> {
+
+    /**
+     * 按工作流 ID 查询执行历史
+     */
+    List<WorkflowExecutionEntity> listByWorkflow(String workflowId);
+
+    /**
+     * 记录执行状态
+     *
+     * @param executionId 执行记录 ID
+     * @param status      状态：pending / running / completed / failed
+     * @param currentNode 当前节点
+     * @param errorMessage 错误信息
+     */
+    void recordStatus(String executionId, String status, String currentNode, String errorMessage);
+}

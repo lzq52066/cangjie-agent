@@ -1,0 +1,214 @@
+package cn.cangjiecloud.knowledge.service.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import cn.cangjiecloud.common.exception.ApiException;
+import cn.cangjiecloud.core.rag.DocumentParserFactory;
+import cn.cangjiecloud.core.rag.EmbeddingProvider;
+import cn.cangjiecloud.core.rag.SplitStrategy;
+import cn.cangjiecloud.core.rag.TextChunk;
+import cn.cangjiecloud.core.rag.TextSplitter;
+import cn.cangjiecloud.core.rag.TextSplitterFactory;
+import cn.cangjiecloud.core.rag.VectorStore;
+import cn.cangjiecloud.knowledge.api.enums.DocumentStatus;
+import cn.cangjiecloud.knowledge.api.enums.DocumentType;
+import cn.cangjiecloud.knowledge.entity.KnowledgeBaseEntity;
+import cn.cangjiecloud.knowledge.entity.KnowledgeDocumentEntity;
+import cn.cangjiecloud.knowledge.entity.KnowledgeParagraphEntity;
+import cn.cangjiecloud.knowledge.mapper.KnowledgeDocumentMapper;
+import cn.cangjiecloud.knowledge.service.IKnowledgeBaseService;
+import cn.cangjiecloud.knowledge.service.IKnowledgeDocumentService;
+import cn.cangjiecloud.knowledge.service.IKnowledgeParagraphService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class KnowledgeDocumentServiceImpl
+        extends ServiceImpl<KnowledgeDocumentMapper, KnowledgeDocumentEntity>
+        implements IKnowledgeDocumentService {
+
+    private final IKnowledgeBaseService knowledgeBaseService;
+    private final IKnowledgeParagraphService paragraphService;
+    private final DocumentParserFactory parserFactory;
+    private final TextSplitterFactory splitterFactory;
+    private final EmbeddingProvider embeddingProvider;
+    private final VectorStore vectorStore;
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public KnowledgeDocumentEntity upload(String knowledgeBaseId, MultipartFile file) {
+        KnowledgeBaseEntity kb = knowledgeBaseService.getById(knowledgeBaseId);
+        if (kb == null) {
+            throw new ApiException("知识库不存在");
+        }
+
+        // 1. 创建文档记录
+        KnowledgeDocumentEntity doc = new KnowledgeDocumentEntity();
+        doc.setKnowledgeBaseId(knowledgeBaseId);
+        doc.setName(file.getOriginalFilename());
+        doc.setFileType(DocumentType.of(file.getOriginalFilename()).getCode());
+        doc.setFileSize(file.getSize());
+        doc.setTitle(file.getOriginalFilename());
+        doc.setStatus(DocumentStatus.PENDING.getCode());
+        try {
+            doc.setFileMd5(md5(file.getBytes()));
+        } catch (IOException e) {
+            log.warn("文件 MD5 计算失败: {}", e.getMessage());
+        }
+        save(doc);
+
+        // 2. 异步处理（M1 同步执行，后续改为消息队列）
+        try {
+            processDocument(doc, kb, file.getBytes());
+        } catch (Exception e) {
+            log.error("文档处理失败: {}", doc.getName(), e);
+            doc.setStatus(DocumentStatus.FAILED.getCode());
+            doc.setProcessMessage(e.getMessage());
+            updateById(doc);
+        }
+
+        return doc;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void delete(String documentId) {
+        KnowledgeDocumentEntity doc = getById(documentId);
+        if (doc == null) return;
+
+        // 删除向量
+        vectorStore.deleteByDocument(documentId);
+        // 删除段落
+        paragraphService.deleteByDocument(documentId);
+        // 删除文档
+        removeById(documentId);
+
+        // 更新知识库计数
+        updateKnowledgeBaseCount(doc.getKnowledgeBaseId());
+        log.info("文档已删除: {} ({})", doc.getName(), documentId);
+    }
+
+    @Override
+    public void reprocess(String documentId) {
+        throw new ApiException("暂不支持重新处理，请重新上传文档");
+    }
+
+    @Override
+    public List<KnowledgeDocumentEntity> listByKnowledgeBase(String knowledgeBaseId) {
+        return list(new LambdaQueryWrapper<KnowledgeDocumentEntity>()
+                .eq(KnowledgeDocumentEntity::getKnowledgeBaseId, knowledgeBaseId)
+                .orderByDesc(KnowledgeDocumentEntity::getCreateTime));
+    }
+
+    /**
+     * 文档处理核心流程：解析 → 切片 → 嵌入 → 存储
+     */
+    private void processDocument(KnowledgeDocumentEntity doc, KnowledgeBaseEntity kb, byte[] fileBytes) {
+        // 1. 解析
+        updateStatus(doc, DocumentStatus.PARSING, "正在解析文档");
+        String text = parserFactory.parse(new ByteArrayInputStream(fileBytes), doc.getName());
+        log.info("文档解析完成: {} ({} 字符)", doc.getName(), text.length());
+
+        // 2. 切片
+        updateStatus(doc, DocumentStatus.SPLITTING, "正在切分文档");
+        TextSplitter splitter = splitterFactory.get(kb.getSplitStrategy());
+        int chunkSize = kb.getChunkSize() != null ? kb.getChunkSize() : 500;
+        int overlap = kb.getChunkOverlap() != null ? kb.getChunkOverlap() : 50;
+        List<TextChunk> chunks = splitter.split(text, chunkSize, overlap);
+        log.info("文档切片完成: {} → {} 个段落", doc.getName(), chunks.size());
+
+        // 3. 保存段落
+        List<KnowledgeParagraphEntity> paragraphs = new ArrayList<>();
+        List<VectorStore.VectorEntry> vectorEntries = new ArrayList<>();
+        int totalTokens = 0;
+
+        for (int i = 0; i < chunks.size(); i++) {
+            TextChunk chunk = chunks.get(i);
+            KnowledgeParagraphEntity para = new KnowledgeParagraphEntity();
+            para.setKnowledgeBaseId(kb.getId());
+            para.setDocumentId(doc.getId());
+            para.setTitle(chunk.getSource() != null ? chunk.getSource() : doc.getTitle());
+            para.setContent(chunk.getContent());
+            para.setChunkIndex(i);
+            para.setPageNumber(chunk.getPageNumber());
+            para.setCharCount(chunk.getContent().length());
+            para.setTokenCount(estimateTokens(chunk.getContent()));
+            para.setVectorStatus("pending");
+            paragraphs.add(para);
+            totalTokens += para.getTokenCount();
+        }
+
+        // 批量保存段落
+        paragraphService.saveBatch(paragraphs);
+
+        // 4. 嵌入 + 存储向量
+        updateStatus(doc, DocumentStatus.EMBEDDING, "正在向量化");
+        for (KnowledgeParagraphEntity para : paragraphs) {
+            float[] embedding = embeddingProvider.embed(para.getContent());
+            vectorStore.store(para.getId(), embedding, para.getContent(),
+                    java.util.Map.of("title", para.getTitle(), "documentId", doc.getId()));
+            para.setVectorStatus("embedded");
+        }
+        paragraphService.updateBatchById(paragraphs);
+
+        // 5. 更新文档状态
+        doc.setStatus(DocumentStatus.COMPLETED.getCode());
+        doc.setParagraphCount(paragraphs.size());
+        doc.setTokenCount(totalTokens);
+        doc.setProcessMessage("处理完成");
+        updateById(doc);
+
+        // 6. 更新知识库计数
+        updateKnowledgeBaseCount(kb.getId());
+        log.info("文档处理完成: {} ({} 段落, {} tokens)", doc.getName(), paragraphs.size(), totalTokens);
+    }
+
+    private void updateStatus(KnowledgeDocumentEntity doc, DocumentStatus status, String message) {
+        doc.setStatus(status.getCode());
+        doc.setProcessMessage(message);
+        updateById(doc);
+    }
+
+    private void updateKnowledgeBaseCount(String knowledgeBaseId) {
+        KnowledgeBaseEntity kb = knowledgeBaseService.getById(knowledgeBaseId);
+        if (kb == null) return;
+        long docCount = count(new LambdaQueryWrapper<KnowledgeDocumentEntity>()
+                .eq(KnowledgeDocumentEntity::getKnowledgeBaseId, knowledgeBaseId));
+        kb.setDocumentCount((int) docCount);
+        // 段落计数
+        long paraCount = paragraphService.listByKnowledgeBase(knowledgeBaseId).size();
+        kb.setParagraphCount((int) paraCount);
+        knowledgeBaseService.updateById(kb);
+    }
+
+    private int estimateTokens(String text) {
+        if (text == null) return 0;
+        // 近似估算：中文 1 字 ≈ 1.5 token，英文 1 词 ≈ 1.3 token
+        return (int) (text.length() * 0.75);
+    }
+
+    private String md5(byte[] bytes) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(bytes);
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+}

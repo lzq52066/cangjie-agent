@@ -1,0 +1,59 @@
+package cn.cangjiecloud.application.controller;
+
+import cn.dev33.satoken.annotation.SaCheckLogin;
+import cn.cangjiecloud.application.api.dto.ApplicationCreateDTO;
+import cn.cangjiecloud.application.entity.ApplicationEntity;
+import cn.cangjiecloud.application.service.IApplicationService;
+import cn.cangjiecloud.common.api.R;
+import cn.cangjiecloud.common.constant.AppConst;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@SaCheckLogin
+@RestController
+@RequiredArgsConstructor
+@RequestMapping(AppConst.ADMIN_API + "/application")
+public class ApplicationController {
+
+    private final IApplicationService applicationService;
+
+    @PostMapping
+    public R<ApplicationEntity> create(@Valid @RequestBody ApplicationCreateDTO dto) {
+        return R.data(applicationService.create(dto));
+    }
+
+    @PutMapping("/{id}")
+    public R<ApplicationEntity> update(@PathVariable String id, @RequestBody ApplicationCreateDTO dto) {
+        return R.data(applicationService.update(id, dto));
+    }
+
+    @DeleteMapping("/{id}")
+    public R<Void> delete(@PathVariable String id) {
+        applicationService.delete(id);
+        return R.ok();
+    }
+
+    @GetMapping("/{id}")
+    public R<ApplicationEntity> get(@PathVariable String id) {
+        return R.data(applicationService.getById(id));
+    }
+
+    @GetMapping
+    public R<List<ApplicationEntity>> list(@RequestParam(required = false) String keyword,
+                                          @RequestParam(required = false) String type) {
+        return R.data(applicationService.list(keyword, type));
+    }
+
+    @PostMapping("/{id}/publish")
+    public R<ApplicationEntity> publish(@PathVariable String id) {
+        return R.data(applicationService.publish(id));
+    }
+
+    @GetMapping("/apikey/{apikey}")
+    public R<ApplicationEntity> getByApikey(@PathVariable String apikey) {
+        return R.data(applicationService.getByApikey(apikey));
+    }
+}

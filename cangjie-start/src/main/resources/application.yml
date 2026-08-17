@@ -1,0 +1,93 @@
+server:
+  port: 8080
+  undertow:
+    max-http-post-size: 2048MB
+spring:
+  threads:
+    virtual:
+      enabled: true
+  output:
+    ansi:
+      enabled: ALWAYS
+  application:
+    name: CangJieAgent
+  servlet:
+    multipart:
+      max-file-size: 512MB
+      max-request-size: 512MB
+  jackson:
+    time-zone: GMT+8
+  cache:
+    type: caffeine
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    validate-on-migrate: false
+    locations: classpath:db/migration
+  sql:
+    init:
+      mode: never
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://localhost:5432/cangjie_agent
+    username: postgres
+    password: postgres
+
+mybatis-plus:
+  global-config:
+    db-config:
+      capital-mode: false
+      table-format: "\"%s\""
+      column-format: "\"%s\""
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  mapper-locations: classpath:mapper/**/*.xml,mapper/*.xml
+  type-aliases-package: cn.cangjiecloud.**.entity
+  type-handlers-package: cn.cangjiecloud.common.mp.typehandler
+
+# Sa-Token 配置
+sa-token:
+  jwt-secret-key: ${SA_TOKEN_JWT_SECRET_KEY:cangjie-cloud-secret-key-change-me-pls}
+  token-name: token
+  timeout: 604800
+  active-timeout: -1
+  is-concurrent: true
+  is-share: true
+  is-log: true
+  token-style: random-32
+
+decorator:
+  datasource:
+    p6spy:
+      log-format: "\ntime:%(executionTime)ms || sql:%(sql)\n"
+      enable-logging: false
+
+system:
+  default-username: admin
+  default-password: ${SYSTEM_DEFAULT_PASSWORD:cangjie@123456}
+  default-phone: 18800000000
+  default-email: admin@cangjiecloud.cn
+
+# 嵌入模型配置（支持 OpenAI 兼容接口：通义/智谱/Ollama 等）
+cangjie:
+  embedding:
+    api-key: ${EMBEDDING_API_KEY:}
+    base-url: ${EMBEDDING_BASE_URL:https://api.openai.com/v1}
+    model: ${EMBEDDING_MODEL:text-embedding-3-small}
+    dimension: ${EMBEDDING_DIMENSION:1536}
+  oss:
+    local-path: ${OSS_LOCAL_PATH:./data/files}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+  api-docs:
+    path: /v3/api-docs
+    enabled: true
+
+logging:
+  level:
+    cn.cangjiecloud: debug
+    com.baomidou.mybatisplus: info

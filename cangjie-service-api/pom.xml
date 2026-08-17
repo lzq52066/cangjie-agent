@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>cn.cangjiecloud</groupId>
+        <artifactId>cangjie-agent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <artifactId>cangjie-service-api</artifactId>
+    <packaging>pom</packaging>
+    <name>${project.artifactId}</name>
+    <modules>
+        <module>cangjie-user-api</module>
+        <module>cangjie-model-api</module>
+        <module>cangjie-knowledge-api</module>
+        <module>cangjie-tool-api</module>
+        <module>cangjie-application-api</module>
+        <module>cangjie-workflow-api</module>
+        <module>cangjie-trigger-api</module>
+        <module>cangjie-oss-api</module>
+        <module>cangjie-system-api</module>
+    </modules>
+</project>
+

@@ -1,0 +1,61 @@
+package cn.cangjiecloud.chat.service.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import cn.cangjiecloud.chat.entity.ChatSessionEntity;
+import cn.cangjiecloud.chat.mapper.ChatSessionMapper;
+import cn.cangjiecloud.chat.service.IChatSessionService;
+import cn.cangjiecloud.common.exception.ApiException;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+
+import java.util.List;
+
+@Slf4j
+@Service
+public class ChatSessionServiceImpl extends ServiceImpl<ChatSessionMapper, ChatSessionEntity>
+        implements IChatSessionService {
+
+    @Override
+    public List<ChatSessionEntity> listByUser(String userId) {
+        LambdaQueryWrapper<ChatSessionEntity> wrapper = new LambdaQueryWrapper<>();
+        if (StringUtils.hasText(userId)) {
+            wrapper.eq(ChatSessionEntity::getUserId, userId);
+        }
+        wrapper.orderByDesc(ChatSessionEntity::getCreateTime);
+        return list(wrapper);
+    }
+
+    @Override
+    public List<ChatSessionEntity> listByApplication(String applicationId) {
+        LambdaQueryWrapper<ChatSessionEntity> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ChatSessionEntity::getApplicationId, applicationId)
+                .orderByDesc(ChatSessionEntity::getCreateTime);
+        return list(wrapper);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ChatSessionEntity close(String sessionId) {
+        ChatSessionEntity entity = getBySessionId(sessionId);
+        if (entity == null) {
+            throw new ApiException("会话不存在");
+        }
+        entity.setStatus("closed");
+        updateById(entity);
+        log.info("会话已关闭: {}", sessionId);
+        return entity;
+    }
+
+    @Override
+    public ChatSessionEntity getBySessionId(String sessionId) {
+        if (!StringUtils.hasText(sessionId)) {
+            return null;
+        }
+        return getOne(new LambdaQueryWrapper<ChatSessionEntity>()
+                .eq(ChatSessionEntity::getSessionId, sessionId)
+                .last("LIMIT 1"));
+    }
+}

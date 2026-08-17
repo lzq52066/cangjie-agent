@@ -1,0 +1,9 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/cangjie_agent
+    username: postgres
+    password: postgres
+decorator:
+  datasource:
+    p6spy:
+      enable-logging: true

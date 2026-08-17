@@ -1,0 +1,18 @@
+login:
+  title: Login CangJie Agent
+  username: Username
+  password: Password
+  submit: Login
+  success: Login successful
+  logoutSuccess: Logged out
+common:
+  confirm: Confirm
+  cancel: Cancel
+  save: Save
+  delete: Delete
+  search: Search
+  add: Add
+  edit: Edit
+  loading: Loading...
+  success: Success
+  failed: Failed
