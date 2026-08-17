@@ -6,6 +6,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
+import cn.cangjiecloud.core.observability.TraceCollector;
 import cn.cangjiecloud.core.workflow.WorkflowContext;
 import cn.cangjiecloud.core.workflow.WorkflowNode;
 import cn.cangjiecloud.core.workflow.WorkflowNodeRegistry;
@@ -15,6 +16,7 @@ import cn.cangjiecloud.workflow.entity.WorkflowExecutionEntity;
 import cn.cangjiecloud.workflow.mapper.WorkflowMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -28,6 +30,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -38,6 +41,9 @@ public class WorkflowServiceImpl extends ServiceImpl<WorkflowMapper, WorkflowEnt
 
     private final WorkflowNodeRegistry workflowNodeRegistry;
     private final IWorkflowExecutionService workflowExecutionService;
+
+    @Autowired(required = false)
+    private TraceCollector traceCollector;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -113,6 +119,7 @@ public class WorkflowServiceImpl extends ServiceImpl<WorkflowMapper, WorkflowEnt
             throw new ApiException("工作流未发布，无法执行");
         }
 
+        String traceId = UUID.randomUUID().toString().replace("-", "");
         Map<String, Object> safeInputs = inputs == null ? new HashMap<>() : inputs;
 
         // 创建执行记录
@@ -140,8 +147,10 @@ public class WorkflowServiceImpl extends ServiceImpl<WorkflowMapper, WorkflowEnt
             Map<String, WorkflowNodeDTO> nodeMap = nodes.stream()
                     .collect(Collectors.toMap(WorkflowNodeDTO::getId, n -> n));
 
-            // 邻接表 (source -> [target])
-            Map<String, List<String>> adjacency = new HashMap<>();
+            // 带条件的邻接表: source -> [(target, condition)]
+            // condition 为 null/空表示无条件边（始终走）
+            record EdgeRef(String target, String condition) {}
+            Map<String, List<EdgeRef>> adjacency = new HashMap<>();
             for (int i = 0; i < edgesArray.size(); i++) {
                 JSONObject edge = edgesArray.getJSONObject(i);
                 String source = edge.getString("source");
@@ -149,7 +158,9 @@ public class WorkflowServiceImpl extends ServiceImpl<WorkflowMapper, WorkflowEnt
                 if (source == null || target == null) {
                     continue;
                 }
-                adjacency.computeIfAbsent(source, k -> new ArrayList<>()).add(target);
+                String cond = edge.getString("condition");
+                adjacency.computeIfAbsent(source, k -> new ArrayList<>())
+                        .add(new EdgeRef(target, cond));
             }
 
             // 找到起始节点
@@ -165,7 +176,7 @@ public class WorkflowServiceImpl extends ServiceImpl<WorkflowMapper, WorkflowEnt
             Map<String, Object> variables = new HashMap<>(safeInputs);
             context.setVariables(variables);
 
-            // 拓扑遍历：按 edges 顺序执行，使用栈保证后继按序执行
+            // 拓扑遍历：使用栈按序执行
             Deque<String> stack = new ArrayDeque<>();
             stack.push(startNode.getId());
             Set<String> visited = new HashSet<>();
@@ -196,10 +207,36 @@ public class WorkflowServiceImpl extends ServiceImpl<WorkflowMapper, WorkflowEnt
                     context.getVariables().putAll(result);
                 }
 
-                // 添加后继节点（逆序压栈保证按序执行）
-                List<String> successors = adjacency.getOrDefault(nodeId, List.of());
-                for (int i = successors.size() - 1; i >= 0; i--) {
-                    stack.push(successors.get(i));
+                // 到达结束节点
+                if ("end".equals(nodeDTO.getType())) {
+                    break;
+                }
+
+                // 条件分支路由
+                List<EdgeRef> outEdges = adjacency.getOrDefault(nodeId, List.of());
+                if ("condition".equals(nodeDTO.getType())) {
+                    // 条件节点：根据 condition_result 选择匹配的出边
+                    Object condResult = context.getVariables().get("condition_result");
+                    String condValue = condResult != null ? condResult.toString() : "false";
+                    List<EdgeRef> matched = new ArrayList<>();
+                    for (EdgeRef e : outEdges) {
+                        if (e.condition == null || e.condition.isEmpty()
+                                || e.condition.equalsIgnoreCase(condValue)) {
+                            matched.add(e);
+                        }
+                    }
+                    // 逆序压栈保证按序执行
+                    for (int i = matched.size() - 1; i >= 0; i--) {
+                        stack.push(matched.get(i).target);
+                    }
+                } else {
+                    // 普通节点：走所有无条件出边
+                    for (int i = outEdges.size() - 1; i >= 0; i--) {
+                        EdgeRef e = outEdges.get(i);
+                        if (e.condition == null || e.condition.isEmpty()) {
+                            stack.push(e.target);
+                        }
+                    }
                 }
             }
 
@@ -209,6 +246,13 @@ public class WorkflowServiceImpl extends ServiceImpl<WorkflowMapper, WorkflowEnt
             execution.setEndTime(LocalDateTime.now());
             execution.setDuration(System.currentTimeMillis() - start);
             workflowExecutionService.updateById(execution);
+
+            // 记录工作流执行成功追踪
+            if (traceCollector != null) {
+                traceCollector.record("workflow", "execute", traceId, execution.getDuration(), "success",
+                        "工作流: " + workflow.getName() + ", 耗时: " + execution.getDuration() + "ms");
+            }
+
             log.info("工作流执行成功: {} ({}), 耗时 {}ms",
                     workflow.getName(), workflowId, execution.getDuration());
             return execution;
@@ -218,6 +262,13 @@ public class WorkflowServiceImpl extends ServiceImpl<WorkflowMapper, WorkflowEnt
             execution.setEndTime(LocalDateTime.now());
             execution.setDuration(System.currentTimeMillis() - start);
             workflowExecutionService.updateById(execution);
+
+            // 记录工作流执行失败追踪
+            if (traceCollector != null) {
+                traceCollector.record("workflow", "execute", traceId, execution.getDuration(), "fail",
+                        "工作流执行失败: " + e.getMessage());
+            }
+
             log.error("工作流执行失败: {} ({})", workflow.getName(), workflowId, e);
             return execution;
         }

@@ -1,5 +1,4 @@
 import { createRouter, createWebHashHistory, Router, RouteRecordRaw } from 'vue-router'
-import { createPinia } from 'pinia'
 import { useUserStore } from '../store/user'
 
 const routes: RouteRecordRaw[] = [
@@ -9,6 +8,11 @@ const routes: RouteRecordRaw[] = [
     meta: { public: true, title: '登录' }
   },
   { path: '/', redirect: '/dashboard' },
+  {
+    path: '/workflow/design/:id',
+    component: () => import('../views/WorkflowDesigner.vue'),
+    meta: { title: '工作流编排' }
+  },
   {
     path: '/',
     component: () => import('../layouts/MainLayout.vue'),
@@ -34,9 +38,8 @@ const router: Router = createRouter({
   routes
 })
 
-const pinia = createPinia()
 router.beforeEach(async (to, _from, next) => {
-  const userStore = useUserStore(pinia)
+  const userStore = useUserStore()
   document.title = (to.meta?.title ? to.meta.title + ' - ' : '') + 'CangJie Agent'
   if (to.meta?.public) { next(); return }
   if (!userStore.isLogin) {

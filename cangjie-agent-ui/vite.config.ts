@@ -1,6 +1,26 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
+
+/**
+ * chat 开发服务的入口是根目录的 chat.html，
+ * 访问 /chat/ 时 Vite 默认会返回 index.html（admin 入口），这里改写为 chat.html
+ */
+function chatDevEntry(): Plugin {
+  return {
+    name: 'chat-dev-entry',
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        // 需保留 base 前缀（/chat/），baseMiddleware 会拦截不以 base 开头的请求
+        const m = req.url?.match(/^\/chat\/(index\.html)?(\?.*)?$/)
+        if (m) {
+          req.url = '/chat/chat.html' + (m[2] || '')
+        }
+        next()
+      })
+    }
+  }
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -11,7 +31,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     base,
-    plugins: [vue()],
+    plugins: [vue(), ...(isAdmin ? [] : [chatDevEntry()])],
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),

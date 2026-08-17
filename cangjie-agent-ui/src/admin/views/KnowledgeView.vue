@@ -27,8 +27,11 @@
             <el-tag size="small" :type="strategyTag(row.splitStrategy)">{{ strategyLabel(row.splitStrategy) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="切片大小" width="90" align="center">
-          <template #default="{ row }">{{ row.chunkSize }} / {{ row.chunkOverlap }}</template>
+        <el-table-column label="段落大小" width="90" align="center">
+          <template #default="{ row }">
+            <span v-if="row.splitStrategy === 'custom'">{{ row.chunkSize }}</span>
+            <span v-else class="text-muted">自动</span>
+          </template>
         </el-table-column>
         <el-table-column label="文档数" prop="documentCount" width="80" align="center" />
         <el-table-column label="段落数" prop="paragraphCount" width="80" align="center" />
@@ -58,21 +61,41 @@
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" :rows="2" placeholder="知识库描述..." />
         </el-form-item>
-        <el-form-item label="切片策略" prop="splitStrategy">
+        <el-form-item label="分段方式" prop="splitStrategy">
           <el-radio-group v-model="form.splitStrategy">
-            <el-radio-button value="sentence">句子切片</el-radio-button>
-            <el-radio-button value="structural">结构切片</el-radio-button>
-            <el-radio-button value="token">Token切片</el-radio-button>
+            <el-radio-button value="smart">智能分段</el-radio-button>
+            <el-radio-button value="custom">自定义分段</el-radio-button>
           </el-radio-group>
+          <div class="form-hint" style="margin-top: 4px">
+            <span v-if="form.splitStrategy === 'smart'">自动识别文档结构，按标题和段落智能切分</span>
+            <span v-else>手动指定分隔符和段落最大长度</span>
+          </div>
         </el-form-item>
-        <el-form-item label="切片大小" prop="chunkSize">
-          <el-input-number v-model="form.chunkSize" :min="100" :max="5000" :step="100" />
-          <span class="form-hint">字符数</span>
-        </el-form-item>
-        <el-form-item label="重叠量" prop="chunkOverlap">
-          <el-input-number v-model="form.chunkOverlap" :min="0" :max="500" :step="10" />
-          <span class="form-hint">相邻切片重叠字符数</span>
-        </el-form-item>
+        <template v-if="form.splitStrategy === 'custom'">
+          <el-form-item label="分隔符" prop="separators">
+            <el-select v-model="form.separators" multiple placeholder="选择分隔符" style="width: 100%">
+              <el-option-group label="标题">
+                <el-option label="一级标题 (#)" value="h1" />
+                <el-option label="二级标题 (##)" value="h2" />
+                <el-option label="三级标题 (###)" value="h3" />
+                <el-option label="四级标题 (####)" value="h4" />
+              </el-option-group>
+              <el-option-group label="段落">
+                <el-option label="空行" value="blank_line" />
+                <el-option label="换行" value="newline" />
+              </el-option-group>
+              <el-option-group label="标点">
+                <el-option label="句号 (。！？)" value="period" />
+                <el-option label="分号 (；;)" value="semicolon" />
+                <el-option label="逗号 (，,)" value="comma" />
+              </el-option-group>
+            </el-select>
+          </el-form-item>
+          <el-form-item label="段落长度" prop="chunkSize">
+            <el-slider v-model="form.chunkSize" :min="100" :max="2000" :step="100" show-input />
+            <div class="form-hint">段落最大字符数</div>
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
         <el-button @click="showCreate = false">取消</el-button>
@@ -102,9 +125,9 @@ const form = reactive({
   id: '',
   name: '',
   description: '',
-  splitStrategy: 'sentence',
+  splitStrategy: 'smart',
   chunkSize: 500,
-  chunkOverlap: 50
+  separators: [] as string[]
 })
 
 const rules: FormRules = {
@@ -130,9 +153,14 @@ function openEdit(row: any) {
   form.id = row.id
   form.name = row.name
   form.description = row.description || ''
-  form.splitStrategy = row.splitStrategy || 'sentence'
+  form.splitStrategy = row.splitStrategy || 'smart'
   form.chunkSize = row.chunkSize || 500
-  form.chunkOverlap = row.chunkOverlap || 50
+  // 解析 separators JSON 字符串
+  try {
+    form.separators = row.separators ? JSON.parse(row.separators) : []
+  } catch {
+    form.separators = []
+  }
   showCreate.value = true
 }
 
@@ -141,11 +169,17 @@ async function handleSave() {
   await formRef.value.validate()
   saving.value = true
   try {
+    const payload = {
+      ...form,
+      // 智能分段模式不提交 chunkSize 和 separators
+      chunkSize: form.splitStrategy === 'smart' ? undefined : form.chunkSize,
+      separators: form.splitStrategy === 'smart' ? undefined : JSON.stringify(form.separators)
+    }
     if (editing.value) {
-      await knowledgeApi.update(form.id, { ...form })
+      await knowledgeApi.update(form.id, payload)
       ElMessage.success('更新成功')
     } else {
-      await knowledgeApi.create({ ...form })
+      await knowledgeApi.create(payload)
       ElMessage.success('创建成功')
     }
     showCreate.value = false
@@ -163,11 +197,11 @@ async function handleDelete(id: string) {
 }
 
 function strategyLabel(code: string) {
-  return { sentence: '句子', structural: '结构', token: 'Token' }[code] || code
+  return { smart: '智能', custom: '自定义' }[code] || code
 }
 
 function strategyTag(code: string): any {
-  return { sentence: 'success', structural: 'warning', token: 'info' }[code] || ''
+  return { smart: 'success', custom: 'warning' }[code] || ''
 }
 
 function formatTime(t: string) {

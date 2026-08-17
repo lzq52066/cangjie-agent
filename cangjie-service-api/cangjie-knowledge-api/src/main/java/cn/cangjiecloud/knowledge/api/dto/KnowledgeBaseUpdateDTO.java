@@ -9,7 +9,8 @@ public class KnowledgeBaseUpdateDTO {
     private String description;
     private String splitStrategy;
     private Integer chunkSize;
-    private Integer chunkOverlap;
+    /** 自定义分隔符列表（JSON 数组字符串，如 ["h2","blank_line"]） */
+    private String separators;
     private String embeddingModelId;
     private String directory;
 }

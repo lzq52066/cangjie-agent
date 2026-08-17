@@ -16,6 +16,7 @@ import cn.cangjiecloud.knowledge.entity.KnowledgeBaseEntity;
 import cn.cangjiecloud.knowledge.entity.KnowledgeDocumentEntity;
 import cn.cangjiecloud.knowledge.entity.KnowledgeParagraphEntity;
 import cn.cangjiecloud.knowledge.mapper.KnowledgeDocumentMapper;
+import cn.cangjiecloud.knowledge.rag.CustomSeparatorTextSplitter;
 import cn.cangjiecloud.knowledge.service.IKnowledgeBaseService;
 import cn.cangjiecloud.knowledge.service.IKnowledgeDocumentService;
 import cn.cangjiecloud.knowledge.service.IKnowledgeParagraphService;
@@ -124,8 +125,16 @@ public class KnowledgeDocumentServiceImpl
         updateStatus(doc, DocumentStatus.SPLITTING, "正在切分文档");
         TextSplitter splitter = splitterFactory.get(kb.getSplitStrategy());
         int chunkSize = kb.getChunkSize() != null ? kb.getChunkSize() : 500;
-        int overlap = kb.getChunkOverlap() != null ? kb.getChunkOverlap() : 50;
-        List<TextChunk> chunks = splitter.split(text, chunkSize, overlap);
+        
+        List<TextChunk> chunks;
+        if (splitter instanceof CustomSeparatorTextSplitter customSplitter) {
+            // 自定义分段模式：解析 separators 字段
+            List<String> separators = parseSeparators(kb.getSeparators());
+            chunks = customSplitter.splitWithSeparators(text, chunkSize, 0, separators);
+        } else {
+            // 智能分段模式：忽略 overlap 参数
+            chunks = splitter.split(text, chunkSize, 0);
+        }
         log.info("文档切片完成: {} → {} 个段落", doc.getName(), chunks.size());
 
         // 3. 保存段落
@@ -209,6 +218,25 @@ public class KnowledgeDocumentServiceImpl
             return sb.toString();
         } catch (Exception e) {
             return "";
+        }
+    }
+
+    /**
+     * 解析分隔符 JSON 数组字符串
+     */
+    private List<String> parseSeparators(String separatorsJson) {
+        if (separatorsJson == null || separatorsJson.isBlank()) {
+            return List.of("blank_line");
+        }
+        try {
+            // 简单解析 JSON 数组，如 ["h2","blank_line"]
+            return java.util.Arrays.stream(separatorsJson.replaceAll("[\\[\\]\"]", "").split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .toList();
+        } catch (Exception e) {
+            log.warn("分隔符解析失败，使用默认值: {}", separatorsJson);
+            return List.of("blank_line");
         }
     }
 }

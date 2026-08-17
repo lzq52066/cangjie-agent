@@ -320,8 +320,19 @@ async function handlePublish(row: any) {
 // 接入方式
 const accessDialog = ref(false)
 const origin = computed(() => location.origin)
+// 开发环境 admin(5173) 与 chat(5174) 是两个独立 Vite 服务，chat 链接需指向 chat 服务；
+// 生产环境同域部署（后端映射 /chat/** 静态资源），直接用当前 origin。
+// 可通过 VITE_CHAT_ORIGIN 覆盖。
+const chatOrigin = computed(() => {
+  const envOrigin = import.meta.env.VITE_CHAT_ORIGIN
+  if (envOrigin) return envOrigin
+  if (location.port === '5173') {
+    return `${location.protocol}//${location.hostname}:5174`
+  }
+  return location.origin
+})
 const chatUrl = computed(() =>
-  `${origin.value}/chat/?app=${current.value?.id || ''}&apikey=${current.value?.apikey || ''}`)
+  `${chatOrigin.value}/chat/?app=${current.value?.id || ''}&apikey=${current.value?.apikey || ''}`)
 const iframeSnippet = computed(() =>
   `<iframe\n  src="${chatUrl.value}"\n  style="width:420px;height:640px;border:none;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.12)"\n  allow="microphone">\n</iframe>`)
 const curlSnippet = computed(() =>

@@ -14,14 +14,14 @@ public class KnowledgeBaseEntity extends BaseEntity {
     private String name;
     private String description;
 
-    /** 切片策略：sentence / structural / token */
+    /** 切片策略：smart（智能分段）/ custom（自定义分段） */
     private String splitStrategy;
 
-    /** 切片大小（字符数） */
+    /** 段落最大字符数（custom 模式使用） */
     private Integer chunkSize;
 
-    /** 切片重叠量 */
-    private Integer chunkOverlap;
+    /** 自定义分隔符列表（JSON 数组字符串，如 ["h2","blank_line"]） */
+    private String separators;
 
     /** 嵌入模型 ID */
     private String embeddingModelId;

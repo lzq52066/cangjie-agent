@@ -68,9 +68,11 @@
           <el-input v-model="form.name" placeholder="如：GPT-4o" />
         </el-form-item>
         <el-form-item label="模型类型" prop="modelType">
-          <el-select v-model="form.modelType" placeholder="选择类型" style="width: 100%" @change="onTypeChange">
+          <el-select v-model="form.modelType" placeholder="选择类型" style="width: 100%"
+                     :disabled="editing" @change="onTypeChange">
             <el-option v-for="t in modelTypes" :key="t.code" :label="t.label" :value="t.code" />
           </el-select>
+          <span v-if="editing" class="form-hint">模型类型创建后不可修改，如需更换请新建模型</span>
         </el-form-item>
         <el-form-item label="API Key" prop="apiKey">
           <el-input v-model="form.apiKey" type="password" show-password placeholder="sk-..." />
@@ -79,7 +81,7 @@
           <el-input v-model="form.baseUrl" placeholder="自动填充，可自定义" />
         </el-form-item>
         <el-form-item label="模型标识" prop="modelName">
-          <el-input v-model="form.modelName" placeholder="如 gpt-4o、qwen-max、glm-4" />
+          <el-input v-model="form.modelName" placeholder="如 gpt-4o、deepseek-chat、qwen-max、glm-4" />
         </el-form-item>
         <el-row :gutter="16">
           <el-col :span="12">
@@ -140,6 +142,7 @@ const filterType = ref('')
 
 const modelTypes = [
   { code: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1' },
+  { code: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1' },
   { code: 'qwen', label: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
   { code: 'zhipu', label: '智谱清言', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
   { code: 'wenxin', label: '文心一言', baseUrl: 'https://qianfan.baidubce.com/v2' },
@@ -226,7 +229,9 @@ async function handleSave() {
   saving.value = true
   try {
     if (editing.value) {
-      await modelApi.update(form.id, { ...form })
+      // 模型类型不可修改，不提交该字段
+      const { id, modelType, ...payload } = form
+      await modelApi.update(id, payload)
       ElMessage.success('更新成功')
     } else {
       await modelApi.create({ ...form })
@@ -273,7 +278,7 @@ function typeLabel(code: string) {
   return modelTypes.find(t => t.code === code)?.label || code
 }
 function typeTag(code: string): any {
-  return { openai: 'success', qwen: 'primary', zhipu: 'warning', wenxin: 'info', ollama: '', custom: 'info' }[code] || ''
+  return { openai: 'success', deepseek: 'primary', qwen: 'primary', zhipu: 'warning', wenxin: 'info', ollama: '', custom: 'info' }[code] || ''
 }
 
 onMounted(loadList)

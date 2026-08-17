@@ -7,7 +7,7 @@ import lombok.EqualsAndHashCode;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
-@TableName(value = "\"user\"", autoResultMap = true)
+@TableName(value = "user", autoResultMap = true)
 public class UserEntity extends BaseEntity {
 
     private String email;

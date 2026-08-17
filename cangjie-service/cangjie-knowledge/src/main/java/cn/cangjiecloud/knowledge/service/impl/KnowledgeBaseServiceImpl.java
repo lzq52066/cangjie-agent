@@ -29,7 +29,7 @@ public class KnowledgeBaseServiceImpl extends ServiceImpl<KnowledgeBaseMapper, K
         entity.setDescription(dto.getDescription());
         entity.setSplitStrategy(SplitStrategy.of(dto.getSplitStrategy()).getCode());
         entity.setChunkSize(dto.getChunkSize() != null ? dto.getChunkSize() : 500);
-        entity.setChunkOverlap(dto.getChunkOverlap() != null ? dto.getChunkOverlap() : 50);
+        entity.setSeparators(dto.getSeparators());
         entity.setEmbeddingModelId(dto.getEmbeddingModelId());
         entity.setDirectory(dto.getDirectory());
         entity.setDocumentCount(0);
@@ -53,7 +53,7 @@ public class KnowledgeBaseServiceImpl extends ServiceImpl<KnowledgeBaseMapper, K
             entity.setSplitStrategy(SplitStrategy.of(dto.getSplitStrategy()).getCode());
         }
         if (dto.getChunkSize() != null) entity.setChunkSize(dto.getChunkSize());
-        if (dto.getChunkOverlap() != null) entity.setChunkOverlap(dto.getChunkOverlap());
+        if (StringUtils.hasText(dto.getSeparators())) entity.setSeparators(dto.getSeparators());
         if (StringUtils.hasText(dto.getEmbeddingModelId())) entity.setEmbeddingModelId(dto.getEmbeddingModelId());
         if (StringUtils.hasText(dto.getDirectory())) entity.setDirectory(dto.getDirectory());
         updateById(entity);

@@ -11,14 +11,14 @@ public class KnowledgeBaseCreateDTO {
 
     private String description;
 
-    /** 切片策略：sentence / structural / token */
-    private String splitStrategy = "sentence";
+    /** 切片策略：smart（智能分段）/ custom（自定义分段） */
+    private String splitStrategy = "smart";
 
-    /** 切片大小（字符数） */
+    /** 段落最大字符数（custom 模式使用） */
     private Integer chunkSize = 500;
 
-    /** 切片重叠量 */
-    private Integer chunkOverlap = 50;
+    /** 自定义分隔符列表（custom 模式使用，如 ["h2","blank_line"]） */
+    private String separators;
 
     /** 嵌入模型 ID */
     private String embeddingModelId;

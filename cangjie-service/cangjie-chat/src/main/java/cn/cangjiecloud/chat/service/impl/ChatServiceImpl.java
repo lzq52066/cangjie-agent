@@ -17,6 +17,7 @@ import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.core.model.ChatMessage;
 import cn.cangjiecloud.core.model.ChatRequest;
 import cn.cangjiecloud.core.model.ChatResponse;
+import cn.cangjiecloud.core.observability.TraceCollector;
 import cn.cangjiecloud.core.rag.HybridRetriever;
 import cn.cangjiecloud.core.rag.RetrievalResult;
 import cn.cangjiecloud.model.provider.OpenAICompatibleClient;
@@ -25,6 +26,7 @@ import cn.cangjiecloud.prompt.entity.PromptTemplateEntity;
 import cn.cangjiecloud.prompt.service.IPromptTemplateService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -33,6 +35,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -47,12 +50,16 @@ public class ChatServiceImpl implements IChatService {
     private final HybridRetriever hybridRetriever;
     private final IPromptTemplateService promptTemplateService;
 
+    @Autowired(required = false)
+    private TraceCollector traceCollector;
+
     private static final int DEFAULT_TOP_K = 5;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ChatResponseDTO chat(ChatRequestDTO request) {
         long start = System.currentTimeMillis();
+        String traceId = UUID.randomUUID().toString().replace("-", "");
 
         // 1. 获取应用配置
         ApplicationEntity application = applicationService.getById(request.getApplicationId());
@@ -77,7 +84,7 @@ public class ChatServiceImpl implements IChatService {
 
         // 4. 构建 system prompt（含提示词模板 + 知识库检索结果）
         List<Map<String, Object>> retrievalSources = new ArrayList<>();
-        String systemPrompt = buildSystemPrompt(application, request.getMessage(), retrievalSources);
+        String systemPrompt = buildSystemPrompt(application, request.getMessage(), retrievalSources, traceId);
 
         // 5. 加载历史消息
         List<ChatMessage> historyMessages = loadHistoryMessages(
@@ -98,9 +105,22 @@ public class ChatServiceImpl implements IChatService {
                 .temperature(application.getTemperature() != null ? application.getTemperature() : 0.7)
                 .build();
         ChatResponse chatResponse;
+        long llmStart = System.currentTimeMillis();
         try {
             chatResponse = client.chat(chatRequest);
+            // 记录模型调用追踪
+            if (traceCollector != null) {
+                traceCollector.record("chat", "llm_call", traceId,
+                        System.currentTimeMillis() - llmStart, "success",
+                        "模型: " + application.getModelId() + ", tokens: " + chatResponse.getTotalTokens());
+            }
         } catch (Exception e) {
+            // 记录模型调用失败追踪
+            if (traceCollector != null) {
+                traceCollector.record("chat", "llm_call", traceId,
+                        System.currentTimeMillis() - llmStart, "fail",
+                        "模型调用失败: " + e.getMessage());
+            }
             log.error("模型调用失败: app={}, model={}", application.getName(), application.getModelId(), e);
             throw new ApiException("模型调用失败: " + e.getMessage());
         }
@@ -123,6 +143,12 @@ public class ChatServiceImpl implements IChatService {
         session.setTokensUsed((session.getTokensUsed() == null ? 0 : session.getTokensUsed())
                 + (chatResponse.getTotalTokens() > 0 ? chatResponse.getTotalTokens() : 0));
         chatSessionService.updateById(session);
+
+        // 记录对话完成追踪
+        if (traceCollector != null) {
+            traceCollector.record("chat", "send", traceId, duration, "success",
+                    "应用: " + application.getName() + ", 总tokens: " + chatResponse.getTotalTokens());
+        }
 
         log.info("对话完成: app={}, session={}, duration={}ms, tokens={}",
                 application.getName(), session.getSessionId(), duration, chatResponse.getTotalTokens());
@@ -160,7 +186,7 @@ public class ChatServiceImpl implements IChatService {
     }
 
     private String buildSystemPrompt(ApplicationEntity application, String userMessage,
-                                     List<Map<String, Object>> retrievalSources) {
+                                     List<Map<String, Object>> retrievalSources, String traceId) {
         StringBuilder sb = new StringBuilder();
 
         // 提示词模板内容
@@ -178,8 +204,15 @@ public class ChatServiceImpl implements IChatService {
         // 知识库检索
         List<String> kbIds = parseStringList(application.getKnowledgeBaseIds());
         if (!kbIds.isEmpty()) {
+            long retrievalStart = System.currentTimeMillis();
             try {
                 List<RetrievalResult> results = hybridRetriever.retrieve(userMessage, kbIds, DEFAULT_TOP_K);
+                // 记录检索追踪
+                if (traceCollector != null) {
+                    traceCollector.record("retrieval", "search", traceId,
+                            System.currentTimeMillis() - retrievalStart, "success",
+                            "知识库检索: " + results.size() + " 条结果");
+                }
                 if (!results.isEmpty()) {
                     sb.append("以下是从知识库中检索到的相关内容，请据此回答用户问题：\n\n");
                     for (int i = 0; i < results.size(); i++) {
@@ -200,6 +233,12 @@ public class ChatServiceImpl implements IChatService {
                     sb.append("请在回答时引用上述知识库内容，如未涉及请如实告知。\n\n");
                 }
             } catch (Exception e) {
+                // 记录检索失败追踪
+                if (traceCollector != null) {
+                    traceCollector.record("retrieval", "search", traceId,
+                            System.currentTimeMillis() - retrievalStart, "fail",
+                            "知识库检索失败: " + e.getMessage());
+                }
                 log.warn("知识库检索失败: {}", e.getMessage());
             }
         }

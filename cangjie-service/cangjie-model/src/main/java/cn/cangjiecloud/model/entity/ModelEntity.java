@@ -13,7 +13,7 @@ public class ModelEntity extends BaseEntity {
     /** 模型名称（显示名） */
     private String name;
 
-    /** 模型类型：openai / qwen / zhipu / wenxin / ollama / custom */
+    /** 模型类型：openai / deepseek / qwen / zhipu / wenxin / ollama / custom */
     private String modelType;
 
     /** API Key */

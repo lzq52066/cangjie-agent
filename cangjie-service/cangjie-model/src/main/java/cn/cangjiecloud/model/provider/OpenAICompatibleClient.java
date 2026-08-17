@@ -137,6 +137,7 @@ public class OpenAICompatibleClient {
     public static String defaultBaseUrl(ModelType type) {
         return switch (type) {
             case OPENAI -> "https://api.openai.com/v1";
+            case DEEPSEEK -> "https://api.deepseek.com/v1";
             case QWEN -> "https://dashscope.aliyuncs.com/compatible-mode/v1";
             case ZHIPU -> "https://open.bigmodel.cn/api/paas/v4";
             case WENXIN -> "https://qianfan.baidubce.com/v2";

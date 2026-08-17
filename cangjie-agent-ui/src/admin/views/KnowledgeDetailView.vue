@@ -9,7 +9,7 @@
           </el-button>
           <h2 class="kb-title">{{ kb.name }}</h2>
           <el-tag size="small" type="success">{{ strategyLabel(kb.splitStrategy) }}</el-tag>
-          <span class="kb-meta">切片: {{ kb.chunkSize }}/{{ kb.chunkOverlap }}</span>
+          <span class="kb-meta" v-if="kb.splitStrategy === 'custom'">段落: {{ kb.chunkSize }}字符</span>
           <span class="kb-meta">文档: {{ kb.documentCount }}</span>
           <span class="kb-meta">段落: {{ kb.paragraphCount }}</span>
         </div>
@@ -209,7 +209,7 @@ async function handleSearch() {
 }
 
 function strategyLabel(code: string) {
-  return { sentence: '句子切片', structural: '结构切片', token: 'Token切片' }[code] || code
+  return { smart: '智能分段', custom: '自定义分段' }[code] || code
 }
 function statusLabel(code: string) {
   return { pending: '待处理', parsing: '解析中', splitting: '切片中', embedding: '向量化中', completed: '已完成', failed: '失败' }[code] || code

@@ -28,6 +28,22 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <dependency>
+            <groupId>cn.cangjiecloud</groupId>
+            <artifactId>cangjie-model</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>cn.cangjiecloud</groupId>
+            <artifactId>cangjie-tool</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>cn.cangjiecloud</groupId>
+            <artifactId>cangjie-knowledge</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>fastjson</artifactId>
+        </dependency>
 
     </dependencies>
 </project>

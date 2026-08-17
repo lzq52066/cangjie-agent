@@ -127,6 +127,16 @@
             </dependency>
             <dependency>
                 <groupId>cn.cangjiecloud</groupId>
+                <artifactId>cangjie-tool</artifactId>
+                <version>1.0.0-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>cn.cangjiecloud</groupId>
+                <artifactId>cangjie-workflow</artifactId>
+                <version>1.0.0-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>cn.cangjiecloud</groupId>
                 <artifactId>cangjie-workflow-api</artifactId>
                 <version>1.0.0-SNAPSHOT</version>
             </dependency>

@@ -65,7 +65,7 @@ decorator:
 
 system:
   default-username: admin
-  default-password: ${SYSTEM_DEFAULT_PASSWORD:cangjie@123456}
+  default-password: ${SYSTEM_DEFAULT_PASSWORD:cj@123}
   default-phone: 18800000000
   default-email: admin@cangjiecloud.cn
 

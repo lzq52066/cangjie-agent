@@ -6,6 +6,7 @@ package cn.cangjiecloud.core.model;
 public enum ModelType {
 
     OPENAI("openai", "OpenAI"),
+    DEEPSEEK("deepseek", "DeepSeek"),
     QWEN("qwen", "通义千问"),
     ZHIPU("zhipu", "智谱清言"),
     WENXIN("wenxin", "文心一言"),

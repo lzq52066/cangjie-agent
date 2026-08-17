@@ -9,7 +9,7 @@ public class ModelCreateDTO {
     @NotBlank(message = "模型名称不能为空")
     private String name;
 
-    /** 模型类型：openai / qwen / zhipu / wenxin / ollama / custom */
+    /** 模型类型：openai / deepseek / qwen / zhipu / wenxin / ollama / custom */
     @NotBlank(message = "模型类型不能为空")
     private String modelType;
 

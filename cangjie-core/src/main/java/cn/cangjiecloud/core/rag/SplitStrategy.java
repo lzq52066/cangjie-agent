@@ -5,14 +5,11 @@ package cn.cangjiecloud.core.rag;
  */
 public enum SplitStrategy {
 
-    /** 句子级切片：按标点符号断句后聚合到目标大小 */
-    SENTENCE("sentence", "句子切片"),
+    /** 智能分段：三阶段流水线（标题切分 → 超长段落句子级切分 → 清洗+短段合并），零配置 */
+    SMART("smart", "智能分段"),
 
-    /** 结构化切片：按标题/段落/换行等文档结构切分 */
-    STRUCTURAL("structural", "结构切片"),
-
-    /** Token 级切片：按 Token 数量精确切分，适合严格长度控制 */
-    TOKEN("token", "Token切片");
+    /** 自定义分段：用户指定分隔符和段落最大长度 */
+    CUSTOM("custom", "自定义分段");
 
     private final String code;
     private final String label;
@@ -31,12 +28,17 @@ public enum SplitStrategy {
     }
 
     public static SplitStrategy of(String code) {
-        if (code == null || code.isBlank()) return SENTENCE;
+        if (code == null || code.isBlank()) return SMART;
         for (SplitStrategy s : values()) {
             if (s.code.equalsIgnoreCase(code) || s.name().equalsIgnoreCase(code)) {
                 return s;
             }
         }
-        return SENTENCE;
+        // 兼容旧值：sentence/structural/token → smart
+        if ("sentence".equalsIgnoreCase(code) || "structural".equalsIgnoreCase(code)
+                || "token".equalsIgnoreCase(code)) {
+            return SMART;
+        }
+        return SMART;
     }
 }
