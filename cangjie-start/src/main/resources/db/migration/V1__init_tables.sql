@@ -8,7 +8,7 @@ CREATE EXTENSION IF NOT EXISTS "vector";
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS "public"."system_setting" (
     "type" int4 NOT NULL,
-    "meta" jsonb NOT NULL DEFAULT '{}}'::jsonb,
+    "meta" jsonb NOT NULL DEFAULT '{}'::jsonb,
     "create_time" timestamp(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "update_time" timestamp(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY ("type")

@@ -74,3 +74,4 @@ storage/
 Thumbs.db
 desktop.ini
 $RECYCLE.BIN/
+.flattened-pom.xml
