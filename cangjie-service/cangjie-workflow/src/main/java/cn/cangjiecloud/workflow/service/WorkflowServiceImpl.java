@@ -110,6 +110,18 @@ public class WorkflowServiceImpl extends ServiceImpl<WorkflowMapper, WorkflowEnt
     }
 
     @Override
+    public WorkflowEntity getByApplicationId(String applicationId) {
+        if (!StringUtils.hasText(applicationId)) {
+            return null;
+        }
+        return getOne(new LambdaQueryWrapper<WorkflowEntity>()
+                .eq(WorkflowEntity::getApplicationId, applicationId)
+                .eq(WorkflowEntity::getStatus, "published")
+                .orderByDesc(WorkflowEntity::getVersion)
+                .last("LIMIT 1"));
+    }
+
+    @Override
     public WorkflowExecutionEntity execute(String workflowId, Map<String, Object> inputs) {
         WorkflowEntity workflow = getById(workflowId);
         if (workflow == null) {

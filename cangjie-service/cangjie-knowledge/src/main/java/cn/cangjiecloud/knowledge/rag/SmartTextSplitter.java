@@ -110,6 +110,15 @@ public class SmartTextSplitter implements TextSplitter {
                     .build());
         }
 
+        // 安全兜底：非空输入必须产出至少一个 chunk
+        if (chunks.isEmpty() && text != null && !text.isBlank()) {
+            chunks.add(TextChunk.builder()
+                    .content(text.trim())
+                    .source("")
+                    .chunkIndex(0)
+                    .build());
+        }
+
         return chunks;
     }
 
@@ -131,9 +140,15 @@ public class SmartTextSplitter implements TextSplitter {
         StringBuilder currentContent = new StringBuilder();
 
         while (matcher.find()) {
-            // 保存上一段
+            // 保存标题前的内容（如第一个标题之前的前言文本）
             if (currentContent.length() > 0) {
                 sections.add(new Section(currentTitle, currentContent.toString().trim()));
+            } else if (matcher.start() > 0 && sections.isEmpty()) {
+                // 第一个标题之前有文本，作为独立 section 保留
+                String preamble = text.substring(0, matcher.start()).trim();
+                if (!preamble.isEmpty()) {
+                    sections.add(new Section("", preamble));
+                }
             }
 
             // 开始新段

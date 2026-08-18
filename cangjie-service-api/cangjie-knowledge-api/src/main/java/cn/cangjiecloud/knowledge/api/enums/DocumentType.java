@@ -11,7 +11,9 @@ public enum DocumentType {
     TEXT("text"),
     HTML("html"),
     CSV("csv"),
-    EXCEL("excel");
+    EXCEL("excel"),
+    PPT("ppt"),
+    IMAGE("image");
 
     private final String code;
 
@@ -32,6 +34,9 @@ public enum DocumentType {
         if (lower.endsWith(".html") || lower.endsWith(".htm")) return HTML;
         if (lower.endsWith(".csv")) return CSV;
         if (lower.endsWith(".xls") || lower.endsWith(".xlsx")) return EXCEL;
+        if (lower.endsWith(".ppt") || lower.endsWith(".pptx")) return PPT;
+        if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg")
+                || lower.endsWith(".gif") || lower.endsWith(".bmp") || lower.endsWith(".webp")) return IMAGE;
         return TEXT;
     }
 }

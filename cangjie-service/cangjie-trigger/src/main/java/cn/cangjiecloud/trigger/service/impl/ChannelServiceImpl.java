@@ -2,6 +2,8 @@ package cn.cangjiecloud.trigger.service.impl;
 
 import cn.cangjiecloud.application.api.dto.ChatRequestDTO;
 import cn.cangjiecloud.application.api.dto.ChatResponseDTO;
+import cn.cangjiecloud.application.entity.ApplicationEntity;
+import cn.cangjiecloud.application.service.IApplicationService;
 import cn.cangjiecloud.chat.service.IChatService;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.trigger.api.dto.ChannelCreateDTO;
@@ -12,6 +14,11 @@ import cn.cangjiecloud.trigger.entity.ChannelMessageEntity;
 import cn.cangjiecloud.trigger.mapper.ChannelMapper;
 import cn.cangjiecloud.trigger.service.IChannelMessageService;
 import cn.cangjiecloud.trigger.service.IChannelService;
+import cn.cangjiecloud.workflow.entity.WorkflowEntity;
+import cn.cangjiecloud.workflow.entity.WorkflowExecutionEntity;
+import cn.cangjiecloud.workflow.service.IWorkflowService;
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +28,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -31,6 +40,8 @@ public class ChannelServiceImpl extends ServiceImpl<ChannelMapper, ChannelEntity
 
     private final IChatService chatService;
     private final IChannelMessageService channelMessageService;
+    private final IApplicationService applicationService;
+    private final IWorkflowService workflowService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -165,15 +176,21 @@ public class ChannelServiceImpl extends ServiceImpl<ChannelMapper, ChannelEntity
         // 用 openId 生成会话前缀，保证不同渠道/用户的会话隔离
         String sessionId = "ch_" + channel.getId() + "_" + dto.getOpenId();
 
-        ChatRequestDTO request = new ChatRequestDTO();
-        request.setApplicationId(channel.getApplicationId());
-        request.setMessage(dto.getMessage());
-        request.setSource(channel.getType());
-        request.setSessionId(sessionId);
-
         try {
-            ChatResponseDTO response = chatService.chat(request);
-            String reply = response != null ? response.getMessage() : null;
+            String reply;
+            // 根据应用类型路由：workflow 类型走工作流引擎，其他走对话服务
+            ApplicationEntity application = applicationService.getById(channel.getApplicationId());
+            if (application != null && "workflow".equals(application.getType())) {
+                reply = executeWorkflow(channel.getApplicationId(), dto.getMessage(), sessionId);
+            } else {
+                ChatRequestDTO request = new ChatRequestDTO();
+                request.setApplicationId(channel.getApplicationId());
+                request.setMessage(dto.getMessage());
+                request.setSource(channel.getType());
+                request.setSessionId(sessionId);
+                ChatResponseDTO response = chatService.chat(request);
+                reply = response != null ? response.getMessage() : null;
+            }
             saveMessage(channel, dto, sessionId, "processed", reply, System.currentTimeMillis() - start);
             updateCallStat(channel, start);
             result.setMessage(reply);
@@ -183,6 +200,54 @@ public class ChannelServiceImpl extends ServiceImpl<ChannelMapper, ChannelEntity
             log.error("渠道消息处理失败: channel={}, openId={}, error={}",
                     channel.getId(), dto.getOpenId(), e.getMessage(), e);
             throw new ApiException("渠道消息处理失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 执行工作流并将输出转为回复文本
+     */
+    private String executeWorkflow(String applicationId, String message, String sessionId) {
+        WorkflowEntity workflow = workflowService.getByApplicationId(applicationId);
+        if (workflow == null) {
+            throw new ApiException("关联的工作流不存在或未发布，应用ID: " + applicationId);
+        }
+        Map<String, Object> inputs = new HashMap<>();
+        inputs.put("input", message);
+        inputs.put("session_id", sessionId);
+        WorkflowExecutionEntity execution = workflowService.execute(workflow.getId(), inputs);
+        if ("failed".equals(execution.getStatus())) {
+            throw new ApiException("工作流执行失败: " + execution.getErrorMessage());
+        }
+        return extractWorkflowOutput(execution.getOutputs());
+    }
+
+    /**
+     * 从工作流输出 JSON 中提取回复文本
+     */
+    private String extractWorkflowOutput(String outputsJson) {
+        if (!StringUtils.hasText(outputsJson)) {
+            return null;
+        }
+        try {
+            JSONObject outputs = JSON.parseObject(outputsJson);
+            // 按优先级查找常见的输出变量
+            for (String key : List.of("output", "result", "reply", "response", "answer", "message")) {
+                String value = outputs.getString(key);
+                if (StringUtils.hasText(value)) {
+                    return value;
+                }
+            }
+            // 兜底：返回第一个非 __end__ 的字符串值
+            for (Map.Entry<String, Object> entry : outputs.entrySet()) {
+                if ("__end__".equals(entry.getKey())) continue;
+                if (entry.getValue() instanceof String && StringUtils.hasText((String) entry.getValue())) {
+                    return (String) entry.getValue();
+                }
+            }
+            return outputsJson;
+        } catch (Exception e) {
+            log.warn("解析工作流输出失败: {}", e.getMessage());
+            return outputsJson;
         }
     }
 

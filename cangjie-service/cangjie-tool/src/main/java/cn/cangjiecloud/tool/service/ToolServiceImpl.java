@@ -5,7 +5,6 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.core.plugin.Plugin;
 import cn.cangjiecloud.core.plugin.PluginContext;
-import cn.cangjiecloud.core.plugin.PluginRegistry;
 import cn.cangjiecloud.tool.api.dto.ToolExecuteResultDTO;
 import cn.cangjiecloud.tool.entity.ToolEntity;
 import cn.cangjiecloud.tool.mapper.ToolMapper;
@@ -26,7 +25,6 @@ import java.util.Map;
 public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
         implements IToolService {
 
-    private final PluginRegistry pluginRegistry;
     private final ApplicationContext applicationContext;
 
     @Override
@@ -118,8 +116,7 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
     /**
      * 通过 implementation 全限定类名加载 Plugin：
      * 1. 优先从 Spring 容器获取 bean；
-     * 2. 容器中不存在时反射实例化；
-     * 3. 同时尝试同步注册到 PluginRegistry。
+     * 2. 容器中不存在时反射实例化。
      */
     private Plugin loadPlugin(String className) {
         if (!StringUtils.hasText(className)) {
@@ -133,13 +130,9 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
             @SuppressWarnings("unchecked")
             Class<? extends Plugin> pluginClass = (Class<? extends Plugin>) clazz;
             try {
-                Plugin plugin = applicationContext.getBean(pluginClass);
-                pluginRegistry.register(plugin);
-                return plugin;
+                return applicationContext.getBean(pluginClass);
             } catch (NoSuchBeanDefinitionException e) {
-                Plugin plugin = pluginClass.getDeclaredConstructor().newInstance();
-                pluginRegistry.register(plugin);
-                return plugin;
+                return pluginClass.getDeclaredConstructor().newInstance();
             }
         } catch (ApiException e) {
             throw e;

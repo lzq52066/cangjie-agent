@@ -332,7 +332,7 @@ const chatOrigin = computed(() => {
   return location.origin
 })
 const chatUrl = computed(() =>
-  `${chatOrigin.value}/chat/?app=${current.value?.id || ''}&apikey=${current.value?.apikey || ''}`)
+  `${chatOrigin.value}/chat/?app=${current.value?.id || ''}&apikey=${current.value?.apikey || ''}&title=${encodeURIComponent(current.value?.name || '')}`)
 const iframeSnippet = computed(() =>
   `<iframe\n  src="${chatUrl.value}"\n  style="width:420px;height:640px;border:none;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.12)"\n  allow="microphone">\n</iframe>`)
 const curlSnippet = computed(() =>
@@ -345,7 +345,8 @@ function openAccess(row: any) {
 
 function openChat(row: any) {
   current.value = row
-  window.open(chatUrl.value, '_blank')
+  const url = `${chatOrigin.value}/chat/?app=${row.id || ''}&apikey=${row.apikey || ''}&title=${encodeURIComponent(row.name || '')}`
+  window.open(url, '_blank')
 }
 
 async function copy(text?: string) {

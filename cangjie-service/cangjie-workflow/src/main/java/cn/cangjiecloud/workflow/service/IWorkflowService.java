@@ -23,6 +23,11 @@ public interface IWorkflowService extends IService<WorkflowEntity> {
     WorkflowEntity publish(String id);
 
     /**
+     * 根据应用 ID 查询关联的已发布工作流
+     */
+    WorkflowEntity getByApplicationId(String applicationId);
+
+    /**
      * 执行工作流
      *
      * @param workflowId 工作流 ID

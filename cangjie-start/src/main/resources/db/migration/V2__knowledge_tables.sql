@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS "public"."knowledge_paragraph" (
     "char_count" int4 DEFAULT 0,
     "vector_status" varchar(20) NOT NULL DEFAULT 'pending',
     "metadata" text,
-    "embedding" vector(1536),
+    "embedding" vector(1024),
     "ts_vector" tsvector,
     "tenant_id" varchar(50) NOT NULL DEFAULT 'default',
     "create_by" varchar(50),

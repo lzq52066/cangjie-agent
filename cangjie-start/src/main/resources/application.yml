@@ -27,11 +27,6 @@ spring:
   sql:
     init:
       mode: never
-  datasource:
-    driver-class-name: org.postgresql.Driver
-    url: jdbc:postgresql://localhost:5432/cangjie_agent
-    username: postgres
-    password: postgres
 
 mybatis-plus:
   global-config:
@@ -57,15 +52,9 @@ sa-token:
   is-log: true
   token-style: random-32
 
-decorator:
-  datasource:
-    p6spy:
-      log-format: "\ntime:%(executionTime)ms || sql:%(sql)\n"
-      enable-logging: false
-
 system:
   default-username: admin
-  default-password: ${SYSTEM_DEFAULT_PASSWORD:cj@123}
+  default-password: ${SYSTEM_DEFAULT_PASSWORD:cangjiecloud@123456}
   default-phone: 18800000000
   default-email: admin@cangjiecloud.cn
 

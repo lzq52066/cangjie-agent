@@ -39,6 +39,11 @@
             <version>5.3.0</version>
         </dependency>
         <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-scratchpad</artifactId>
+            <version>5.3.0</version>
+        </dependency>
+        <dependency>
             <groupId>com.pgvector</groupId>
             <artifactId>pgvector</artifactId>
         </dependency>

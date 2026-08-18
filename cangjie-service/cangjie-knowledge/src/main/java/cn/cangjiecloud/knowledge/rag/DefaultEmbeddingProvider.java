@@ -11,8 +11,8 @@ import java.util.List;
 /**
  * 默认嵌入提供者
  * <p>
- * 优先使用 OpenAI 兼容 API（支持通义/智谱等兼容接口）。
- * 若未配置 API Key，降级为确定性哈希伪向量（仅用于开发测试，不可用于生产检索）。
+ * 使用 OpenAI 兼容 API（支持通义/智谱/硅基流动等兼容接口）。
+ * 未配置 API Key 或 API 调用失败时直接抛出异常，不降级。
  */
 @Slf4j
 @Component
@@ -34,13 +34,14 @@ public class DefaultEmbeddingProvider implements EmbeddingProvider {
 
     @Override
     public float[] embed(String text) {
+        if (!isConfigured()) {
+            throw new IllegalStateException(
+                    "Embedding API Key 未配置。请在 application.yml 中设置 cangjie.embedding.api-key");
+        }
         if (text == null || text.isBlank()) {
             return new float[dimension];
         }
-        if (isConfigured()) {
-            return embedViaApi(text);
-        }
-        return pseudoEmbed(text);
+        return embedViaApi(text);
     }
 
     @Override
@@ -62,14 +63,9 @@ public class DefaultEmbeddingProvider implements EmbeddingProvider {
     }
 
     private float[] embedViaApi(String text) {
-        try {
-            dev.langchain4j.model.embedding.EmbeddingModel m = getDelegate();
-            dev.langchain4j.data.embedding.Embedding embedding = m.embed(text).content();
-            return embedding.vector();
-        } catch (Exception e) {
-            log.warn("API 嵌入失败，降级为伪向量: {}", e.getMessage());
-            return pseudoEmbed(text);
-        }
+        dev.langchain4j.model.embedding.EmbeddingModel m = getDelegate();
+        dev.langchain4j.data.embedding.Embedding embedding = m.embed(text).content();
+        return embedding.vector();
     }
 
     private dev.langchain4j.model.embedding.EmbeddingModel getDelegate() {
@@ -87,27 +83,5 @@ public class DefaultEmbeddingProvider implements EmbeddingProvider {
             }
         }
         return delegate;
-    }
-
-    /**
-     * 伪向量（开发测试用）
-     * 基于文本哈希生成确定性向量，不保证语义相似性。
-     */
-    private float[] pseudoEmbed(String text) {
-        float[] vec = new float[dimension];
-        int hash = text.hashCode();
-        java.util.Random rng = new java.util.Random(hash);
-        float norm = 0;
-        for (int i = 0; i < dimension; i++) {
-            vec[i] = (float) rng.nextGaussian();
-            norm += vec[i] * vec[i];
-        }
-        norm = (float) Math.sqrt(norm);
-        if (norm > 0) {
-            for (int i = 0; i < dimension; i++) {
-                vec[i] /= norm;
-            }
-        }
-        return vec;
     }
 }

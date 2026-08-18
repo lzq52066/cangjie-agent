@@ -1,12 +1,9 @@
 package cn.cangjiecloud.trigger.plugin;
 
-import cn.cangjiecloud.application.api.dto.ChatRequestDTO;
-import cn.cangjiecloud.application.api.dto.ChatResponseDTO;
-import cn.cangjiecloud.chat.service.IChatService;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.core.plugin.Plugin;
 import cn.cangjiecloud.core.plugin.PluginContext;
-import cn.cangjiecloud.trigger.entity.ChannelEntity;
+import cn.cangjiecloud.trigger.api.dto.ChannelReplyDTO;
 import cn.cangjiecloud.trigger.service.IChannelService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -16,14 +13,13 @@ import java.util.Collections;
 import java.util.Map;
 
 /**
- * 微信渠道插件：接收渠道消息并转发到对话服务
+ * 微信渠道插件：接收渠道消息并转发到内部对话服务或工作流引擎
  */
 @Component
 @RequiredArgsConstructor
 public class WechatChannelPlugin implements Plugin {
 
     private final IChannelService channelService;
-    private final IChatService chatService;
 
     @Override
     public String getName() {
@@ -32,7 +28,7 @@ public class WechatChannelPlugin implements Plugin {
 
     @Override
     public String getDescription() {
-        return "微信渠道插件：将外部平台消息转发到内部对话服务";
+        return "微信渠道插件：将外部平台消息转发到内部对话服务或工作流引擎";
     }
 
     @Override
@@ -46,19 +42,17 @@ public class WechatChannelPlugin implements Plugin {
         String channelId = String.valueOf(params.get("channelId"));
         String message = String.valueOf(params.get("message"));
         String openId = String.valueOf(params.get("openId"));
-        ChannelEntity channel = channelService.getById(channelId);
-        if (channel == null) {
-            throw new ApiException("渠道不存在: " + channelId);
-        }
         if (!StringUtils.hasText(openId)) {
             throw new ApiException("缺少外部用户 ID（openId）");
         }
-        ChatRequestDTO request = new ChatRequestDTO();
-        request.setApplicationId(channel.getApplicationId());
-        request.setMessage(message);
-        request.setSource(channel.getType());
-        request.setSessionId("ch_" + channel.getId() + "_" + openId);
-        ChatResponseDTO response = chatService.chat(request);
-        return response != null ? response.getMessage() : null;
+
+        ChannelReplyDTO dto = new ChannelReplyDTO();
+        dto.setChannelId(channelId);
+        dto.setMessage(message);
+        dto.setOpenId(openId);
+        dto.setMsgType("text");
+
+        ChannelReplyDTO reply = channelService.handleMessage(dto);
+        return reply != null ? reply.getMessage() : null;
     }
 }

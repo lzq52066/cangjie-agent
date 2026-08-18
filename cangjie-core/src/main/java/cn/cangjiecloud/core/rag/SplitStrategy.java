@@ -34,6 +34,9 @@ public enum SplitStrategy {
                 return s;
             }
         }
+        // 兼容数字编码（早期版本可能存储了序号）
+        if ("1".equals(code)) return SMART;
+        if ("2".equals(code)) return CUSTOM;
         // 兼容旧值：sentence/structural/token → smart
         if ("sentence".equalsIgnoreCase(code) || "structural".equalsIgnoreCase(code)
                 || "token".equalsIgnoreCase(code)) {
