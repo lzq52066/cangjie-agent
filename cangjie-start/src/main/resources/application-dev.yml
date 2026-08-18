@@ -3,7 +3,39 @@ spring:
     url: jdbc:postgresql://localhost:5432/cangjie_agent
     username: postgres
     password: postgres
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      password:
+      timeout: 5000
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
 decorator:
   datasource:
     p6spy:
       enable-logging: true
+
+cangjie:
+  embedding:
+    api-key: ${EMBEDDING_API_KEY:}
+    base-url: ${EMBEDDING_BASE_URL:https://api.openai.com/v1}
+    model: ${EMBEDDING_MODEL:text-embedding-3-small}
+    dimension-enabled: ${EMBEDDING_DIMENSION_ENABLED:true}
+    dimension: ${EMBEDDING_DIMENSION:1536}
+  oss:
+    # 存储类型：local | minio
+    type: ${OSS_TYPE:local}
+    local-path: ${OSS_LOCAL_PATH:./data/files}
+    minio:
+      endpoint: ${OSS_MINIO_ENDPOINT:http://127.0.0.1:9000}
+      region: ${OSS_MINIO_REGION:}
+      access-key: ${OSS_MINIO_ACCESS_KEY:admin}
+      secret-key: ${OSS_MINIO_SECRET_KEY:admin123}
+      bucket: ${OSS_MINIO_BUCKET:cangjie-files}
+      # 外部访问地址（Nginx 反向代理时使用，留空则用 endpoint）
+      public-endpoint: ${OSS_MINIO_PUBLIC_ENDPOINT:}

@@ -98,7 +98,9 @@
           </div>
         </div>
         <el-table :data="traces" v-loading="loading" stripe>
-          <el-table-column label="开始时间" prop="startTime" width="180" />
+          <el-table-column label="开始时间" width="180">
+            <template #default="{ row }">{{ formatTime(row.startTime) }}</template>
+          </el-table-column>
           <el-table-column label="TraceId" prop="traceId" min-width="220" show-overflow-tooltip>
             <template #default="{ row }">
               <el-link type="primary" @click="filterByTrace(row.traceId)">{{ row.traceId }}</el-link>
@@ -185,6 +187,15 @@ function formatNumber(value: any) {
   const num = Number(value)
   if (Number.isNaN(num)) return '-'
   return Number.isInteger(num) ? String(num) : num.toFixed(2)
+}
+
+// 时间格式化为 年-月-日 时:分:秒
+function formatTime(value?: string) {
+  if (!value) return '-'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
 function pretty(text?: string) {

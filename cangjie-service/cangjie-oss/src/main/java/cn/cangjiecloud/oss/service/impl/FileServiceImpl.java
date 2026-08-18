@@ -3,7 +3,7 @@ package cn.cangjiecloud.oss.service.impl;
 import cn.cangjiecloud.common.constant.AppConst;
 import cn.cangjiecloud.common.context.UserContext;
 import cn.cangjiecloud.common.exception.ApiException;
-import cn.cangjiecloud.core.oss.FileStorage;
+import cn.cangjiecloud.oss.storage.FileStorage;
 import cn.cangjiecloud.oss.entity.FileEntity;
 import cn.cangjiecloud.oss.mapper.FileMapper;
 import cn.cangjiecloud.oss.service.IFileService;
@@ -59,10 +59,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, FileEntity> impleme
         entity.setStatus("active");
         save(entity);
 
-        // 本地存储的访问 URL 即下载接口地址
-        entity.setUrl(AppConst.ADMIN_API + "/file/" + entity.getId());
+        // 对象存储（MinIO/COS）返回公开 URL，本地存储用后端下载接口
+        String publicUrl = fileStorage.getUrl(storedPath);
+        entity.setUrl(publicUrl != null ? publicUrl : AppConst.ADMIN_API + "/file/" + entity.getId());
         updateById(entity);
-        log.info("文件上传成功: id={}, path={}", entity.getId(), storedPath);
+        log.info("文件上传成功: id={}, path={}, url={}", entity.getId(), storedPath, entity.getUrl());
         return entity;
     }
 

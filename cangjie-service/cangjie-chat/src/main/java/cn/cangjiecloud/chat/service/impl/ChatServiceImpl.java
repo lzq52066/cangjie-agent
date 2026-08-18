@@ -21,6 +21,7 @@ import cn.cangjiecloud.core.observability.TraceCollector;
 import cn.cangjiecloud.core.rag.HybridRetriever;
 import cn.cangjiecloud.core.rag.RetrievalResult;
 import cn.cangjiecloud.model.provider.OpenAICompatibleClient;
+import cn.cangjiecloud.model.entity.ModelEntity;
 import cn.cangjiecloud.model.service.impl.ModelServiceImpl;
 import cn.cangjiecloud.prompt.entity.PromptTemplateEntity;
 import cn.cangjiecloud.prompt.service.IPromptTemplateService;
@@ -112,7 +113,7 @@ public class ChatServiceImpl implements IChatService {
             if (traceCollector != null) {
                 traceCollector.record("chat", "llm_call", traceId,
                         System.currentTimeMillis() - llmStart, "success",
-                        "模型: " + application.getModelId() + ", tokens: " + chatResponse.getTotalTokens());
+                        "模型: " + getModelName(application.getModelId()) + ", tokens: " + chatResponse.getTotalTokens());
             }
         } catch (Exception e) {
             // 记录模型调用失败追踪
@@ -277,6 +278,24 @@ public class ChatServiceImpl implements IChatService {
             return modelService.getClient(application.getModelId());
         }
         return modelService.getDefaultClient();
+    }
+
+    /**
+     * 获取模型显示名称，查不到时回退为模型 ID
+     */
+    private String getModelName(String modelId) {
+        if (!StringUtils.hasText(modelId)) {
+            return "默认模型";
+        }
+        try {
+            ModelEntity model = modelService.getById(modelId);
+            if (model != null && StringUtils.hasText(model.getName())) {
+                return model.getName();
+            }
+        } catch (Exception e) {
+            log.warn("获取模型名称失败: modelId={}, {}", modelId, e.getMessage());
+        }
+        return modelId;
     }
 
     private List<String> parseStringList(String json) {

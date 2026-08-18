@@ -49,6 +49,9 @@ public class ApplicationEntity extends BaseEntity {
     /** 额外配置（JSON） */
     private String config;
 
+    /** 建议问题列表（JSON 数组，用于 chat 入口欢迎页） */
+    private String suggestions;
+
     /** 图标 */
     private String icon;
 

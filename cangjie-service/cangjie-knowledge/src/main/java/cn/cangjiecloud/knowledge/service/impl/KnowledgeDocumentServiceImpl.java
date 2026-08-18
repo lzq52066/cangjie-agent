@@ -1,5 +1,6 @@
 package cn.cangjiecloud.knowledge.service.impl;
 
+import cn.cangjiecloud.oss.service.IFileService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
@@ -45,6 +46,7 @@ public class KnowledgeDocumentServiceImpl
     private final TextSplitterFactory splitterFactory;
     private final EmbeddingProvider embeddingProvider;
     private final VectorStore vectorStore;
+    private final IFileService fileService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -54,24 +56,35 @@ public class KnowledgeDocumentServiceImpl
             throw new ApiException("知识库不存在");
         }
 
-        // 1. 创建文档记录
+        byte[] fileBytes;
+        try {
+            fileBytes = file.getBytes();
+        } catch (IOException e) {
+            throw new ApiException("读取文件失败: " + e.getMessage());
+        }
+
+        // 0. 先通过文件管理统一服务保存原件（记录到 file_record，存储到 local/MinIO）
+        var fileEntity = fileService.upload(file, "document");
+
+        // 1. 创建知识文档记录
         KnowledgeDocumentEntity doc = new KnowledgeDocumentEntity();
         doc.setKnowledgeBaseId(knowledgeBaseId);
         doc.setName(file.getOriginalFilename());
         doc.setFileType(DocumentType.of(file.getOriginalFilename()).getCode());
         doc.setFileSize(file.getSize());
         doc.setTitle(file.getOriginalFilename());
+        doc.setFileId(fileEntity.getId());
         doc.setStatus(DocumentStatus.PENDING.getCode());
         try {
-            doc.setFileMd5(md5(file.getBytes()));
-        } catch (IOException e) {
+            doc.setFileMd5(md5(fileBytes));
+        } catch (Exception e) {
             log.warn("文件 MD5 计算失败: {}", e.getMessage());
         }
         save(doc);
 
         // 2. 异步处理（M1 同步执行，后续改为消息队列）
         try {
-            processDocument(doc, kb, file.getBytes());
+            processDocument(doc, kb, fileBytes);
         } catch (Exception e) {
             log.error("文档处理失败: {}", doc.getName(), e);
             doc.setStatus(DocumentStatus.FAILED.getCode());
@@ -101,8 +114,76 @@ public class KnowledgeDocumentServiceImpl
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void reprocess(String documentId) {
-        throw new ApiException("暂不支持重新处理，请重新上传文档");
+        KnowledgeDocumentEntity doc = getById(documentId);
+        if (doc == null) {
+            throw new ApiException("文档不存在");
+        }
+        if (!DocumentStatus.FAILED.getCode().equals(doc.getStatus())) {
+            throw new ApiException("仅失败状态的文档可重新处理");
+        }
+
+        log.info("重新处理文档: {} ({})", doc.getName(), documentId);
+        reEmbedDocument(doc);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void reEmbed(String documentId) {
+        KnowledgeDocumentEntity doc = getById(documentId);
+        if (doc == null) {
+            throw new ApiException("文档不存在");
+        }
+        log.info("重新向量化文档: {} ({})", doc.getName(), documentId);
+        reEmbedDocument(doc);
+    }
+
+    /**
+     * 重新向量化文档：删除旧向量，对已有段落重新生成向量
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void reEmbedDocument(KnowledgeDocumentEntity doc) {
+        String documentId = doc.getId();
+        List<KnowledgeParagraphEntity> paragraphs = paragraphService.listByDocument(documentId);
+        if (paragraphs.isEmpty()) {
+            throw new ApiException("文档无段落数据，无法重新向量化");
+        }
+
+        // 1. 删除旧向量
+        vectorStore.deleteByDocument(documentId);
+
+        // 2. 重新嵌入
+        updateStatus(doc, DocumentStatus.EMBEDDING, "正在向量化");
+        for (KnowledgeParagraphEntity para : paragraphs) {
+            try {
+                float[] embedding = embeddingProvider.embed(para.getContent());
+                vectorStore.store(para.getId(), embedding, para.getContent(),
+                        java.util.Map.of("title", para.getTitle(), "documentId", documentId));
+                para.setVectorStatus("embedded");
+            } catch (Exception e) {
+                log.warn("段落向量化失败: {} ({}), 跳过", para.getId(), e.getMessage());
+                para.setVectorStatus("pending");
+            }
+        }
+        paragraphService.updateBatchById(paragraphs);
+
+        // 3. 更新文档状态
+        long embeddedCount = paragraphs.stream()
+                .filter(p -> "embedded".equals(p.getVectorStatus()))
+                .count();
+        doc.setParagraphCount(paragraphs.size());
+        doc.setTokenCount(paragraphs.stream().mapToInt(p -> {
+            if (p.getTokenCount() == null) return 0;
+            return p.getTokenCount();
+        }).sum());
+        doc.setProcessMessage("向量化完成: " + embeddedCount + "/" + paragraphs.size());
+        doc.setStatus(DocumentStatus.COMPLETED.getCode());
+        updateById(doc);
+
+        // 4. 更新知识库计数
+        updateKnowledgeBaseCount(doc.getKnowledgeBaseId());
+        log.info("文档重新向量化完成: {} ({} 段落, {} 成功)", doc.getName(), paragraphs.size(), embeddedCount);
     }
 
     @Override

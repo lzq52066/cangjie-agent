@@ -1,5 +1,6 @@
 package cn.cangjiecloud.chat.controller;
 
+import cn.cangjiecloud.application.api.dto.ChatConfigDTO;
 import cn.cangjiecloud.application.api.dto.ChatRequestDTO;
 import cn.cangjiecloud.application.api.dto.ChatResponseDTO;
 import cn.cangjiecloud.application.entity.ApplicationEntity;
@@ -42,6 +43,23 @@ public class ChatController {
         return R.data(chatService.chat(request));
     }
 
+    /**
+     * 获取应用对话配置（名称、建议问题等），供 chat 前端初始化使用
+     */
+    @GetMapping("/config/{applicationId}")
+    public R<ChatConfigDTO> config(@PathVariable String applicationId,
+                                   HttpServletRequest httpRequest) {
+        validateApikey(httpRequest, applicationId);
+        ApplicationEntity app = applicationService.getById(applicationId);
+        if (app == null) {
+            throw new ApiException("应用不存在");
+        }
+        ChatConfigDTO config = new ChatConfigDTO();
+        config.setTitle(app.getName());
+        config.setSuggestions(parseStringList(app.getSuggestions()));
+        return R.data(config);
+    }
+
     @GetMapping("/sessions")
     public R<List<ChatSessionEntity>> listSessions(@RequestParam(required = false) String userId,
                                                   HttpServletRequest httpRequest) {
@@ -79,6 +97,18 @@ public class ChatController {
         return R.data(chatSessionService.close(sessionId));
     }
 
+    @DeleteMapping("/sessions/{sessionId}/delete")
+    public R<Void> deleteSession(@PathVariable String sessionId,
+                                 HttpServletRequest httpRequest) {
+        ChatSessionEntity session = chatSessionService.getBySessionId(sessionId);
+        if (session == null) {
+            throw new ApiException("会话不存在");
+        }
+        validateApikey(httpRequest, session.getApplicationId());
+        chatSessionService.deleteBySessionId(sessionId);
+        return R.ok("对话记录已删除");
+    }
+
     /**
      * 校验请求头中的 apikey 与指定应用一致
      */
@@ -109,5 +139,19 @@ public class ChatController {
             throw new ApiException("API Key 无效或应用未发布");
         }
         return application;
+    }
+
+    /**
+     * 解析 JSON 数组字符串为列表
+     */
+    private List<String> parseStringList(String json) {
+        if (!StringUtils.hasText(json)) {
+            return new java.util.ArrayList<>();
+        }
+        try {
+            return com.alibaba.fastjson.JSON.parseArray(json, String.class);
+        } catch (Exception e) {
+            return new java.util.ArrayList<>();
+        }
     }
 }

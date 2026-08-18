@@ -132,6 +132,16 @@
             </el-form-item>
           </el-col>
         </el-row>
+        <el-form-item label="建议问题">
+          <div class="suggestion-editor">
+            <div v-for="(_, idx) in form.suggestions" :key="idx" class="suggestion-row">
+              <el-input v-model="form.suggestions[idx]" placeholder="输入建议问题，如：帮我介绍一下你们的产品" />
+              <el-button :icon="Delete" circle size="small" @click="removeSuggestion(idx)" />
+            </div>
+            <el-button type="primary" plain size="small" :icon="Plus" @click="addSuggestion">添加问题</el-button>
+            <div class="form-hint">展示在对话入口欢迎页，用户点击可直接提问；不配置则不显示</div>
+          </div>
+        </el-form-item>
         <el-form-item label="图标"><el-input v-model="form.icon" placeholder="图标名或 URL" /></el-form-item>
         <el-form-item label="额外配置">
           <el-input v-model="form.config" type="textarea" :rows="3" placeholder="JSON，如欢迎语、开场问题等" />
@@ -183,7 +193,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { Search, Plus } from '@element-plus/icons-vue'
+import { Search, Plus, Delete } from '@element-plus/icons-vue'
 import { applicationApi } from '@admin/api/application-api'
 import { modelApi } from '@admin/api/model-api'
 import { knowledgeApi } from '@admin/api/knowledge-api'
@@ -215,7 +225,8 @@ const defaults = {
   id: '', name: '', description: '', type: 'chat', modelId: '',
   knowledgeBaseIds: [] as string[], promptTemplateId: '',
   skillIds: [] as string[], ruleIds: [] as string[],
-  memoryEnabled: false, maxTurns: 20, temperature: 0.7, config: '', icon: ''
+  memoryEnabled: false, maxTurns: 20, temperature: 0.7, config: '', icon: '',
+  suggestions: [] as string[]
 }
 const form = reactive<Record<string, any>>({ ...defaults })
 const rules: FormRules = {
@@ -257,7 +268,7 @@ async function loadList() {
 
 function openCreate() {
   editing.value = false
-  Object.assign(form, { ...defaults, knowledgeBaseIds: [], skillIds: [], ruleIds: [] })
+  Object.assign(form, { ...defaults, knowledgeBaseIds: [], skillIds: [], ruleIds: [], suggestions: [] })
   showDialog.value = true
 }
 
@@ -279,9 +290,18 @@ function openEdit(row: any) {
     maxTurns: row.maxTurns ?? 20,
     temperature: row.temperature ?? 0.7,
     config: row.config || '',
-    icon: row.icon || ''
+    icon: row.icon || '',
+    suggestions: parseIds(row.suggestions)
   })
   showDialog.value = true
+}
+
+function addSuggestion() {
+  form.suggestions.push('')
+}
+
+function removeSuggestion(idx: number) {
+  form.suggestions.splice(idx, 1)
 }
 
 async function handleSave() {
@@ -390,4 +410,7 @@ onMounted(async () => {
   font-size: 12px; line-height: 1.7; overflow: auto; max-height: 220px;
   white-space: pre-wrap; word-break: break-all; margin: 0 0 12px;
 }
+.suggestion-editor { width: 100%; }
+.suggestion-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+.form-hint { font-size: 12px; color: #909399; margin-top: 6px; }
 </style>

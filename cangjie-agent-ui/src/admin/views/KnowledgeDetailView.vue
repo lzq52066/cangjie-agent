@@ -14,6 +14,7 @@
           <span class="kb-meta">段落: {{ kb.paragraphCount }}</span>
         </div>
         <div class="kb-actions">
+          
           <el-upload :show-file-list="false" :before-upload="handleUpload" accept=".pdf,.docx,.doc,.txt,.md,.csv,.html">
             <el-button type="primary" :loading="uploading">
               <el-icon><Upload /></el-icon> 上传文档
@@ -29,32 +30,41 @@
         <!-- 文档列表 -->
         <el-tab-pane label="文档列表" name="documents">
           <el-table :data="documents" stripe v-loading="docLoading">
-            <el-table-column label="文件名" prop="name" min-width="200">
+            <el-table-column label="文件名" prop="name" min-width="180">
               <template #default="{ row }">
                 <el-link type="primary" @click="showParagraphs(row)">{{ row.name }}</el-link>
               </template>
             </el-table-column>
-            <el-table-column label="类型" prop="fileType" width="80" align="center">
+            <el-table-column label="类型" prop="fileType" width="70" align="center">
               <template #default="{ row }">
                 <el-tag size="small">{{ row.fileType }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="大小" width="100" align="center">
+            <el-table-column label="大小" width="90" align="center">
               <template #default="{ row }">{{ formatSize(row.fileSize) }}</template>
             </el-table-column>
-            <el-table-column label="状态" width="100" align="center">
+            <el-table-column label="状态" width="90" align="center">
               <template #default="{ row }">
                 <el-tag size="small" :type="statusTag(row.status)">{{ statusLabel(row.status) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="段落数" prop="paragraphCount" width="80" align="center" />
-            <el-table-column label="Token数" prop="tokenCount" width="100" align="center" />
-            <el-table-column label="上传时间" width="170" align="center">
+            <el-table-column label="段落数" prop="paragraphCount" width="70" align="center" />
+            <el-table-column label="Token数" prop="tokenCount" width="80" align="center" />
+            <el-table-column label="源文件" width="100" align="center">
+              <template #default="{ row }">
+                <el-button v-if="row.fileId" size="small" link type="info" @click="openFile(row)">
+                  查看文件
+                </el-button>
+                <span v-else class="no-file">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="上传时间" width="160" align="center">
               <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="120" fixed="right" align="center">
+            <el-table-column label="操作" width="200" fixed="right" align="center">
               <template #default="{ row }">
                 <el-button size="small" link type="primary" @click="showParagraphs(row)">查看切片</el-button>
+                <el-button size="small" link type="warning" :loading="reEmbeddingDoc === row.id" @click="handleReEmbedDoc(row.id)">重新向量化</el-button>
                 <el-popconfirm title="确定删除？" @confirm="handleDeleteDoc(row.id)">
                   <template #reference>
                     <el-button size="small" link type="danger">删除</el-button>
@@ -136,6 +146,8 @@ const docLoading = ref(false)
 const uploading = ref(false)
 const activeTab = ref('documents')
 
+const reEmbeddingDoc = ref('')
+
 // 检索
 const retrievalQuery = ref('')
 const results = ref<any[]>([])
@@ -187,6 +199,19 @@ async function handleDeleteDoc(docId: string) {
   loadKb()
 }
 
+async function handleReEmbedDoc(docId: string) {
+  reEmbeddingDoc.value = docId
+  try {
+    await knowledgeApi.reEmbedDocument(docId)
+    ElMessage.success('文档重新向量化完成')
+    loadDocuments()
+  } catch (e) {
+    ElMessage.error('重新向量化失败')
+  } finally {
+    reEmbeddingDoc.value = ''
+  }
+}
+
 async function showParagraphs(doc: any) {
   currentDoc.value = doc
   paragraphDialog.value = true
@@ -228,6 +253,11 @@ function formatTime(t: string) {
   return t.replace('T', ' ').substring(0, 19)
 }
 
+function openFile(row: any) {
+  // 通过文件管理接口直接打开文件预览
+  window.open(`/#/file?highlight=${row.fileId}`, '_blank')
+}
+
 onMounted(() => {
   loadKb()
   loadDocuments()
@@ -252,6 +282,7 @@ onMounted(() => {
 .score { color: #409eff; font-weight: 600; }
 .score-sub { color: #909399; }
 .result-content { color: #303133; line-height: 1.8; white-space: pre-wrap; }
+.no-file { color: #c0c4cc; }
 .para-content {
   max-height: 80px; overflow: hidden; text-overflow: ellipsis;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;

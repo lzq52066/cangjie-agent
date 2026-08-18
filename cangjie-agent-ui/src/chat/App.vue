@@ -26,6 +26,9 @@
               <div class="session-title">{{ s.title || '未命名对话' }}</div>
               <div class="session-time">{{ formatTime(s.updateTime || s.createTime) }}</div>
             </div>
+            <button class="session-delete-btn" title="删除对话" @click.stop="deleteSession(s)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+            </button>
           </div>
           <div v-if="sessions.length === 0" class="empty-sessions">
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
@@ -78,7 +81,7 @@
           </div>
           <h2 class="welcome-title">{{ welcomeTitle }}</h2>
           <p class="welcome-sub">{{ welcomeSub }}</p>
-          <div v-if="!configError" class="suggestions">
+          <div v-if="!configError && suggestionCards.length" class="suggestions">
             <button class="suggestion-card" v-for="(s, i) in suggestionCards" :key="i" @click="useSuggestion(s)">
               <span class="suggestion-icon">{{ s.icon }}</span>
               <span class="suggestion-text">{{ s.text }}</span>
@@ -101,16 +104,23 @@
             <div class="message-bubble" :class="{ 'user-bubble': m.role === 'user' }">
               <div class="message-text" v-html="renderMarkdown(m.content)"></div>
             </div>
-            <!-- Sources -->
+            <!-- Sources (默认折叠) -->
             <div v-if="m.sources?.length" class="sources-card">
-              <div class="sources-header">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
-                <span>引用来源 ({{ m.sources.length }})</span>
+              <div class="sources-header" @click="toggleSources(m)">
+                <div class="sources-header-left">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+                  <span>引用来源 ({{ m.sources.length }})</span>
+                </div>
+                <svg :class="['chevron', { open: !m._sourcesCollapsed }]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
               </div>
-              <div v-for="(s, si) in m.sources" :key="si" class="source-item">
-                <span class="source-badge">{{ si + 1 }}</span>
-                <span class="source-text">{{ sourceText(s) }}</span>
-              </div>
+              <Transition name="collapse">
+                <div v-show="!m._sourcesCollapsed" class="sources-body">
+                  <div v-for="(s, si) in m.sources" :key="si" class="source-item">
+                    <span class="source-badge">{{ si + 1 }}</span>
+                    <span class="source-text">{{ sourceText(s) }}</span>
+                  </div>
+                </div>
+              </Transition>
             </div>
             <!-- Meta -->
             <div v-if="m.duration != null" class="message-meta">
@@ -170,14 +180,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { chatApi } from '@shared/api/chat-api'
 
 interface Msg {
   role: 'user' | 'assistant'
   content: string
   sources?: Record<string, any>[]
+  _sourcesCollapsed?: boolean
   tokens?: number
   duration?: number
 }
@@ -204,12 +215,8 @@ const welcomeTitle = computed(() => (configError.value ? '无法开始对话' : 
 const welcomeSub = computed(() =>
   configError.value || '我是你的智能助手，支持知识库检索与工具调用')
 
-const suggestionCards = [
-  { icon: '📋', text: '帮我介绍一下你们的服务' },
-  { icon: '🔧', text: '如何使用这个平台？' },
-  { icon: '💡', text: '有什么功能推荐？' },
-  { icon: '📞', text: '如何联系人工客服？' },
-]
+// 建议问题：从应用配置动态加载，未配置则为空
+const suggestionCards = ref<{ icon: string; text: string }[]>([])
 
 function scroll() {
   nextTick(() => scrollAnchor.value?.scrollIntoView({ behavior: 'smooth' }))
@@ -217,6 +224,22 @@ function scroll() {
 
 function sourceText(s: Record<string, any>) {
   return s?.content || s?.text || s?.title || s?.documentName || JSON.stringify(s)
+}
+
+// 后端 sources 可能是数组，也可能是 JSON 字符串（历史消息）
+function parseSources(raw: any): Record<string, any>[] {
+  if (!raw) return []
+  if (Array.isArray(raw)) return raw
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function toggleSources(m: any) {
+  m._sourcesCollapsed = !m._sourcesCollapsed
 }
 
 function formatTime(t: string) {
@@ -284,7 +307,8 @@ async function send() {
     messages.value.push({
       role: 'assistant',
       content: res?.message || '（无回复内容）',
-      sources: res?.retrievalSources || [],
+      sources: parseSources(res?.retrievalSources),
+      _sourcesCollapsed: true,
       tokens: res?.tokens,
       duration: res?.duration
     })
@@ -306,8 +330,34 @@ async function loadSessions() {
   }
 }
 
+async function deleteSession(s: any) {
+  try {
+    await ElMessageBox.confirm(
+      '确定要删除这条对话记录吗？删除后不可恢复。',
+      '删除确认',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return // 用户取消
+  }
+  try {
+    await chatApi.deleteSession(apikey.value, s.sessionId)
+    sessions.value = sessions.value.filter((x: any) => x.sessionId !== s.sessionId)
+    if (sessionId.value === s.sessionId) {
+      sessionId.value = ''
+      messages.value = []
+    }
+    ElMessage.success('对话已删除')
+  } catch (e: any) {
+    ElMessage.warning('删除失败：' + (e?.message || '未知错误'))
+  }
+}
+
 async function openSession(s: any) {
-  showHistory.value = false
+  // 小屏时点击会话后收起侧栏，大屏保持常驻
+  if (window.innerWidth < 1024) {
+    showHistory.value = false
+  }
   sessionId.value = s.sessionId
   messages.value = []
   try {
@@ -315,6 +365,8 @@ async function openSession(s: any) {
     messages.value = (history || []).map((m: any) => ({
       role: m.role === 'user' ? 'user' : 'assistant',
       content: m.content,
+      sources: parseSources(m.retrievalSources ?? m.sources),
+      _sourcesCollapsed: true,
       tokens: m.tokens,
       duration: m.duration
     }))
@@ -335,12 +387,47 @@ onMounted(() => {
     document.title = customTitle
   }
 
+  // 大屏默认常驻对话记录，小屏默认折叠
+  showHistory.value = !embedded.value && window.innerWidth >= 1024
+  window.addEventListener('resize', onWindowResize)
+
   if (!applicationId.value || !apikey.value) {
     configError.value = '缺少 app 或 apikey 参数，请通过后台「智能应用 - 接入方式」获取嵌入地址'
     return
   }
+  loadConfig()
   loadSessions()
 })
+
+// 加载应用配置（建议问题等）
+async function loadConfig() {
+  try {
+    const cfg = await chatApi.getConfig(apikey.value, applicationId.value)
+    if (cfg?.title && !new URLSearchParams(location.search).get('title')) {
+      title.value = cfg.title
+      document.title = cfg.title
+    }
+    suggestionCards.value = (cfg?.suggestions || [])
+      .filter((t: string) => t && t.trim())
+      .map((t: string) => ({ icon: '💬', text: t }))
+  } catch {
+    // 配置加载失败不阻塞对话
+  }
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onWindowResize)
+})
+
+// 屏幕尺寸跨过阈值时自动展开/折叠对话记录（嵌入式不参与）
+function onWindowResize() {
+  if (embedded.value) return
+  if (window.innerWidth >= 1024 && !showHistory.value) {
+    showHistory.value = true
+  } else if (window.innerWidth < 1024 && showHistory.value) {
+    showHistory.value = false
+  }
+}
 </script>
 
 <style lang="scss">
@@ -429,8 +516,29 @@ onMounted(() => {
   cursor: pointer;
   transition: var(--cj-transition);
   margin-bottom: 4px;
+  position: relative;
   &:hover { background: var(--cj-border-light); }
+  &:hover .session-delete-btn { opacity: 1; }
   &.active { background: var(--cj-primary-bg); }
+}
+.session-delete-btn {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cj-text-muted);
+  opacity: 0;
+  transition: var(--cj-transition);
+  &:hover { background: #fee2e2; color: #ef4444; }
 }
 .session-icon {
   color: var(--cj-text-muted);
@@ -656,6 +764,9 @@ onMounted(() => {
   margin-bottom: 24px;
   align-items: flex-start;
   animation: fadeIn 0.3s ease;
+  &.user {
+    flex-direction: row-reverse;
+  }
 }
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
@@ -729,11 +840,38 @@ onMounted(() => {
 .sources-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
   color: var(--cj-text-secondary);
-  margin-bottom: 8px;
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0;
+  &:hover { color: var(--cj-text); }
+}
+.sources-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.chevron {
+  transition: transform 0.2s ease;
+  &.open { transform: rotate(180deg); }
+}
+.sources-body {
+  overflow: hidden;
+}
+.collapse-enter-active, .collapse-leave-active {
+  transition: all 0.2s ease;
+}
+.collapse-enter-from, .collapse-leave-to {
+  opacity: 0;
+  max-height: 0;
+}
+.collapse-enter-to, .collapse-leave-from {
+  opacity: 1;
+  max-height: 600px;
 }
 .source-item {
   display: flex;
@@ -773,6 +911,9 @@ onMounted(() => {
   margin-top: 6px;
   display: flex;
   gap: 4px;
+}
+.user .message-meta {
+  justify-content: flex-end;
 }
 .meta-dot { opacity: 0.5; }
 

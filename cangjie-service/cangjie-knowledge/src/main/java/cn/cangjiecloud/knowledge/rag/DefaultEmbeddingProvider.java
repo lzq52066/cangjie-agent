@@ -27,6 +27,9 @@ public class DefaultEmbeddingProvider implements EmbeddingProvider {
     @Value("${cangjie.embedding.model:text-embedding-3-small}")
     private String model;
 
+    @Value("${cangjie.embedding.dimension-enabled:true}")
+    private boolean dimensionEnabled;
+
     @Value("${cangjie.embedding.dimension:1536}")
     private int dimension;
 
@@ -39,7 +42,8 @@ public class DefaultEmbeddingProvider implements EmbeddingProvider {
                     "Embedding API Key 未配置。请在 application.yml 中设置 cangjie.embedding.api-key");
         }
         if (text == null || text.isBlank()) {
-            return new float[dimension];
+            int dim = dimensionEnabled ? dimension : 1536;
+            return new float[dim];
         }
         return embedViaApi(text);
     }
@@ -72,13 +76,17 @@ public class DefaultEmbeddingProvider implements EmbeddingProvider {
         if (delegate == null) {
             synchronized (this) {
                 if (delegate == null) {
-                    delegate = dev.langchain4j.model.openai.OpenAiEmbeddingModel.builder()
+                    var builder = dev.langchain4j.model.openai.OpenAiEmbeddingModel.builder()
                             .apiKey(apiKey)
                             .baseUrl(baseUrl)
-                            .modelName(model)
-                            .dimensions(dimension)
-                            .build();
-                    log.info("Embedding 模型已初始化: {} @ {}", model, baseUrl);
+                            .modelName(model);
+                    // dimension-enabled=false 时不传 dimensions 参数（兼容 BGE-M3 等不支持该参数的模型）
+                    if (dimensionEnabled) {
+                        builder.dimensions(dimension);
+                    }
+                    delegate = builder.build();
+                    log.info("Embedding 模型已初始化: {} @ {} (dimension={})", model, baseUrl,
+                            dimensionEnabled ? dimension : "auto");
                 }
             }
         }

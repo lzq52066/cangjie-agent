@@ -37,6 +37,7 @@ public class ApplicationServiceImpl extends ServiceImpl<ApplicationMapper, Appli
         entity.setMaxTurns(dto.getMaxTurns() != null ? dto.getMaxTurns() : 20);
         entity.setTemperature(dto.getTemperature() != null ? dto.getTemperature() : 0.7);
         entity.setConfig(dto.getConfig());
+        entity.setSuggestions(toJson(dto.getSuggestions()));
         entity.setIcon(dto.getIcon());
         entity.setStatus("draft");
         save(entity);
@@ -63,6 +64,7 @@ public class ApplicationServiceImpl extends ServiceImpl<ApplicationMapper, Appli
         if (dto.getMaxTurns() != null) entity.setMaxTurns(dto.getMaxTurns());
         if (dto.getTemperature() != null) entity.setTemperature(dto.getTemperature());
         if (StringUtils.hasText(dto.getConfig())) entity.setConfig(dto.getConfig());
+        if (dto.getSuggestions() != null) entity.setSuggestions(toJson(dto.getSuggestions()));
         if (StringUtils.hasText(dto.getIcon())) entity.setIcon(dto.getIcon());
         updateById(entity);
         return entity;

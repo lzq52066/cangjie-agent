@@ -79,4 +79,5 @@ public class KnowledgeBaseServiceImpl extends ServiceImpl<KnowledgeBaseMapper, K
         }
         return list(wrapper);
     }
-}
+
+    }

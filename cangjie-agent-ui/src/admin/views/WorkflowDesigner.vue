@@ -20,9 +20,9 @@
 
     <div class="designer-body" v-loading="loading">
       <aside class="palette">
-        <div class="palette-title">节点库<span>拖拽或点击添加</span></div>
-        <div v-for="t in NODE_TYPES" :key="t.type" class="palette-item" draggable
-             @dragstart="onDragStart($event, t.type)" @click="addNodeOfType(t.type)">
+        <div class="palette-title">节点库<span>点击添加或拖拽到画布</span></div>
+        <div v-for="t in NODE_TYPES" :key="t.type" class="palette-item"
+             @pointerdown="startNodeDrag($event, t.type)">
           <span class="palette-icon" :style="{ background: t.color }">
             <el-icon :size="14"><component :is="t.icon" /></el-icon>
           </span>
@@ -33,7 +33,7 @@
         </div>
       </aside>
 
-      <div class="canvas-wrap" @drop="onDrop" @dragover.prevent>
+      <div class="canvas-wrap" ref="canvasRef">
         <VueFlow
           v-model:nodes="nodes"
           v-model:edges="edges"
@@ -162,6 +162,16 @@
       </template>
     </el-drawer>
 
+    <!-- 拖拽幽灵元素 -->
+    <Teleport to="body">
+      <div v-if="ghost.show" class="drag-ghost" :style="{ left: ghost.x + 'px', top: ghost.y + 'px' }">
+        <span class="ghost-icon" :style="{ background: getMeta(ghost.type).color }">
+          <el-icon :size="14"><component :is="getMeta(ghost.type).icon" /></el-icon>
+        </span>
+        <span class="ghost-name">{{ getMeta(ghost.type).name }}</span>
+      </div>
+    </Teleport>
+
     <!-- 连线条件 -->
     <el-dialog v-model="edgeDialog" title="连线条件" width="440px">
       <el-form label-width="80px">
@@ -178,7 +188,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, reactive, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, QuestionFilled } from '@element-plus/icons-vue'
@@ -207,6 +217,10 @@ const workflow = ref<any>(null)
 const nodes = ref<Node[]>([])
 const edges = ref<Edge[]>([])
 const store = ref<VueFlowStore>()
+const canvasRef = ref<HTMLElement | null>(null)
+
+// 拖拽幽灵元素状态（取代 pendingNodeType）
+const ghost = reactive({ show: false, x: 0, y: 0, type: '' })
 
 const defaultEdgeOptions = {
   markerEnd: MarkerType.ArrowClosed,
@@ -322,20 +336,49 @@ async function save(publish: boolean) {
   }
 }
 
-// ============ 画布交互 ============
+// ============ 画布交互（基于 Pointer Events，兼容 SVG）============
 
 function onInit(instance: VueFlowStore) {
   store.value = instance
 }
 
-function onDragStart(e: DragEvent, type: string) {
-  e.dataTransfer?.setData('application/workflow-node', type)
+/** document 级 pointermove — 跟随鼠标移动幽灵元素 */
+function onPointerMove(e: PointerEvent) {
+  if (!ghost.show) return
+  ghost.x = e.clientX + 16
+  ghost.y = e.clientY + 16
 }
 
-function onDrop(e: DragEvent) {
-  const type = e.dataTransfer?.getData('application/workflow-node')
-  if (!type) return
-  const position = store.value?.screenToFlowCoordinate({ x: e.clientX, y: e.clientY })
+/** 在节点库上按下鼠标/手指 — 开始拖拽，显示幽灵元素 */
+function startNodeDrag(e: PointerEvent, type: string) {
+  ghost.type = type
+  ghost.x = e.clientX + 16
+  ghost.y = e.clientY + 16
+  ghost.show = true
+  ;(e.target as HTMLElement)?.closest('.palette-item')?.classList.add('dragging')
+  document.addEventListener('pointermove', onPointerMove)
+}
+
+/** document 上的 pointerup — 放置节点，清理幽灵元素 */
+function onPointerUp(e: PointerEvent) {
+  const type = ghost.type
+  const wasShowing = ghost.show
+  ghost.show = false
+  ghost.type = ''
+  document.removeEventListener('pointermove', onPointerMove)
+  // 清除所有 palette-item 的 dragging 状态
+  document.querySelectorAll('.palette-item.dragging').forEach(el => el.classList.remove('dragging'))
+  if (!type || !wasShowing) return
+
+  // 检查释放位置是否在画布区域内
+  const canvas = canvasRef.value
+  if (!canvas) { addNodeOfType(type); return }
+  const rect = canvas.getBoundingClientRect()
+  const inCanvas = e.clientX >= rect.left && e.clientX <= rect.right &&
+                   e.clientY >= rect.top && e.clientY <= rect.bottom
+  const position = inCanvas && store.value
+    ? store.value.screenToFlowCoordinate({ x: e.clientX, y: e.clientY })
+    : undefined
   addNodeOfType(type, position)
 }
 
@@ -535,6 +578,15 @@ onMounted(async () => {
   try { models.value = await modelApi.list() } catch { models.value = [] }
   try { knowledgeBases.value = await knowledgeApi.list() } catch { knowledgeBases.value = [] }
   try { tools.value = await toolApi.list() } catch { tools.value = [] }
+
+  // 注册 Pointer-based 拖拽（不依赖 HTML5 DnD，兼容 SVG 画布）
+  document.addEventListener('pointerup', onPointerUp)
+  document.addEventListener('pointermove', onPointerMove)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('pointerup', onPointerUp)
+  document.removeEventListener('pointermove', onPointerMove)
 })
 </script>
 
@@ -566,8 +618,11 @@ onMounted(async () => {
       display: flex; gap: 8px; align-items: center; padding: 8px;
       border: 1px solid #ebeef5; border-radius: 8px; margin-bottom: 8px;
       cursor: grab; user-select: none; transition: all 0.2s;
+      touch-action: none; /* 防止 touch 滚动干扰拖拽 */
 
       &:hover { border-color: #409eff; box-shadow: 0 2px 8px rgba(64, 158, 255, 0.15); }
+
+      &.dragging { opacity: 0.7; transform: scale(0.95); }
 
       .palette-icon {
         width: 28px; height: 28px; border-radius: 6px; color: #fff; flex-shrink: 0;
@@ -583,4 +638,31 @@ onMounted(async () => {
 
 :deep(.vue-flow__edge-textbg) { fill: #fff; }
 :deep(.vue-flow__edge-text) { fill: #606266; font-size: 12px; }
+</style>
+
+<style>
+/* 拖拽幽灵（Teleport 到 body，需全局样式） */
+.drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: rgba(255,255,255,0.95);
+  border: 2px solid #409eff;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  font-size: 13px;
+  font-weight: 500;
+  color: #303133;
+  white-space: nowrap;
+  transform: translate(-8px, -8px);
+  transition: none;
+}
+.ghost-icon {
+  width: 24px; height: 24px; border-radius: 6px; color: #fff;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
 </style>

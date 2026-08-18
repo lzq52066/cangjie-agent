@@ -14,4 +14,9 @@ public interface IChatSessionService extends IService<ChatSessionEntity> {
     ChatSessionEntity close(String sessionId);
 
     ChatSessionEntity getBySessionId(String sessionId);
+
+    /**
+     * 物理删除会话及其所有消息
+     */
+    void deleteBySessionId(String sessionId);
 }

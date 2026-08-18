@@ -11,6 +11,14 @@ function withKey(apikey: string) {
 }
 
 export const chatApi = {
+  getConfig(apikey: string, applicationId: string) {
+    return request<any>({
+      baseURL: CHAT_BASE,
+      method: 'GET',
+      url: `/config/${applicationId}`,
+      headers: withKey(apikey)
+    })
+  },
   send(apikey: string, data: { applicationId: string; message: string; sessionId?: string }) {
     return request<any>({
       baseURL: CHAT_BASE,
@@ -41,6 +49,14 @@ export const chatApi = {
       baseURL: CHAT_BASE,
       method: 'DELETE',
       url: `/sessions/${sessionId}`,
+      headers: withKey(apikey)
+    })
+  },
+  deleteSession(apikey: string, sessionId: string) {
+    return request<void>({
+      baseURL: CHAT_BASE,
+      method: 'DELETE',
+      url: `/sessions/${sessionId}/delete`,
       headers: withKey(apikey)
     })
   }

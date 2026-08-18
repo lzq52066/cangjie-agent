@@ -45,6 +45,9 @@ public class KnowledgeDocumentEntity extends BaseEntity {
     /** 目录路径 */
     private String directoryPath;
 
+    /** 关联的文件管理记录 ID */
+    private String fileId;
+
     /** 元数据（JSON） */
     private String metadata;
 }

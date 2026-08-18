@@ -71,27 +71,37 @@ public class SmartTextSplitter implements TextSplitter {
             }
         }
 
-        // 阶段3：清洗 + 短段合并
+        // 阶段3：清洗 + 短段合并（不跨 Section 合并，保持语义完整性）
         int chunkIndex = 0;
-        StringBuilder buffer = new StringBuilder();
-        String currentTitle = "";
 
         for (Section part : splitParts) {
             String cleaned = cleanAndFilter(part.content);
+            if (cleaned.isBlank()) continue;
+
+            // 如果当前 Section 内容在 DEFAULT_LIMIT 以内，直接作为一个 chunk
+            if (cleaned.length() <= DEFAULT_LIMIT) {
+                chunks.add(TextChunk.builder()
+                        .content(cleaned)
+                        .source(part.title)
+                        .chunkIndex(chunkIndex++)
+                        .build());
+                continue;
+            }
+
+            // 超长 Section 按行合并到 DEFAULT_LIMIT
             List<String> lines = lineSplit(cleaned, DEFAULT_LIMIT);
+            StringBuilder buffer = new StringBuilder();
 
             for (String line : lines) {
                 if (line.isBlank()) continue;
 
                 if (buffer.length() + line.length() > DEFAULT_LIMIT && buffer.length() > 0) {
-                    // 输出当前切片
                     chunks.add(TextChunk.builder()
                             .content(buffer.toString().trim())
-                            .source(currentTitle)
+                            .source(part.title)
                             .chunkIndex(chunkIndex++)
                             .build());
                     buffer = new StringBuilder();
-                    currentTitle = part.title;
                 }
 
                 if (buffer.length() > 0) {
@@ -99,15 +109,15 @@ public class SmartTextSplitter implements TextSplitter {
                 }
                 buffer.append(line);
             }
-        }
 
-        // 最后剩余内容
-        if (buffer.length() > 0) {
-            chunks.add(TextChunk.builder()
-                    .content(buffer.toString().trim())
-                    .source(currentTitle)
-                    .chunkIndex(chunkIndex)
-                    .build());
+            // Section 内剩余内容
+            if (buffer.length() > 0) {
+                chunks.add(TextChunk.builder()
+                        .content(buffer.toString().trim())
+                        .source(part.title)
+                        .chunkIndex(chunkIndex++)
+                        .build());
+            }
         }
 
         // 安全兜底：非空输入必须产出至少一个 chunk

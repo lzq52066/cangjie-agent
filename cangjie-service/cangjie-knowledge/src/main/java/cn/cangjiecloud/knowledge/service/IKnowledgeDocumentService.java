@@ -19,9 +19,14 @@ public interface IKnowledgeDocumentService extends IService<KnowledgeDocumentEnt
     void delete(String documentId);
 
     /**
-     * 重新处理文档
+     * 重新处理文档（仅失败状态）
      */
     void reprocess(String documentId);
+
+    /**
+     * 重新向量化文档（不限制状态，对已有段落重新生成向量）
+     */
+    void reEmbed(String documentId);
 
     /**
      * 查询知识库下的文档列表

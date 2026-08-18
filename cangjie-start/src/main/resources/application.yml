@@ -27,6 +27,18 @@ spring:
   sql:
     init:
       mode: never
+  data:
+    redis:
+      host: 47.97.122.98
+      port: 6379
+      password: xiaovcloud
+      timeout: 5000
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
 
 mybatis-plus:
   global-config:
@@ -57,16 +69,6 @@ system:
   default-password: ${SYSTEM_DEFAULT_PASSWORD:cangjiecloud@123456}
   default-phone: 18800000000
   default-email: admin@cangjiecloud.cn
-
-# 嵌入模型配置（支持 OpenAI 兼容接口：通义/智谱/Ollama 等）
-cangjie:
-  embedding:
-    api-key: ${EMBEDDING_API_KEY:}
-    base-url: ${EMBEDDING_BASE_URL:https://api.openai.com/v1}
-    model: ${EMBEDDING_MODEL:text-embedding-3-small}
-    dimension: ${EMBEDDING_DIMENSION:1536}
-  oss:
-    local-path: ${OSS_LOCAL_PATH:./data/files}
 
 springdoc:
   swagger-ui:

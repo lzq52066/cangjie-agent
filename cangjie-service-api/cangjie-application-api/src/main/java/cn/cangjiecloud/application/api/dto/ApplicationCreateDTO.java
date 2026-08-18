@@ -44,6 +44,9 @@ public class ApplicationCreateDTO {
     /** 额外配置（JSON） */
     private String config;
 
+    /** 建议问题列表（用于 chat 入口欢迎页展示） */
+    private List<String> suggestions;
+
     /** 图标 */
     private String icon;
 }

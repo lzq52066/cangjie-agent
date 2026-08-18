@@ -111,11 +111,13 @@ async function handleDelete(id: string) {
 }
 
 function openFile(row: any) {
-  window.open(fileApi.downloadUrl(row.id), '_blank')
+  // row.url 存在（MinIO 等对象存储的直接 URL）则用它，否则走后端下载接口
+  const url = row.url || (location.origin + fileApi.downloadUrl(row.id))
+  window.open(url, '_blank')
 }
 
 async function copyUrl(row: any) {
-  const url = location.origin + fileApi.downloadUrl(row.id)
+  const url = row.url || (location.origin + fileApi.downloadUrl(row.id))
   try {
     await navigator.clipboard.writeText(url)
     ElMessage.success('链接已复制')

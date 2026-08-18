@@ -42,6 +42,11 @@ export const knowledgeApi = {
     return request<any[]>({ method: 'GET', url: `/knowledge/document/paragraphs/${documentId}` })
   },
 
+  // 重新向量化（仅文档级，逐个操作避免成本过高）
+  reEmbedDocument(documentId: string) {
+    return request<void>({ method: 'POST', url: `/knowledge/document/re-embed/${documentId}` })
+  },
+
   // 检索测试
   search(data: { query: string; knowledgeBaseId?: string; knowledgeBaseIds?: string[]; topK?: number }) {
     return request<any[]>({ method: 'POST', url: '/knowledge/retrieval/search', data })

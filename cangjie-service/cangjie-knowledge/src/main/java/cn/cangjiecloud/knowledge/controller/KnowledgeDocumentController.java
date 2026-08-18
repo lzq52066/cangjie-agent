@@ -48,4 +48,10 @@ public class KnowledgeDocumentController {
     public R<List<KnowledgeParagraphEntity>> paragraphs(@PathVariable String documentId) {
         return R.data(paragraphService.listByDocument(documentId));
     }
+
+    @PostMapping("/re-embed/{documentId}")
+    public R<Void> reEmbed(@PathVariable String documentId) {
+        documentService.reEmbed(documentId);
+        return R.ok("文档重新向量化已完成");
+    }
 }
