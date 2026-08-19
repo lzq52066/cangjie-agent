@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.model.api.dto.ModelCreateDTO;
 import cn.cangjiecloud.model.api.dto.ModelUpdateDTO;
 import cn.cangjiecloud.model.entity.ModelEntity;
+import cn.cangjiecloud.model.provider.OpenAICompatibleClient;
 
 import java.util.List;
 
@@ -31,4 +32,14 @@ public interface IModelService extends IService<ModelEntity> {
      * 设置默认模型
      */
     void setDefault(String modelId);
+
+    /**
+     * 根据模型 ID 获取 OpenAI 兼容客户端
+     */
+    OpenAICompatibleClient getClient(String modelId);
+
+    /**
+     * 获取默认模型的客户端
+     */
+    OpenAICompatibleClient getDefaultClient();
 }

@@ -1,10 +1,12 @@
 package cn.cangjiecloud.oss.aspect;
 
+import cn.cangjiecloud.common.annotation.Sensitive;
 import cn.cangjiecloud.common.context.UserContext;
 import cn.cangjiecloud.common.domain.UserIdentity;
 import cn.cangjiecloud.oss.entity.OperationLogEntity;
 import cn.cangjiecloud.oss.service.IOperationLogService;
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.serializer.ValueFilter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -18,13 +20,21 @@ import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.lang.reflect.Field;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
  * 操作日志切面：自动采集所有 Controller 的写操作（POST/PUT/DELETE/PATCH），
  * 记录模块、操作、参数、结果、耗时、用户等，写入 operation_log 表。
+ * <p>
+ * 敏感字段通过 {@link Sensitive} 注解标记，序列化时值替换为 ******。
+ * </p>
  */
 @Slf4j
 @Aspect
@@ -34,6 +44,12 @@ public class OperationLogAspect {
 
     /** 参数/结果序列化最大长度，防止大字段拖慢写入 */
     private static final int MAX_TEXT_LENGTH = 2000;
+
+    /** 敏感字段值替换掩码 */
+    private static final String MASK = "******";
+
+    /** 缓存各 Class 中标注了 @Sensitive 的字段名，避免重复反射 */
+    private static final Map<Class<?>, Set<String>> SENSITIVE_FIELD_CACHE = new ConcurrentHashMap<>();
 
     private final IOperationLogService operationLogService;
 
@@ -61,7 +77,7 @@ public class OperationLogAspect {
             Object result = pjp.proceed();
             entity.setDuration(System.currentTimeMillis() - start);
             entity.setStatus("success");
-            entity.setResult(truncate(JSON.toJSONString(result)));
+            entity.setResult(serializeResult(result));
             record(entity);
             return result;
         } catch (Throwable e) {
@@ -112,12 +128,46 @@ public class OperationLogAspect {
             String json = Arrays.stream(args)
                     .filter(a -> !(a instanceof HttpServletRequest || a instanceof HttpServletResponse
                             || a instanceof MultipartFile))
-                    .map(a -> truncate(JSON.toJSONString(a)))
+                    .map(a -> truncate(JSON.toJSONString(a, buildFilter(a.getClass()))))
                     .collect(Collectors.joining(","));
             return truncate(json);
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private String serializeResult(Object result) {
+        if (result == null) {
+            return null;
+        }
+        try {
+            return truncate(JSON.toJSONString(result, buildFilter(result.getClass())));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * 为指定 Class 构建 ValueFilter：标注了 @Sensitive 的字段值替换为 ******。
+     */
+    private ValueFilter buildFilter(Class<?> clazz) {
+        Set<String> fields = SENSITIVE_FIELD_CACHE.computeIfAbsent(clazz, this::resolveSensitiveFields);
+        if (fields.isEmpty()) {
+            return (object, name, value) -> value;
+        }
+        return (object, name, value) -> fields.contains(name) ? MASK : value;
+    }
+
+    /**
+     * 反射扫描类中标注了 @Sensitive 的字段名。
+     */
+    private Set<String> resolveSensitiveFields(Class<?> clazz) {
+        String[] names = Arrays.stream(clazz.getDeclaredFields())
+                .filter(f -> f.isAnnotationPresent(Sensitive.class))
+                .map(Field::getName)
+                .toArray(String[]::new);
+        return names.length == 0 ? Collections.emptySet()
+                : Collections.unmodifiableSet(Arrays.stream(names).collect(Collectors.toSet()));
     }
 
     private String resolveIp(HttpServletRequest request) {

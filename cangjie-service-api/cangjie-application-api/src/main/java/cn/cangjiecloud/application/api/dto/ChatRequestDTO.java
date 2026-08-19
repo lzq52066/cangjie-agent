@@ -3,6 +3,8 @@ package cn.cangjiecloud.application.api.dto;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 public class ChatRequestDTO {
 
@@ -22,4 +24,18 @@ public class ChatRequestDTO {
 
     /** 是否流式返回 */
     private Boolean stream = false;
+
+    /**
+     * OpenAI 兼容：完整对话消息列表（含当前消息）。
+     * 非空时优先作为本次模型调用的完整上下文（忽略数据库历史消息）。
+     */
+    private List<ConversationMessage> messages;
+
+    @Data
+    public static class ConversationMessage {
+        /** 角色：system / user / assistant */
+        private String role;
+        /** 消息内容 */
+        private String content;
+    }
 }

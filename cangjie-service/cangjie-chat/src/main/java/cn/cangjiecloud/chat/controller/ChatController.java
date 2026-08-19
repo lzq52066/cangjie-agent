@@ -43,6 +43,14 @@ public class ChatController {
         return R.data(chatService.chat(request));
     }
 
+    @PostMapping("/send-stream")
+    public void sendStream(@Valid @RequestBody ChatRequestDTO request,
+                           HttpServletRequest httpRequest,
+                           org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter) {
+        validateApikey(httpRequest, request.getApplicationId());
+        chatService.chatStream(request, emitter, false);
+    }
+
     /**
      * 获取应用对话配置（名称、建议问题等），供 chat 前端初始化使用
      */

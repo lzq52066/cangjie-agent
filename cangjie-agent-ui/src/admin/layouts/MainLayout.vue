@@ -9,7 +9,9 @@
         </div>
       </div>
       <el-menu
+        :key="openKey"
         :default-active="activeMenu"
+        :default-openeds="openMenus"
         class="menu"
         router
         background-color="transparent"
@@ -106,30 +108,26 @@ function pruneEmpty(node: MenuNode) {
   }
 }
 
-function getDefaultMenus(): MenuNode[] {
-  return [
-    { id: '/dashboard', name: '工作台', path: '/dashboard', icon: 'DataBoard' },
-    { id: '/model', name: '模型管理', path: '/model', icon: 'Connection' },
-    { id: '/knowledge', name: '知识库', path: '/knowledge', icon: 'Files' },
-    { id: '/tool', name: '工具插件', path: '/tool', icon: 'Tools' },
-    { id: '/prompt', name: '提示词/Skill', path: '/prompt', icon: 'EditPen' },
-    { id: '/workflow', name: '工作流', path: '/workflow', icon: 'Share' },
-    { id: '/application', name: '智能应用', path: '/application', icon: 'VideoPlay' },
-    { id: '/channel', name: '渠道接入', path: '/channel', icon: 'DataLine' },
-    { id: '/observability', name: '可观测性', path: '/observability', icon: 'Histogram' },
-    { id: '/file', name: '文件管理', path: '/file', icon: 'Folder' },
-    { id: '/system/role', name: '角色管理', path: '/system/role', icon: 'UserFilled' },
-    { id: '/system/menu', name: '菜单管理', path: '/system/menu', icon: 'Menu' },
-    { id: '/system', name: '系统设置', path: '/system', icon: 'Setting' }
-  ]
-}
-
 const menus = computed(() => {
   const items = userStore.menus || []
-  if (items.length === 0) return getDefaultMenus()
-  const tree = buildMenuTree(items.filter(m => m.type !== 'button'))
-  return tree.length > 0 ? tree : getDefaultMenus()
+  return buildMenuTree(items.filter(m => m.type !== 'button'))
 })
+
+// 当前激活菜单所在分组的 index 列表（用于自动展开对应二级菜单）
+const openMenus = computed(() => {
+  const result: string[] = []
+  const walk = (nodes: MenuNode[], parentIndex?: string) => {
+    for (const n of nodes) {
+      if (n.path === activeMenu.value && parentIndex) result.push(parentIndex)
+      if (n.children && n.children.length) walk(n.children, n.path || n.id)
+    }
+  }
+  walk(menus.value)
+  return result
+})
+
+// 路由切换时重建菜单，确保分组展开状态正确
+const openKey = computed(() => openMenus.value.join('_') || 'root')
 
 async function handleCmd(cmd: string) {
   if (cmd === 'logout') {

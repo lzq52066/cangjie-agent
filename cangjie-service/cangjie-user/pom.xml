@@ -24,9 +24,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!-- 仅使用 BCryptPasswordEncoder 密码加密，认证走 Sa-Token；引入完整 security starter 会触发
+             SecurityAutoConfiguration 与 actuator 的 ManagementWebSecurityAutoConfiguration 冲突导致启动失败 -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-security</artifactId>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
         </dependency>
     </dependencies>
 </project>

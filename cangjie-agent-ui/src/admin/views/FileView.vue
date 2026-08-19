@@ -20,7 +20,9 @@
     <el-table :data="list" v-loading="loading" stripe>
       <el-table-column label="文件名" prop="fileName" min-width="220" show-overflow-tooltip />
       <el-table-column label="分类" prop="category" width="120" />
-      <el-table-column label="类型" prop="contentType" min-width="160" show-overflow-tooltip />
+      <el-table-column label="类型" min-width="160" show-overflow-tooltip>
+        <template #default="{ row }">{{ displayType(row.contentType) }}</template>
+      </el-table-column>
       <el-table-column label="大小" width="110" align="right">
         <template #default="{ row }">{{ formatSize(row.fileSize) }}</template>
       </el-table-column>
@@ -33,7 +35,8 @@
       <el-table-column label="操作" width="180" fixed="right" align="center">
         <template #default="{ row }">
           <el-button size="small" link type="primary" @click="openFile(row)">预览</el-button>
-          <el-button size="small" link type="success" @click="copyUrl(row)">复制链接</el-button>
+          <el-button size="small" link type="success" @click="downloadFile(row)">下载</el-button>
+          <el-button size="small" link type="warning" @click="copyUrl(row)">复制链接</el-button>
           <el-popconfirm title="确定删除该文件？" @confirm="handleDelete(row.id)">
             <template #reference>
               <el-button size="small" link type="danger">删除</el-button>
@@ -46,6 +49,18 @@
     <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
                    :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
                    :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+
+    <!-- 文件预览弹窗 -->
+    <el-dialog v-model="previewVisible" :title="previewTitle" width="80%" top="5vh" destroy-on-close>
+      <div class="preview-container">
+        <iframe v-if="previewType === 'iframe'"
+                :src="previewUrl" class="preview-iframe" frameborder="0" />
+        <div v-else class="preview-unsupported">
+          <p>该文件类型不支持在线预览</p>
+          <el-button type="primary" @click="downloadCurrentPreview">下载文件</el-button>
+        </div>
+      </div>
+    </el-dialog>
   </el-card>
 </template>
 
@@ -57,6 +72,15 @@ import { fileApi } from '@admin/api/file-api'
 
 const categories = ['document', 'image', 'avatar', 'other']
 
+/** 浏览器可直接内联渲染的文件类型 */
+const INLINE_TYPES = [
+  'image/', 'video/', 'audio/',
+  'application/pdf',
+  'text/',
+  'application/json',
+  'application/xml',
+]
+
 const list = ref<any[]>([])
 const loading = ref(false)
 const uploading = ref(false)
@@ -65,6 +89,51 @@ const category = ref('')
 const pageNum = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
+
+// 预览弹窗
+const previewVisible = ref(false)
+const previewTitle = ref('')
+const previewUrl = ref('')
+const previewType = ref<'iframe' | 'unsupported'>('iframe')
+let currentPreviewRow: any = null
+
+function canPreviewInline(contentType?: string): boolean {
+  if (!contentType) return false
+  return INLINE_TYPES.some(t => contentType.startsWith(t))
+}
+
+const MIME_SHORT_MAP: Record<string, string> = {
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word (.docx)',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel (.xlsx)',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PowerPoint (.pptx)',
+  'application/msword': 'Word (.doc)',
+  'application/vnd.ms-excel': 'Excel (.xls)',
+  'application/vnd.ms-powerpoint': 'PowerPoint (.ppt)',
+  'application/pdf': 'PDF',
+  'application/zip': 'ZIP 压缩包',
+  'application/x-rar-compressed': 'RAR 压缩包',
+  'application/x-7z-compressed': '7Z 压缩包',
+  'application/gzip': 'GZIP 压缩包',
+  'application/json': 'JSON',
+  'application/xml': 'XML',
+  'text/plain': '文本文件',
+  'text/html': 'HTML',
+  'text/css': 'CSS',
+  'text/javascript': 'JavaScript',
+  'image/png': 'PNG 图片',
+  'image/jpeg': 'JPEG 图片',
+  'image/gif': 'GIF 图片',
+  'image/webp': 'WebP 图片',
+  'image/svg+xml': 'SVG 图片',
+  'video/mp4': 'MP4 视频',
+  'audio/mpeg': 'MP3 音频',
+  'audio/wav': 'WAV 音频',
+}
+
+function displayType(contentType?: string): string {
+  if (!contentType) return '-'
+  return MIME_SHORT_MAP[contentType] || contentType
+}
 
 function formatSize(size?: number) {
   if (!size) return '-'
@@ -111,13 +180,34 @@ async function handleDelete(id: string) {
 }
 
 function openFile(row: any) {
-  // row.url 存在（MinIO 等对象存储的直接 URL）则用它，否则走后端下载接口
-  const url = row.url || (location.origin + fileApi.downloadUrl(row.id))
-  window.open(url, '_blank')
+  currentPreviewRow = row
+  previewTitle.value = row.fileName || '文件预览'
+  if (canPreviewInline(row.contentType)) {
+    previewType.value = 'iframe'
+    previewUrl.value = location.origin + fileApi.previewUrl(row.id)
+  } else {
+    previewType.value = 'unsupported'
+    previewUrl.value = ''
+  }
+  previewVisible.value = true
+}
+
+function downloadCurrentPreview() {
+  if (currentPreviewRow) downloadFile(currentPreviewRow)
+}
+
+function downloadFile(row: any) {
+  const url = location.origin + fileApi.downloadUrl(row.id)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = row.fileName || ''
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
 }
 
 async function copyUrl(row: any) {
-  const url = row.url || (location.origin + fileApi.downloadUrl(row.id))
+  const url = row.url || (location.origin + fileApi.previewUrl(row.id))
   try {
     await navigator.clipboard.writeText(url)
     ElMessage.success('链接已复制')
@@ -133,4 +223,7 @@ onMounted(loadList)
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .toolbar-left { display: flex; gap: 12px; }
 .pager { margin-top: 16px; justify-content: flex-end; }
+.preview-container { min-height: 400px; display: flex; align-items: center; justify-content: center; }
+.preview-iframe { width: 100%; height: 70vh; border: none; }
+.preview-unsupported { text-align: center; color: #999; }
 </style>

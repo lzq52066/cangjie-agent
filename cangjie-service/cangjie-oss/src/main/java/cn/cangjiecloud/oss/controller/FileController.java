@@ -37,10 +37,12 @@ public class FileController {
     }
 
     /**
-     * 下载 / 预览文件
+     * 预览 / 下载文件。
+     * ?download=true 下载（attachment，保留原文件名），否则浏览器内联预览（inline）。
      */
     @GetMapping("/{id}")
-    public ResponseEntity<byte[]> download(@PathVariable String id) {
+    public ResponseEntity<byte[]> download(@PathVariable String id,
+                                           @RequestParam(defaultValue = "false") boolean download) {
         FileEntity entity = fileService.getById(id);
         byte[] data = fileService.download(id);
         String contentType = entity != null && entity.getContentType() != null
@@ -48,8 +50,11 @@ public class FileController {
         String fileName = entity != null && entity.getFileName() != null
                 ? entity.getFileName() : "file";
         String encodedName = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");
+        String disposition = download
+                ? "attachment; filename*=UTF-8''" + encodedName
+                : "inline; filename*=UTF-8''" + encodedName;
         return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename*=UTF-8''" + encodedName)
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition)
                 .contentType(MediaType.parseMediaType(contentType))
                 .body(data);
     }

@@ -29,6 +29,12 @@ public class ChatResponseDTO {
     /** 总 token 数 */
     private Integer tokens;
 
+    /** 输入 token 数（OpenAI 兼容 usage 使用） */
+    private Integer promptTokens;
+
+    /** 输出 token 数（OpenAI 兼容 usage 使用） */
+    private Integer completionTokens;
+
     /** 响应耗时（毫秒） */
     private Long duration;
 }

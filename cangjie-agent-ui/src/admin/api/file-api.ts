@@ -19,8 +19,12 @@ export const fileApi = {
   remove(id: string) {
     return request<void>({ method: 'DELETE', url: `/file/${id}` })
   },
-  /** 下载/预览地址（浏览器直接打开） */
-  downloadUrl(id: string) {
+  /** 预览地址（浏览器内联打开） */
+  previewUrl(id: string) {
     return `/api/admin/file/${id}`
+  },
+  /** 下载地址（attachment，原文件名） */
+  downloadUrl(id: string) {
+    return `/api/admin/file/${id}?download=true`
   }
 }

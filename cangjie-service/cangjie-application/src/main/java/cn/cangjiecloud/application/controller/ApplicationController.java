@@ -2,12 +2,15 @@ package cn.cangjiecloud.application.controller;
 
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.cangjiecloud.application.api.dto.ApplicationCreateDTO;
+import cn.cangjiecloud.application.api.dto.ApplicationVersionDTO;
 import cn.cangjiecloud.application.entity.ApplicationEntity;
 import cn.cangjiecloud.application.service.IApplicationService;
+import cn.cangjiecloud.application.service.IApplicationVersionService;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -19,6 +22,7 @@ import java.util.List;
 public class ApplicationController {
 
     private final IApplicationService applicationService;
+    private final IApplicationVersionService applicationVersionService;
 
     @PostMapping
     public R<ApplicationEntity> create(@Valid @RequestBody ApplicationCreateDTO dto) {
@@ -48,8 +52,12 @@ public class ApplicationController {
     }
 
     @PostMapping("/{id}/publish")
-    public R<ApplicationEntity> publish(@PathVariable String id) {
-        return R.data(applicationService.publish(id));
+    @Transactional(rollbackFor = Exception.class)
+    public R<ApplicationEntity> publish(@PathVariable String id,
+                                        @RequestParam(required = false) String operator) {
+        ApplicationEntity published = applicationService.publish(id);
+        applicationVersionService.publish(id, operator != null ? operator : "system");
+        return R.data(published);
     }
 
     @GetMapping("/apikey/{apikey}")

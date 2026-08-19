@@ -12,7 +12,6 @@ public interface AppConst {
     String DEFAULT_TENANT_ID = "default";
 
     String DEFAULT_USERNAME = "admin";
-    String DEFAULT_PASSWORD = "cangjie@123456";
     String DEFAULT_EMAIL = "admin@cangjiecloud.cn";
     String DEFAULT_PHONE = "18800000000";
 

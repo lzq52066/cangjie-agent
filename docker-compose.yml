@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  # ---- 应用服务 ----
+  cangjie-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cangjie-agent:latest
+    container_name: cangjie-agent
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # 数据库
+      DB_URL: jdbc:postgresql://postgres:5432/cangjie_agent
+      DB_USERNAME: cangjie
+      DB_PASSWORD: cangjie_secret
+      # Redis
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: redis_secret
+      # Sa-Token JWT
+      SA_TOKEN_JWT_SECRET_KEY: ${SA_TOKEN_JWT_SECRET_KEY:-change-me-to-a-random-64-chars-string}
+      # 默认管理员密码
+      SYSTEM_DEFAULT_PASSWORD: ${SYSTEM_DEFAULT_PASSWORD:-cangjiecloud@123}
+      # 运行环境
+      SPRING_PROFILES_ACTIVE: docker
+      # JVM
+      JAVA_OPTS: "-Xms512m -Xmx2g"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - cangjie-net
+    volumes:
+      - cangjie-logs:/app/logs
+      - cangjie-uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+
+  # ---- PostgreSQL + pgvector ----
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: cangjie-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: cangjie_agent
+      POSTGRES_USER: cangjie
+      POSTGRES_PASSWORD: cangjie_secret
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - cangjie-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cangjie -d cangjie_agent"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  # ---- Redis ----
+  redis:
+    image: redis:7-alpine
+    container_name: cangjie-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass redis_secret --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - cangjie-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis_secret", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  cangjie-logs:
+    driver: local
+  cangjie-uploads:
+    driver: local
+
+networks:
+  cangjie-net:
+    driver: bridge
