@@ -14,6 +14,9 @@ public class MinioProperties {
     /** MinIO 服务地址，如 http://localhost:9000 */
     private String endpoint;
 
+    /** 区域，如 us-east-1 */
+    private String region;
+
     /** 访问密钥 */
     private String accessKey;
 
@@ -21,10 +24,10 @@ public class MinioProperties {
     private String secretKey;
 
     /** 默认存储桶名称 */
-    private String bucketName;
+    private String bucket;
 
-    /** 是否使用 HTTPS */
-    private Boolean secure = false;
+    /** 公网访问地址（替换 endpoint 中的内网地址），如 https://cdn.example.com */
+    private String publicEndpoint;
 
     public String getEndpoint() {
         return endpoint;
@@ -32,6 +35,14 @@ public class MinioProperties {
 
     public void setEndpoint(String endpoint) {
         this.endpoint = endpoint;
+    }
+
+    public String getRegion() {
+        return region;
+    }
+
+    public void setRegion(String region) {
+        this.region = region;
     }
 
     public String getAccessKey() {
@@ -50,19 +61,19 @@ public class MinioProperties {
         this.secretKey = secretKey;
     }
 
-    public String getBucketName() {
-        return bucketName;
+    public String getBucket() {
+        return bucket;
     }
 
-    public void setBucketName(String bucketName) {
-        this.bucketName = bucketName;
+    public void setBucket(String bucket) {
+        this.bucket = bucket;
     }
 
-    public Boolean getSecure() {
-        return secure;
+    public String getPublicEndpoint() {
+        return publicEndpoint;
     }
 
-    public void setSecure(Boolean secure) {
-        this.secure = secure;
+    public void setPublicEndpoint(String publicEndpoint) {
+        this.publicEndpoint = publicEndpoint;
     }
 }
