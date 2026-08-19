@@ -18,6 +18,19 @@ export interface PageResult<T> {
   size: number
 }
 
+export interface MenuNode {
+  id: string
+  name: string
+  path?: string
+  component?: string
+  icon?: string
+  type?: string
+  status?: string
+  sort?: number
+  parentId?: string
+  children?: MenuNode[]
+}
+
 export interface UserIdentity {
   userId: string
   username: string
@@ -27,6 +40,8 @@ export interface UserIdentity {
   role: string
   tenantId: string
   workspaceId: string
+  permissions?: string[]
+  menus?: MenuNode[]
 }
 
 export interface LoginResult {

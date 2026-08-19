@@ -7,12 +7,21 @@ import cn.cangjiecloud.common.api.ResultCode;
 import cn.cangjiecloud.common.constant.AppConst;
 import cn.cangjiecloud.common.context.UserContext;
 import cn.cangjiecloud.common.domain.UserIdentity;
+import cn.cangjiecloud.common.domain.MenuVO;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.common.props.SystemProperties;
 import cn.cangjiecloud.user.dto.LoginDTO;
 import cn.cangjiecloud.user.entity.UserEntity;
+import cn.cangjiecloud.user.entity.RoleMenuEntity;
+import cn.cangjiecloud.user.entity.UserRoleEntity;
+import cn.cangjiecloud.user.entity.MenuEntity;
 import cn.cangjiecloud.user.mapper.UserMapper;
+import cn.cangjiecloud.user.mapper.UserRoleMapper;
+import cn.cangjiecloud.user.mapper.RoleMenuMapper;
+import cn.cangjiecloud.user.mapper.MenuMapper;
 import cn.cangjiecloud.user.service.IUserService;
+import java.util.List;
+import java.util.ArrayList;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -30,6 +39,9 @@ import java.util.Map;
 public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> implements IUserService {
 
     private final SystemProperties systemProperties;
+    private final UserRoleMapper userRoleMapper;
+    private final RoleMenuMapper roleMenuMapper;
+    private final MenuMapper menuMapper;
     private static final PasswordEncoder PASSWORD_ENCODER = new BCryptPasswordEncoder();
 
     @Override
@@ -46,9 +58,18 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
         if (!PASSWORD_ENCODER.matches(dto.getPassword(), user.getPassword())) {
             throw new ApiException("用户名或密码错误");
         }
+        // 查询并缓存用户权限
+        List<String> permissions = getPermissionsByUserId(user.getId());
+        List<String> roles = getRolesByUserId(user.getId());
+        List<MenuVO> menus = getMenusByUserId(user.getId());
+
         UserIdentity identity = buildIdentity(user);
+        identity.setPermissions(permissions);
+        identity.setMenus(menus);
+
         UserContext.setUserId(user.getId());
         UserContext.setIdentity(identity);
+
         Map<String, Object> result = new HashMap<>();
         result.put("token", StpUtil.getTokenValue());
         result.put("tokenName", StpUtil.getTokenName());
@@ -77,6 +98,86 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
     @Override
     public UserEntity getByUsername(String username) {
         return getOne(new LambdaQueryWrapper<UserEntity>().eq(UserEntity::getUsername, username));
+    }
+
+    @Override
+    public List<String> getPermissionsByUserId(String userId) {
+        List<UserRoleEntity> userRoles = userRoleMapper.selectList(
+            new LambdaQueryWrapper<UserRoleEntity>()
+                .eq(UserRoleEntity::getUserId, userId)
+                .eq(UserRoleEntity::getDeleted, 0)
+        );
+        if (userRoles.isEmpty()) return List.of();
+        List<String> roleIds = userRoles.stream().map(UserRoleEntity::getRoleId).toList();
+        List<RoleMenuEntity> roleMenus = roleMenuMapper.selectList(
+            new LambdaQueryWrapper<RoleMenuEntity>()
+                .in(RoleMenuEntity::getRoleId, roleIds)
+                .eq(RoleMenuEntity::getDeleted, 0)
+        );
+        if (roleMenus.isEmpty()) return List.of();
+        List<String> menuIds = roleMenus.stream().map(RoleMenuEntity::getMenuId).distinct().toList();
+        List<MenuEntity> menus = menuMapper.selectList(
+            new LambdaQueryWrapper<MenuEntity>()
+                .in(MenuEntity::getId, menuIds)
+                .eq(MenuEntity::getDeleted, 0)
+        );
+        return menus.stream()
+            .filter(m -> "button".equals(m.getType()))
+            .map(MenuEntity::getCode)
+            .filter(java.util.Objects::nonNull)
+            .toList();
+    }
+
+    @Override
+    public List<String> getRolesByUserId(String userId) {
+        List<UserRoleEntity> userRoles = userRoleMapper.selectList(
+            new LambdaQueryWrapper<UserRoleEntity>()
+                .eq(UserRoleEntity::getUserId, userId)
+                .eq(UserRoleEntity::getDeleted, 0)
+        );
+        return userRoles.stream()
+            .map(UserRoleEntity::getRoleId)
+            .toList();
+    }
+
+    @Override
+    public List<MenuVO> getMenusByUserId(String userId) {
+        List<UserRoleEntity> userRoles = userRoleMapper.selectList(
+            new LambdaQueryWrapper<UserRoleEntity>()
+                .eq(UserRoleEntity::getUserId, userId)
+                .eq(UserRoleEntity::getDeleted, 0)
+        );
+        if (userRoles.isEmpty()) return List.of();
+        List<String> roleIds = userRoles.stream().map(UserRoleEntity::getRoleId).toList();
+        List<RoleMenuEntity> roleMenus = roleMenuMapper.selectList(
+            new LambdaQueryWrapper<RoleMenuEntity>()
+                .in(RoleMenuEntity::getRoleId, roleIds)
+                .eq(RoleMenuEntity::getDeleted, 0)
+        );
+        if (roleMenus.isEmpty()) return List.of();
+        List<String> menuIds = roleMenus.stream().map(RoleMenuEntity::getMenuId).distinct().toList();
+        List<MenuEntity> menus = menuMapper.selectList(
+            new LambdaQueryWrapper<MenuEntity>()
+                .in(MenuEntity::getId, menuIds)
+                .eq(MenuEntity::getDeleted, 0)
+                .orderByAsc(MenuEntity::getSort)
+        );
+        return menus.stream()
+            .sorted(java.util.Comparator.comparing(MenuEntity::getSort,
+                java.util.Comparator.nullsFirst(java.util.Comparator.naturalOrder())))
+            .map(m -> {
+                MenuVO vo = new MenuVO();
+                vo.setId(m.getId());
+                vo.setName(m.getName());
+                vo.setPath(m.getPath());
+                vo.setComponent(m.getComponent());
+                vo.setIcon(m.getIcon());
+                vo.setType(m.getType());
+                vo.setStatus(m.getStatus());
+                vo.setSort(m.getSort());
+                return vo;
+            })
+            .toList();
     }
 
     private UserIdentity buildIdentity(UserEntity user) {

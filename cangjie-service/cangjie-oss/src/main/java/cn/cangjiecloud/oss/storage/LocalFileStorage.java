@@ -94,4 +94,10 @@ public class LocalFileStorage implements FileStorage {
     public String getType() {
         return "local";
     }
+
+    @Override
+    public String getUrl(String filePath) {
+        // 本地存储无公网 URL，由 FileServiceImpl 回退到 /file/{id} 下载接口
+        return null;
+    }
 }

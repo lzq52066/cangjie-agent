@@ -58,36 +58,106 @@
 import { computed, markRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@admin/store/user'
+import type { MenuNode } from '@shared/types'
 import { ElMessageBox } from 'element-plus'
+import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import {
   DataBoard, Connection, Files, Tools, EditPen,
-  Share, DataLine, VideoPlay, Histogram, Folder, Setting, ArrowDown
+  Share, DataLine, VideoPlay, Histogram, Folder, Setting, ArrowDown, UserFilled, Menu
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const activeMenu = computed(() => {
-  // 子路由映射到父菜单（如 /knowledge/:id → /knowledge）
+  if (route.path.startsWith('/system/role')) return '/system/role'
+  if (route.path.startsWith('/system/menu')) return '/system/menu'
   const segments = route.path.split('/').filter(Boolean)
   return '/' + (segments[0] || 'dashboard')
 })
 const user = computed(() => userStore.userInfo)
 const nickname = computed(() => user.value?.nickname?.slice(0, 1) || 'U')
 
-const menus = [
-  { path: '/dashboard',     title: '工作台',     icon: markRaw(DataBoard) },
-  { path: '/model',         title: '模型管理',   icon: markRaw(Connection) },
-  { path: '/knowledge',     title: '知识库',     icon: markRaw(Files) },
-  { path: '/tool',          title: '工具插件',   icon: markRaw(Tools) },
-  { path: '/prompt',        title: '提示词/Skill', icon: markRaw(EditPen) },
-  { path: '/workflow',      title: '工作流',     icon: markRaw(Share) },
-  { path: '/application',   title: '智能应用',   icon: markRaw(VideoPlay) },
-  { path: '/channel',       title: '渠道接入',   icon: markRaw(DataLine) },
-  { path: '/observability', title: '可观测性',   icon: markRaw(Histogram) },
-  { path: '/file',          title: '文件管理',   icon: markRaw(Folder) },
-  { path: '/system',        title: '系统设置',   icon: markRaw(Setting) }
-]
+function buildMenuTree(items: MenuNode[]): MenuNode[] {
+  const map = new Map<string, MenuNode>()
+  const roots: MenuNode[] = []
+  for (const item of items) {
+    map.set(item.id, { ...item, children: [] })
+  }
+  for (const item of items) {
+    const node = map.get(item.id)!
+    const pid = item.parentId
+    if (pid && map.has(pid)) {
+      const parent = map.get(pid)!
+      parent.children = parent.children || []
+      parent.children.push(node)
+    } else {
+      roots.push(node)
+    }
+  }
+  roots.sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+  for (const root of roots) {
+    root.children = root.children || []
+    root.children.sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+    pruneEmpty(root)
+  }
+  return roots
+}
+
+function pruneEmpty(node: MenuNode) {
+  if (node.children && node.children.length === 0) {
+    delete node.children
+  } else if (node.children) {
+    for (const child of node.children!) pruneEmpty(child)
+  }
+}
+
+const iconMap: Record<string, any> = {}
+for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
+  iconMap[key] = component
+}
+
+function getIcon(name?: string) {
+  return name && iconMap[name] ? markRaw(iconMap[name]) : markRaw(Menu)
+}
+
+function getDefaultMenus() {
+  return [
+    { path: '/dashboard', title: '工作台', icon: markRaw(DataBoard) },
+    { path: '/model', title: '模型管理', icon: markRaw(Connection) },
+    { path: '/knowledge', title: '知识库', icon: markRaw(Files) },
+    { path: '/tool', title: '工具插件', icon: markRaw(Tools) },
+    { path: '/prompt', title: '提示词/Skill', icon: markRaw(EditPen) },
+    { path: '/workflow', title: '工作流', icon: markRaw(Share) },
+    { path: '/application', title: '智能应用', icon: markRaw(VideoPlay) },
+    { path: '/channel', title: '渠道接入', icon: markRaw(DataLine) },
+    { path: '/observability', title: '可观测性', icon: markRaw(Histogram) },
+    { path: '/file', title: '文件管理', icon: markRaw(Folder) },
+    { path: '/system/role', title: '角色管理', icon: markRaw(UserFilled) },
+    { path: '/system/menu', title: '菜单管理', icon: markRaw(Menu) },
+    { path: '/system', title: '系统设置', icon: markRaw(Setting) }
+  ]
+}
+
+const menus = computed(() => {
+  const items = userStore.menus || []
+  if (items.length === 0) return getDefaultMenus()
+  const tree = buildMenuTree(items)
+  const flat: MenuNode[] = []
+  function flatten(nodes: MenuNode[]) {
+    for (const node of nodes) {
+      flat.push(node)
+      if (node.children) flatten(node.children)
+    }
+  }
+  flatten(tree)
+  if (flat.length === 0) return getDefaultMenus()
+  return flat.map(item => ({
+    path: item.path || '/',
+    title: item.name,
+    icon: getIcon(item.icon),
+  }))
+})
 
 async function handleCmd(cmd: string) {
   if (cmd === 'logout') {
