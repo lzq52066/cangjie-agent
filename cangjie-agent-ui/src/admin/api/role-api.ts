@@ -1,25 +1,19 @@
 import { request } from '@shared/api/http'
 import type { PageQuery, PageResult } from '@shared/types'
 
-/** 角色状态：1-激活 0-停用 */
-export const ROLE_STATUS = {
-  ACTIVE: 1,
-  INACTIVE: 0
-} as const
-
 export interface Role {
   id: string
-  roleName: string
-  roleCode: string
+  name: string
+  code: string
   description?: string
-  status: number
+  status: string
   createTime?: string
   updateTime?: string
 }
 
 export interface RoleQuery extends PageQuery {
-  roleName?: string
-  roleCode?: string
+  keyword?: string
+  status?: string
 }
 
 export interface UserOption {
@@ -53,11 +47,11 @@ export const roleApi = {
   remove(id: string) {
     return request<void>({ method: 'DELETE', url: `/role/${id}` })
   },
-  assignUsers(roleId: string, userIds: string[]) {
-    return request<void>({ method: 'PUT', url: `/role/${roleId}/users`, data: { userIds } })
+  assignUsers(userIds: string[], roleId: string) {
+    return request<void>({ method: 'POST', url: '/role/assignUsers', data: { roleId, userIds } })
   },
-  assignMenus(roleId: string, menuIds: string[]) {
-    return request<void>({ method: 'PUT', url: `/role/${roleId}/menus`, data: { menuIds } })
+  assignMenus(menuIds: string[], roleId: string) {
+    return request<void>({ method: 'POST', url: '/menu/assignMenus', data: { roleId, menuIds } })
   },
   userOptions(keyword?: string) {
     return request<UserOption[]>({ method: 'GET', url: '/user/options', params: { keyword } })

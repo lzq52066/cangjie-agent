@@ -13,5 +13,6 @@ public class MenuVO {
     private String type;
     private String status;
     private Integer sort;
+    private String parentId;
     private List<MenuVO> children;
 }

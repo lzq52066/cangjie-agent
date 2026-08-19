@@ -12,12 +12,13 @@ export interface Menu {
   id: string
   parentId: string
   name: string
+  code?: string
   path?: string
+  component?: string
   icon?: string
   type: string
-  permission?: string
   sort: number
-  status: number
+  status: string
   children?: Menu[]
 }
 

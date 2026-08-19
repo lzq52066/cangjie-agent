@@ -9,6 +9,7 @@ import cn.cangjiecloud.user.entity.UserRoleEntity;
 import cn.cangjiecloud.user.mapper.RoleMapper;
 import cn.cangjiecloud.user.mapper.UserRoleMapper;
 import cn.cangjiecloud.user.service.IRoleService;
+import cn.cangjiecloud.user.service.PermissionQueryService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -29,6 +30,7 @@ public class RoleServiceImpl extends ServiceImpl<RoleMapper, RoleEntity>
         implements IRoleService {
 
     private final UserRoleMapper userRoleMapper;
+    private final PermissionQueryService permissionQueryService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -73,6 +75,7 @@ public class RoleServiceImpl extends ServiceImpl<RoleMapper, RoleEntity>
         userRoleMapper.delete(new LambdaQueryWrapper<UserRoleEntity>()
                 .eq(UserRoleEntity::getRoleId, id));
         removeById(id);
+        permissionQueryService.evictAll();
         log.info("角色已删除: {} ({})", entity.getName(), id);
     }
 
@@ -121,6 +124,7 @@ public class RoleServiceImpl extends ServiceImpl<RoleMapper, RoleEntity>
             ur.setRoleId(dto.getRoleId());
             userRoleMapper.insert(ur);
         }
+        permissionQueryService.evictAll();
         log.info("角色 {} 已重新分配 {} 个用户", dto.getRoleId(), dto.getUserIds().size());
     }
 }

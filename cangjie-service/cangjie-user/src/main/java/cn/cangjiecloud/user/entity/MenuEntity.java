@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import cn.cangjiecloud.common.mp.base.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import java.util.List;
 
 /**
  * 菜单/权限实体
@@ -42,4 +43,8 @@ public class MenuEntity extends BaseEntity {
 
     /** 状态：active / inactive */
     private String status;
+
+    /** 子菜单列表（非数据库字段，用于构建树形结构） */
+    @TableField(exist = false)
+    private List<MenuEntity> children;
 }

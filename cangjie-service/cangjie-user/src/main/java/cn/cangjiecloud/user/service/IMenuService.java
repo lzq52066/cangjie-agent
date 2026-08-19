@@ -36,4 +36,9 @@ public interface IMenuService extends IService<MenuEntity> {
      * 给角色分配菜单
      */
     void assignMenusToRole(AssignMenuDTO dto);
+
+    /**
+     * 查询菜单树（所有菜单的树形结构）
+     */
+    List<MenuEntity> tree();
 }

@@ -16,10 +16,7 @@
         text-color="#e4e7ed"
         active-text-color="#67c23a"
       >
-        <el-menu-item v-for="item in menus" :key="item.path" :index="item.path">
-          <el-icon><component :is="item.icon" /></el-icon>
-          <span>{{ item.title }}</span>
-        </el-menu-item>
+        <MenuTreeNode v-for="item in menus" :key="item.id || item.path" :node="item" />
       </el-menu>
     </el-aside>
 
@@ -55,16 +52,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, markRaw } from 'vue'
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@admin/store/user'
 import type { MenuNode } from '@shared/types'
 import { ElMessageBox } from 'element-plus'
-import * as ElementPlusIconsVue from '@element-plus/icons-vue'
-import {
-  DataBoard, Connection, Files, Tools, EditPen,
-  Share, DataLine, VideoPlay, Histogram, Folder, Setting, ArrowDown, UserFilled, Menu
-} from '@element-plus/icons-vue'
+import { ArrowDown, UserFilled } from '@element-plus/icons-vue'
+import MenuTreeNode from './MenuTreeNode.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -112,51 +106,29 @@ function pruneEmpty(node: MenuNode) {
   }
 }
 
-const iconMap: Record<string, any> = {}
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
-  iconMap[key] = component
-}
-
-function getIcon(name?: string) {
-  return name && iconMap[name] ? markRaw(iconMap[name]) : markRaw(Menu)
-}
-
-function getDefaultMenus() {
+function getDefaultMenus(): MenuNode[] {
   return [
-    { path: '/dashboard', title: '工作台', icon: markRaw(DataBoard) },
-    { path: '/model', title: '模型管理', icon: markRaw(Connection) },
-    { path: '/knowledge', title: '知识库', icon: markRaw(Files) },
-    { path: '/tool', title: '工具插件', icon: markRaw(Tools) },
-    { path: '/prompt', title: '提示词/Skill', icon: markRaw(EditPen) },
-    { path: '/workflow', title: '工作流', icon: markRaw(Share) },
-    { path: '/application', title: '智能应用', icon: markRaw(VideoPlay) },
-    { path: '/channel', title: '渠道接入', icon: markRaw(DataLine) },
-    { path: '/observability', title: '可观测性', icon: markRaw(Histogram) },
-    { path: '/file', title: '文件管理', icon: markRaw(Folder) },
-    { path: '/system/role', title: '角色管理', icon: markRaw(UserFilled) },
-    { path: '/system/menu', title: '菜单管理', icon: markRaw(Menu) },
-    { path: '/system', title: '系统设置', icon: markRaw(Setting) }
+    { id: '/dashboard', name: '工作台', path: '/dashboard', icon: 'DataBoard' },
+    { id: '/model', name: '模型管理', path: '/model', icon: 'Connection' },
+    { id: '/knowledge', name: '知识库', path: '/knowledge', icon: 'Files' },
+    { id: '/tool', name: '工具插件', path: '/tool', icon: 'Tools' },
+    { id: '/prompt', name: '提示词/Skill', path: '/prompt', icon: 'EditPen' },
+    { id: '/workflow', name: '工作流', path: '/workflow', icon: 'Share' },
+    { id: '/application', name: '智能应用', path: '/application', icon: 'VideoPlay' },
+    { id: '/channel', name: '渠道接入', path: '/channel', icon: 'DataLine' },
+    { id: '/observability', name: '可观测性', path: '/observability', icon: 'Histogram' },
+    { id: '/file', name: '文件管理', path: '/file', icon: 'Folder' },
+    { id: '/system/role', name: '角色管理', path: '/system/role', icon: 'UserFilled' },
+    { id: '/system/menu', name: '菜单管理', path: '/system/menu', icon: 'Menu' },
+    { id: '/system', name: '系统设置', path: '/system', icon: 'Setting' }
   ]
 }
 
 const menus = computed(() => {
   const items = userStore.menus || []
   if (items.length === 0) return getDefaultMenus()
-  const tree = buildMenuTree(items)
-  const flat: MenuNode[] = []
-  function flatten(nodes: MenuNode[]) {
-    for (const node of nodes) {
-      flat.push(node)
-      if (node.children) flatten(node.children)
-    }
-  }
-  flatten(tree)
-  if (flat.length === 0) return getDefaultMenus()
-  return flat.map(item => ({
-    path: item.path || '/',
-    title: item.name,
-    icon: getIcon(item.icon),
-  }))
+  const tree = buildMenuTree(items.filter(m => m.type !== 'button'))
+  return tree.length > 0 ? tree : getDefaultMenus()
 })
 
 async function handleCmd(cmd: string) {

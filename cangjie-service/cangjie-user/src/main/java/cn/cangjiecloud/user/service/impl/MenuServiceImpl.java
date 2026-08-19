@@ -8,6 +8,7 @@ import cn.cangjiecloud.user.entity.RoleMenuEntity;
 import cn.cangjiecloud.user.mapper.MenuMapper;
 import cn.cangjiecloud.user.mapper.RoleMenuMapper;
 import cn.cangjiecloud.user.service.IMenuService;
+import cn.cangjiecloud.user.service.PermissionQueryService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +17,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -26,6 +30,7 @@ public class MenuServiceImpl extends ServiceImpl<MenuMapper, MenuEntity>
         implements IMenuService {
 
     private final RoleMenuMapper roleMenuMapper;
+    private final PermissionQueryService permissionQueryService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -86,6 +91,7 @@ public class MenuServiceImpl extends ServiceImpl<MenuMapper, MenuEntity>
         roleMenuMapper.delete(new LambdaQueryWrapper<RoleMenuEntity>()
                 .eq(RoleMenuEntity::getMenuId, id));
         removeById(id);
+        permissionQueryService.evictAll();
         log.info("菜单已删除: {} ({})", entity.getName(), id);
     }
 
@@ -104,6 +110,30 @@ public class MenuServiceImpl extends ServiceImpl<MenuMapper, MenuEntity>
     }
 
     @Override
+    public List<MenuEntity> tree() {
+        List<MenuEntity> all = list(new LambdaQueryWrapper<MenuEntity>()
+                .eq(MenuEntity::getDeleted, 0));
+        Map<String, List<MenuEntity>> parentMap = all.stream()
+                .filter(m -> m.getParentId() != null)
+                .collect(Collectors.groupingBy(MenuEntity::getParentId));
+        List<MenuEntity> roots = new ArrayList<>();
+        for (MenuEntity m : all) {
+            if (m.getParentId() == null || m.getParentId().isEmpty()) {
+                roots.add(m);
+            }
+            List<MenuEntity> children = parentMap.get(m.getId());
+            if (children != null) {
+                children.sort(Comparator.comparing(MenuEntity::getSort,
+                        Comparator.nullsFirst(Comparator.naturalOrder())));
+                m.setChildren(children);
+            }
+        }
+        roots.sort(Comparator.comparing(MenuEntity::getSort,
+                Comparator.nullsFirst(Comparator.naturalOrder())));
+        return roots;
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public void assignMenusToRole(AssignMenuDTO dto) {
         if (dto.getRoleId() == null || dto.getMenuIds() == null || dto.getMenuIds().isEmpty()) {
@@ -119,6 +149,7 @@ public class MenuServiceImpl extends ServiceImpl<MenuMapper, MenuEntity>
             rm.setRoleId(dto.getRoleId());
             roleMenuMapper.insert(rm);
         }
+        permissionQueryService.evictAll();
         log.info("角色 {} 已重新分配 {} 个菜单", dto.getRoleId(), dto.getMenuIds().size());
     }
 }

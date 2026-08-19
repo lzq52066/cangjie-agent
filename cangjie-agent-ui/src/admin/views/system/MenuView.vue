@@ -17,12 +17,14 @@
 
       <el-table :data="treeData" row-key="id" border stripe default-expand-all :tree-props="{ children: 'children' }">
         <el-table-column label="菜单名称" prop="name" min-width="180" />
+        <el-table-column label="权限标识" prop="code" min-width="140" show-overflow-tooltip />
         <el-table-column label="类型" width="100" align="center">
           <template #default="{ row }">
             <el-tag size="small" :type="typeTag(row.type)">{{ typeLabel(row.type) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="路径" prop="path" min-width="180" show-overflow-tooltip />
+        <el-table-column label="组件" prop="component" min-width="140" show-overflow-tooltip />
         <el-table-column label="图标" width="80" align="center">
           <template #default="{ row }">
             <el-icon v-if="row.icon" :size="18"><component :is="row.icon" /></el-icon>
@@ -32,8 +34,8 @@
         <el-table-column label="排序" prop="sort" width="80" align="center" />
         <el-table-column label="状态" width="100" align="center">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.status === 1 ? 'success' : 'info'">
-              {{ row.status === 1 ? '激活' : '停用' }}
+            <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">
+              {{ row.status === 'active' ? '激活' : '停用' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -57,6 +59,9 @@
         <el-form-item label="菜单名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入菜单名称" />
         </el-form-item>
+        <el-form-item label="权限标识" prop="code">
+          <el-input v-model="form.code" placeholder="如 system:menu:add" />
+        </el-form-item>
         <el-form-item label="父菜单">
           <el-cascader
             v-model="form.parentId"
@@ -77,6 +82,9 @@
         <el-form-item label="路径">
           <el-input v-model="form.path" placeholder="如 /system/role" />
         </el-form-item>
+        <el-form-item label="组件">
+          <el-input v-model="form.component" placeholder="如 system/RoleView" />
+        </el-form-item>
         <el-form-item label="图标">
           <el-input v-model="form.icon" placeholder="图标名称（如 Setting）" />
         </el-form-item>
@@ -88,7 +96,7 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="状态">
-              <el-switch v-model="form.status" :active-value="1" :inactive-value="0" />
+              <el-switch v-model="form.status" active-value="active" inactive-value="inactive" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -119,11 +127,13 @@ const form = reactive({
   id: '',
   parentId: '',
   name: '',
+  code: '',
   type: 'menu',
   path: '',
+  component: '',
   icon: '',
   sort: 0,
-  status: 1
+  status: 'active'
 })
 
 const menuRules: FormRules = {
@@ -151,11 +161,13 @@ function openCreate(row?: any) {
     id: '',
     parentId: row ? row.id : '',
     name: '',
+    code: '',
     type: 'menu',
     path: '',
+    component: '',
     icon: '',
     sort: 0,
-    status: 1
+    status: 'active'
   })
   showDialog.value = true
 }
@@ -166,8 +178,10 @@ function openEdit(row: any) {
     id: row.id,
     parentId: row.parentId || '',
     name: row.name,
+    code: row.code || '',
     type: row.type,
     path: row.path || '',
+    component: row.component || '',
     icon: row.icon || '',
     sort: row.sort ?? 0,
     status: row.status

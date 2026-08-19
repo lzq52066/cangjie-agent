@@ -4,9 +4,7 @@
       <template #header>
         <div class="card-header">
           <div class="header-left">
-            <el-input v-model="searchForm.roleName" placeholder="角色名称" clearable style="width: 180px"
-                      @clear="loadList" @keyup.enter="loadList" />
-            <el-input v-model="searchForm.roleCode" placeholder="角色编码" clearable style="width: 180px"
+            <el-input v-model="searchForm.keyword" placeholder="角色名称/编码" clearable style="width: 220px"
                       @clear="loadList" @keyup.enter="loadList" />
             <el-button @click="loadList">搜索</el-button>
           </div>
@@ -17,27 +15,34 @@
       </template>
 
       <el-table :data="list" v-loading="loading" stripe border>
-        <el-table-column label="角色名称" prop="roleName" min-width="150" />
-        <el-table-column label="角色编码" prop="roleCode" min-width="150" />
+        <el-table-column label="角色名称" prop="name" min-width="150" />
+        <el-table-column label="角色编码" prop="code" min-width="150" />
         <el-table-column label="描述" prop="description" min-width="200" show-overflow-tooltip />
         <el-table-column label="状态" width="100" align="center">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.status === 1 ? 'success' : 'info'">
-              {{ row.status === 1 ? '激活' : '停用' }}
+            <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">
+              {{ row.status === 'active' ? '激活' : '停用' }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="创建时间" prop="createTime" width="180" />
         <el-table-column label="操作" width="320" fixed="right" align="center">
           <template #default="{ row }">
-            <el-button size="small" link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button size="small" link type="success" @click="openAssignUsers(row)">分配用户</el-button>
-            <el-button size="small" link type="warning" @click="openAssignMenus(row)">分配菜单</el-button>
-            <el-popconfirm title="确定删除该角色？" @confirm="handleDelete(row)">
-              <template #reference>
-                <el-button size="small" link type="danger">删除</el-button>
-              </template>
-            </el-popconfirm>
+            <template v-if="row.code === 'ADMIN'">
+              <el-tooltip content="系统管理员角色，不允许修改">
+                <span class="admin-role-tag">系统角色</span>
+              </el-tooltip>
+            </template>
+            <template v-else>
+              <el-button size="small" link type="primary" @click="openEdit(row)">编辑</el-button>
+              <el-button size="small" link type="success" @click="openAssignUsers(row)">分配用户</el-button>
+              <el-button size="small" link type="warning" @click="openAssignMenus(row)">分配菜单</el-button>
+              <el-popconfirm title="确定删除该角色？" @confirm="handleDelete(row)">
+                <template #reference>
+                  <el-button size="small" link type="danger">删除</el-button>
+                </template>
+              </el-popconfirm>
+            </template>
           </template>
         </el-table-column>
       </el-table>
@@ -58,17 +63,17 @@
     <!-- 创建/编辑对话框 -->
     <el-dialog v-model="showDialog" :title="editing ? '编辑角色' : '新增角色'" width="520px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
-        <el-form-item label="角色名称" prop="roleName">
-          <el-input v-model="form.roleName" placeholder="请输入角色名称" />
+        <el-form-item label="角色名称" prop="name">
+          <el-input v-model="form.name" placeholder="请输入角色名称" />
         </el-form-item>
-        <el-form-item label="角色编码" prop="roleCode">
-          <el-input v-model="form.roleCode" placeholder="请输入角色编码" :disabled="editing" />
+        <el-form-item label="角色编码" prop="code">
+          <el-input v-model="form.code" placeholder="请输入角色编码" :disabled="editing" />
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" :rows="2" />
         </el-form-item>
         <el-form-item label="状态">
-          <el-switch v-model="form.status" :active-value="1" :inactive-value="0" />
+          <el-switch v-model="form.status" active-value="active" inactive-value="inactive" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -133,18 +138,18 @@ const loading = ref(false)
 const total = ref(0)
 const page = ref(1)
 const size = ref(10)
-const searchForm = reactive({ roleName: '', roleCode: '' })
+const searchForm = reactive({ keyword: '' })
 
 // 表单
 const showDialog = ref(false)
 const editing = ref(false)
 const saving = ref(false)
 const formRef = ref<FormInstance>()
-const form = reactive({ id: '', roleName: '', roleCode: '', description: '', status: 1 })
+const form = reactive({ id: '', name: '', code: '', description: '', status: 'active' })
 
 const rules: FormRules = {
-  roleName: [{ required: true, message: '请输入角色名称', trigger: 'blur' }],
-  roleCode: [{ required: true, message: '请输入角色编码', trigger: 'blur' }]
+  name: [{ required: true, message: '请输入角色名称', trigger: 'blur' }],
+  code: [{ required: true, message: '请输入角色编码', trigger: 'blur' }]
 }
 
 // 分配用户
@@ -176,7 +181,7 @@ async function loadList() {
 
 function openCreate() {
   editing.value = false
-  Object.assign(form, { id: '', roleName: '', roleCode: '', description: '', status: 1 })
+  Object.assign(form, { id: '', name: '', code: '', description: '', status: 'active' })
   showDialog.value = true
 }
 
@@ -184,8 +189,8 @@ function openEdit(row: any) {
   editing.value = true
   Object.assign(form, {
     id: row.id,
-    roleName: row.roleName,
-    roleCode: row.roleCode,
+    name: row.name,
+    code: row.code,
     description: row.description || '',
     status: row.status
   })
@@ -240,7 +245,7 @@ function handleUserSelectionChange(selection: any[]) {
 async function handleAssignUsers() {
   userSaving.value = true
   try {
-    await roleApi.assignUsers(currentRoleIdForUser.value, selectedUserIds.value)
+    await roleApi.assignUsers(selectedUserIds.value, currentRoleIdForUser.value)
     ElMessage.success('分配用户成功')
     userDialog.value = false
     loadList()
@@ -261,7 +266,7 @@ async function handleAssignMenus() {
   menuSaving.value = true
   try {
     const keys = menuTreeRef.value?.getCheckedKeys() || []
-    await roleApi.assignMenus(currentRoleIdForMenu.value, keys)
+    await roleApi.assignMenus(keys, currentRoleIdForMenu.value)
     ElMessage.success('分配菜单成功')
     menuDialog.value = false
     loadList()
@@ -278,4 +283,5 @@ onMounted(loadList)
 .header-left { display: flex; gap: 12px; }
 .pagination { margin-top: 16px; display: flex; justify-content: flex-end; }
 .user-select-area { padding: 4px 0; }
+.admin-role-tag { color: var(--el-color-info); font-size: 13px; cursor: default; }
 </style>
