@@ -5,6 +5,8 @@ import cn.cangjiecloud.common.mp.base.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.time.LocalDateTime;
+
 /**
  * 长期记忆（用户 + 应用维度的画像信息）
  */
@@ -35,7 +37,7 @@ public class LongTermMemoryEntity extends BaseEntity {
     private Integer triggerCount;
 
     /** 最后触发时间 */
-    private String lastTriggeredAt;
+    private LocalDateTime lastTriggeredAt;
 
     /** 是否激活 */
     private Boolean isActive;

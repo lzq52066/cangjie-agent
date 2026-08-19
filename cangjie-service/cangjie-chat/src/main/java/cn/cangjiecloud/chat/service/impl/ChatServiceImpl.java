@@ -122,7 +122,7 @@ public class ChatServiceImpl implements IChatService {
     }
 
     @Override
-    public void chatStream(ChatRequestDTO request, SseEmitter emitter, boolean openAiFormat) {
+    public void chatStream(ChatRequestDTO request, SseEmitter emitter, boolean openAiFormat, String userId) {
         String traceId = UUID.randomUUID().toString().replace("-", "");
         long chatStart = System.currentTimeMillis();
 
@@ -137,7 +137,7 @@ public class ChatServiceImpl implements IChatService {
 
             // 注入长期记忆（如有）
             List<ChatMessage> messages = new ArrayList<>(context.messages());
-            injectLongTermMemory(request, messages);
+            injectLongTermMemory(request, messages, userId);
 
             // 保存用户消息到数据库
             ChatMessageEntity userMessage = saveUserMessage(session, application, request.getMessage());
@@ -188,7 +188,28 @@ public class ChatServiceImpl implements IChatService {
             } else {
                 // 内部 SSE 格式
                 try {
+                    Map<String, Object> initPayload = new HashMap<>();
+                    initPayload.put("sessionId", session.getSessionId());
+                    initPayload.put("sources", retrievalSources);
+                    emitter.send(SseEmitter.event().name("init").data(initPayload));
+                } catch (IOException ex) {
+                    log.warn("SSE init 事件推送失败: {}", ex.getMessage());
+                }
+                try {
                     chunkStream.forEach(chunk -> {
+                        if (chunk.getError() != null) {
+                            // 模型流式调用异常
+                            try {
+                                Map<String, Object> errorPayload = new HashMap<>();
+                                errorPayload.put("delta", "");
+                                errorPayload.put("done", true);
+                                errorPayload.put("error", chunk.getError());
+                                emitter.send(SseEmitter.event().name("error").data(errorPayload));
+                            } catch (IOException e) {
+                                log.warn("SSE 错误推送失败: {}", e.getMessage());
+                            }
+                            return;
+                        }
                         if (chunk.getDelta() != null) {
                             fullContent.append(chunk.getDelta());
                             try {
@@ -216,7 +237,6 @@ public class ChatServiceImpl implements IChatService {
                     } catch (IOException ex) {
                         log.warn("SSE 错误推送失败: {}", ex.getMessage());
                     }
-                    throw new ApiException("流式对话失败: " + e.getMessage());
                 }
             }
 
@@ -240,7 +260,7 @@ public class ChatServiceImpl implements IChatService {
 
             // 异步触发长期记忆提取
             longTermMemoryExtractService.extract(
-                    UserContext.getUserId(), application, userMessage, aiMessage);
+                    userId, application, userMessage, aiMessage);
 
             // 非 OpenAI 格式下发送完成事件
             if (!openAiFormat) {
@@ -569,8 +589,11 @@ public class ChatServiceImpl implements IChatService {
      * 注入长期记忆到消息列表（在 system prompt 后追加用户画像上下文）
      */
     private void injectLongTermMemory(ChatRequestDTO request, List<ChatMessage> messages) {
+        injectLongTermMemory(request, messages, UserContext.getUserId());
+    }
+
+    private void injectLongTermMemory(ChatRequestDTO request, List<ChatMessage> messages, String userId) {
         try {
-            String userId = UserContext.getUserId();
             if (!StringUtils.hasText(userId)) {
                 return;
             }

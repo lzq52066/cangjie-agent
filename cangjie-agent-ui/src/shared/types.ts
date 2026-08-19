@@ -38,7 +38,6 @@ export interface UserIdentity {
   email: string
   phone: string
   role: string
-  tenantId: string
   workspaceId: string
   permissions?: string[]
   menus?: MenuNode[]

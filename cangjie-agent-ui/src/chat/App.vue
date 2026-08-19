@@ -298,23 +298,37 @@ async function send() {
   scroll()
   typing.value = true
   try {
-    const res = await chatApi.send(apikey.value, {
+    const stream = chatApi.sendStream(apikey.value, {
       applicationId: applicationId.value,
       message: text,
       sessionId: sessionId.value || undefined
     })
-    if (res?.sessionId) sessionId.value = res.sessionId
-    messages.value.push({
-      role: 'assistant',
-      content: res?.message || '（无回复内容）',
-      sources: parseSources(res?.retrievalSources),
-      _sourcesCollapsed: true,
-      tokens: res?.tokens,
-      duration: res?.duration
-    })
+    let assistantMsg: Msg | null = null
+    let pendingSources: any[] | null = null
+    for await (const { event, data: chunk } of stream) {
+      if (event === 'init') {
+        if (chunk?.sessionId) sessionId.value = chunk.sessionId
+        if (chunk?.sources) pendingSources = chunk.sources
+        continue
+      }
+      if (event === 'done' || event === 'error') {
+        if (chunk?.error && assistantMsg) assistantMsg.content += chunk.error
+        break
+      }
+      if (event === 'message' && chunk) {
+        if (!assistantMsg) {
+          assistantMsg = { role: 'assistant', content: '', _sourcesCollapsed: true, sources: pendingSources || undefined }
+          messages.value.push(assistantMsg)
+        }
+        if (chunk.delta) assistantMsg.content += chunk.delta
+      }
+      scroll()
+    }
     loadSessions()
   } catch (e: any) {
-    messages.value.push({ role: 'assistant', content: '回复失败：' + (e?.message || '请稍后重试') })
+    if (!messages.value.some(m => m.role === 'assistant' && m.content)) {
+      messages.value.push({ role: 'assistant', content: '回复失败：' + (e?.message || '请稍后重试') })
+    }
   } finally {
     typing.value = false
     scroll()

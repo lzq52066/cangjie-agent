@@ -59,5 +59,59 @@ export const chatApi = {
       url: `/sessions/${sessionId}/delete`,
       headers: withKey(apikey)
     })
+  },
+  sendStream(
+    apikey: string,
+    data: { applicationId: string; message: string; sessionId?: string }
+  ): AsyncIterable<{ event: string; data: any }> {
+    return (async function* () {
+      const res = await fetch('/api/chat/send-stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': apikey
+        },
+        body: JSON.stringify(data)
+      })
+      if (!res.ok) {
+        const txt = await res.text()
+        throw new Error(txt || `HTTP ${res.status}`)
+      }
+      const reader = (res.body as ReadableStream<Uint8Array>).getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        let idx
+        while ((idx = buffer.indexOf('\n\n')) !== -1) {
+          const raw = buffer.slice(0, idx).trim()
+          buffer = buffer.slice(idx + 2)
+          if (!raw) continue
+
+          // 解析 SSE 字段：event:xxx / data:xxx
+          let eventName = 'message'
+          let dataStr = ''
+          for (const line of raw.split('\n')) {
+            if (line.startsWith('event:')) {
+              eventName = line.slice(6).trim() || 'message'
+            } else if (line.startsWith('data:')) {
+              dataStr = line.slice(5).trim()
+            }
+          }
+          if (!dataStr) continue
+          if (eventName === 'message' && dataStr === '[DONE]') return
+
+          let parsed: any = dataStr
+          try {
+            parsed = JSON.parse(dataStr)
+          } catch {
+            // keep raw string
+          }
+          yield { event: eventName, data: parsed }
+        }
+      }
+    })()
   }
 }

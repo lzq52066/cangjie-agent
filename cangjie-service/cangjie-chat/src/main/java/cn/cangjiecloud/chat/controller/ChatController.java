@@ -12,6 +12,7 @@ import cn.cangjiecloud.chat.service.IChatService;
 import cn.cangjiecloud.chat.service.IChatSessionService;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.context.UserContext;
 import cn.cangjiecloud.common.exception.ApiException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -20,6 +21,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.concurrent.Executor;
 
 /**
  * 对话开放接口：通过应用 API Key 鉴权，不要求 Sa-Token 登录。
@@ -33,6 +35,7 @@ public class ChatController {
     private final IChatSessionService chatSessionService;
     private final IChatMessageService chatMessageService;
     private final IApplicationService applicationService;
+    private final Executor chatExecutor;
 
     private static final String API_KEY_HEADER = "X-API-Key";
 
@@ -44,11 +47,15 @@ public class ChatController {
     }
 
     @PostMapping("/send-stream")
-    public void sendStream(@Valid @RequestBody ChatRequestDTO request,
-                           HttpServletRequest httpRequest,
-                           org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter) {
+    public org.springframework.web.servlet.mvc.method.annotation.SseEmitter sendStream(
+            @Valid @RequestBody ChatRequestDTO request,
+            HttpServletRequest httpRequest) {
         validateApikey(httpRequest, request.getApplicationId());
-        chatService.chatStream(request, emitter, false);
+        String userId = UserContext.getUserId();
+        org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter =
+                new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(600_000L);
+        chatExecutor.execute(() -> chatService.chatStream(request, emitter, false, userId));
+        return emitter;
     }
 
     /**

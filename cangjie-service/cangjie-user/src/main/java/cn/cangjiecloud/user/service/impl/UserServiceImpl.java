@@ -101,7 +101,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
                 .email(user.getEmail())
                 .phone(user.getPhone())
                 .role(user.getRole())
-                .tenantId(user.getTenantId() == null ? AppConst.DEFAULT_TENANT_ID : user.getTenantId())
                 .workspaceId(AppConst.Workspace.DEFAULT_WORKSPACE_ID)
                 .build();
     }
@@ -109,7 +108,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
     private void ensureDefaultAdminExists() {
         long count = count(new LambdaQueryWrapper<UserEntity>().eq(UserEntity::getUsername, systemProperties.getDefaultUsername()));
         if (count > 0) return;
-        String tenantId = AppConst.DEFAULT_TENANT_ID;
         UserEntity admin = new UserEntity();
         admin.setUsername(systemProperties.getDefaultUsername());
         admin.setPassword(PASSWORD_ENCODER.encode(systemProperties.getDefaultPassword()));
@@ -120,7 +118,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
         admin.setIsActive(true);
         admin.setSource("LOCAL");
         admin.setLanguage("zh_CN");
-        admin.setTenantId(tenantId);
         admin.setCreateBy("system");
         admin.setUpdateBy("system");
         admin.setCreateTime(LocalDateTime.now());
@@ -131,7 +128,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
         UserRoleEntity userRole = new UserRoleEntity();
         userRole.setUserId(admin.getId());
         userRole.setRoleId("role_admin");
-        userRole.setTenantId(tenantId);
         userRole.setCreateBy("system");
         userRole.setUpdateBy("system");
         userRoleMapper.insert(userRole);

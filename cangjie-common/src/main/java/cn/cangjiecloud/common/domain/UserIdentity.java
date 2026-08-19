@@ -19,7 +19,6 @@ public class UserIdentity implements Serializable {
     private String email;
     private String phone;
     private String role;
-    private String tenantId;
     private String workspaceId;
     /** 权限码列表（按钮级权限） */
     private List<String> permissions;

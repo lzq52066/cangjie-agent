@@ -22,4 +22,7 @@ public class ChatChunk {
 
     /** 完成原因（done=true 时有值） */
     private String finishReason;
+
+    /** 错误信息（发生异常时设置） */
+    private String error;
 }

@@ -9,8 +9,6 @@ public interface AppConst {
     String CHAT_PATH = "/chat";
     String ADMIN_PATH = "/admin";
 
-    String DEFAULT_TENANT_ID = "default";
-
     String DEFAULT_USERNAME = "admin";
     String DEFAULT_EMAIL = "admin@cangjiecloud.cn";
     String DEFAULT_PHONE = "18800000000";

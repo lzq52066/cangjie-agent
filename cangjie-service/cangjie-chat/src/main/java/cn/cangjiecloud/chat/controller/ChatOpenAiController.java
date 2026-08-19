@@ -7,6 +7,7 @@ import cn.cangjiecloud.application.api.dto.ChatResponseDTO;
 import cn.cangjiecloud.application.entity.ApplicationEntity;
 import cn.cangjiecloud.application.service.IApplicationService;
 import cn.cangjiecloud.chat.service.IChatService;
+import cn.cangjiecloud.common.context.UserContext;
 import cn.cangjiecloud.common.exception.ApiException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -24,6 +25,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 
 /**
  * OpenAI 兼容 API 控制器
@@ -38,6 +40,7 @@ public class ChatOpenAiController {
 
     private final IChatService chatService;
     private final IApplicationService applicationService;
+    private final Executor chatExecutor;
 
     private static final String AUTH_HEADER = "Authorization";
     private static final String BEARER_PREFIX = "Bearer ";
@@ -48,13 +51,14 @@ public class ChatOpenAiController {
                                   HttpServletResponse httpResponse) {
         ApplicationEntity application = authenticate(httpRequest);
         ChatRequestDTO internalRequest = toInternalRequest(request, application);
+        String userId = UserContext.getUserId();
 
         if (Boolean.TRUE.equals(request.getStream())) {
             // 流式模式：返回 SSE
             httpResponse.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
             httpResponse.setCharacterEncoding("UTF-8");
             SseEmitter emitter = new SseEmitter(5 * 60 * 1000L);
-            chatService.chatStream(internalRequest, emitter, true);
+            chatExecutor.execute(() -> chatService.chatStream(internalRequest, emitter, true, userId));
             return emitter;
         }
 

@@ -32,7 +32,4 @@ public abstract class BaseEntity implements Serializable {
     @TableField(fill = FieldFill.INSERT)
     @JsonIgnore
     private Integer deleted;
-
-    @TableField(fill = FieldFill.INSERT)
-    private String tenantId;
 }
