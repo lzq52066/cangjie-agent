@@ -32,5 +32,16 @@ export const observabilityApi = {
     pageSize?: number
   }) {
     return request<PageResult<any>>({ method: 'GET', url: '/observability/traces', params })
+  },
+  /** LLM 调用追踪分页 */
+  llmTraces(params: {
+    traceId?: string
+    appName?: string
+    modelName?: string
+    status?: string
+    pageNum?: number
+    pageSize?: number
+  }) {
+    return request<PageResult<any>>({ method: 'GET', url: '/observability/llm-traces', params })
   }
 }

@@ -14,6 +14,7 @@
         <el-tab-pane label="操作日志" name="logs" />
         <el-tab-pane label="系统指标" name="metrics" />
         <el-tab-pane label="调用追踪" name="traces" />
+        <el-tab-pane label="LLM 调用" name="llm-traces" />
       </el-tabs>
 
       <!-- 操作日志 -->
@@ -30,7 +31,7 @@
           </div>
           <el-button @click="refresh"><el-icon><Refresh /></el-icon> 刷新面板</el-button>
         </div>
-        <el-table :data="logs" v-loading="loading" stripe>
+        <el-table :data="operationLogs" v-loading="loading" stripe>
           <el-table-column label="时间" prop="createTime" width="170" />
           <el-table-column label="模块" prop="module" width="120" />
           <el-table-column label="操作" prop="action" width="130" />
@@ -72,7 +73,7 @@
             <el-icon><Odometer /></el-icon> 立即采集
           </el-button>
         </div>
-        <el-table :data="metrics" v-loading="loading" stripe>
+        <el-table :data="systemMetrics" v-loading="loading" stripe>
           <el-table-column label="采集时间" prop="collectTime" width="180" />
           <el-table-column label="类型" prop="metricType" width="140" />
           <el-table-column label="指标名" prop="metricName" min-width="200" />
@@ -85,7 +86,7 @@
       </template>
 
       <!-- 调用追踪 -->
-      <template v-else>
+      <template v-else-if="activeTab === 'traces'">
         <div class="toolbar">
           <div class="toolbar-left">
             <el-input v-model="traceQuery.traceId" placeholder="TraceId" clearable style="width:220px"
@@ -97,7 +98,7 @@
             <el-button type="primary" @click="loadTraces">查询</el-button>
           </div>
         </div>
-        <el-table :data="traces" v-loading="loading" stripe>
+        <el-table :data="callTraces" v-loading="loading" stripe>
           <el-table-column label="开始时间" width="180">
             <template #default="{ row }">{{ formatTime(row.startTime) }}</template>
           </el-table-column>
@@ -120,6 +121,46 @@
             </template>
           </el-table-column>
           <el-table-column label="信息" prop="message" min-width="200" show-overflow-tooltip />
+        </el-table>
+      </template>
+
+      <!-- LLM 调用追踪 -->
+      <template v-else-if="activeTab === 'llm-traces'">
+        <div class="toolbar">
+          <div class="toolbar-left">
+            <el-input v-model="llmTraceQuery.traceId" placeholder="TraceId" clearable style="width:200px"
+                      @keyup.enter="loadLlmTraces" />
+            <el-input v-model="llmTraceQuery.appName" placeholder="应用名称" clearable style="width:150px"
+                      @keyup.enter="loadLlmTraces" />
+            <el-input v-model="llmTraceQuery.modelName" placeholder="模型名称" clearable style="width:150px"
+                      @keyup.enter="loadLlmTraces" />
+            <el-select v-model="llmTraceQuery.status" placeholder="全部状态" clearable style="width:120px" @change="loadLlmTraces">
+              <el-option label="成功" value="success" />
+              <el-option label="失败" value="fail" />
+            </el-select>
+            <el-button type="primary" @click="loadLlmTraces">查询</el-button>
+          </div>
+        </div>
+        <el-table :data="llmTraces" v-loading="loading" stripe>
+          <el-table-column label="开始时间" width="170">
+            <template #default="{ row }">{{ formatTime(row.startTime) }}</template>
+          </el-table-column>
+          <el-table-column label="TraceId" prop="traceId" min-width="200" show-overflow-tooltip />
+          <el-table-column label="应用名称" prop="appName" min-width="140" />
+          <el-table-column label="模型" prop="modelName" min-width="120" />
+          <el-table-column label="输入Token" prop="inputTokens" width="110" align="center" />
+          <el-table-column label="输出Token" prop="outputTokens" width="110" align="center" />
+          <el-table-column label="总Token" prop="totalTokens" width="100" align="center" />
+          <el-table-column label="耗时" width="100" align="center">
+            <template #default="{ row }">{{ row.duration != null ? row.duration + ' ms' : '-' }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="90" align="center">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.status === 'success' ? 'success' : 'danger'">
+                {{ row.status === 'success' ? '成功' : '失败' }}
+              </el-tag>
+            </template>
+          </el-table-column>
         </el-table>
       </template>
 
@@ -159,7 +200,7 @@ import { observabilityApi } from '@admin/api/observability-api'
 
 const metricTypes = ['jvm', 'system', 'business']
 
-const activeTab = ref<'logs' | 'metrics' | 'traces'>('logs')
+const activeTab = ref<'logs' | 'metrics' | 'traces' | 'llm-traces'>('logs')
 const loading = ref(false)
 const collecting = ref(false)
 const pageNum = ref(1)
@@ -176,12 +217,14 @@ const stats = computed(() => [
   { key: 'trace', label: '调用追踪', value: dashboard.value.todayTraceCount ?? 0, unit: '条', color: '#7c4dff' }
 ])
 
-const logs = ref<any[]>([])
+const operationLogs = ref<any[]>([])
 const logQuery = reactive({ module: '', action: '', status: '' })
-const metrics = ref<any[]>([])
+const systemMetrics = ref<any[]>([])
 const metricQuery = reactive({ metricType: '' })
-const traces = ref<any[]>([])
+const callTraces = ref<any[]>([])
 const traceQuery = reactive({ traceId: '', module: '', action: '' })
+const llmTraces = ref<any[]>([])
+const llmTraceQuery = reactive({ traceId: '', appName: '', modelName: '', status: '' })
 
 function formatNumber(value: any) {
   const num = Number(value)
@@ -219,7 +262,7 @@ async function loadLogs() {
   loading.value = true
   try {
     const page = await observabilityApi.logs({ ...logQuery, pageNum: pageNum.value, pageSize: pageSize.value })
-    logs.value = page?.records || []
+    operationLogs.value = page?.records || []
     total.value = page?.total || 0
   } finally {
     loading.value = false
@@ -230,7 +273,7 @@ async function loadMetrics() {
   loading.value = true
   try {
     const page = await observabilityApi.metrics({ ...metricQuery, pageNum: pageNum.value, pageSize: pageSize.value })
-    metrics.value = page?.records || []
+    systemMetrics.value = page?.records || []
     total.value = page?.total || 0
   } finally {
     loading.value = false
@@ -241,7 +284,18 @@ async function loadTraces() {
   loading.value = true
   try {
     const page = await observabilityApi.traces({ ...traceQuery, pageNum: pageNum.value, pageSize: pageSize.value })
-    traces.value = page?.records || []
+    callTraces.value = page?.records || []
+    total.value = page?.total || 0
+  } finally {
+    loading.value = false
+  }
+}
+
+async function loadLlmTraces() {
+  loading.value = true
+  try {
+    const page = await observabilityApi.llmTraces({ ...llmTraceQuery, pageNum: pageNum.value, pageSize: pageSize.value })
+    llmTraces.value = page?.records || []
     total.value = page?.total || 0
   } finally {
     loading.value = false
@@ -251,6 +305,7 @@ async function loadTraces() {
 function reload() {
   if (activeTab.value === 'logs') loadLogs()
   else if (activeTab.value === 'metrics') loadMetrics()
+  else if (activeTab.value === 'llm-traces') loadLlmTraces()
   else loadTraces()
 }
 

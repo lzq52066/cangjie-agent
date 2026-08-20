@@ -1,6 +1,6 @@
-package cn.cangjiecloud.chat.mapper;
+package cn.cangjiecloud.observability.mapper;
 
-import cn.cangjiecloud.chat.entity.LlmTraceEntity;
+import cn.cangjiecloud.observability.entity.LlmTraceEntity;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 
