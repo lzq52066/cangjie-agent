@@ -32,6 +32,9 @@ public class ApplicationCreateDTO {
     /** 规则 ID 列表（JSON 数组） */
     private List<String> ruleIds;
 
+    /** 工具 ID 列表（JSON 数组） */
+    private List<String> toolIds;
+
     /** 是否启用记忆 */
     private Boolean memoryEnabled = false;
 

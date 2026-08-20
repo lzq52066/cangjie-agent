@@ -25,13 +25,22 @@ import cn.cangjiecloud.core.model.ChatResponse;
 import cn.cangjiecloud.core.observability.TraceCollector;
 import cn.cangjiecloud.core.rag.HybridRetriever;
 import cn.cangjiecloud.core.rag.RetrievalResult;
+import cn.cangjiecloud.core.tool.ToolSpecification;
 import cn.cangjiecloud.model.provider.OpenAICompatibleClient;
 import cn.cangjiecloud.model.entity.ModelEntity;
 import cn.cangjiecloud.model.service.IModelService;
 import cn.cangjiecloud.prompt.entity.LongTermMemoryEntity;
 import cn.cangjiecloud.prompt.entity.PromptTemplateEntity;
+import cn.cangjiecloud.prompt.entity.RuleEntity;
+import cn.cangjiecloud.prompt.entity.SkillEntity;
 import cn.cangjiecloud.prompt.service.ILongTermMemoryService;
 import cn.cangjiecloud.prompt.service.IPromptTemplateService;
+import cn.cangjiecloud.prompt.service.IRuleService;
+import cn.cangjiecloud.prompt.service.ISkillService;
+import cn.cangjiecloud.tool.service.IToolService;
+import cn.cangjiecloud.workflow.entity.WorkflowEntity;
+import cn.cangjiecloud.workflow.entity.WorkflowExecutionEntity;
+import cn.cangjiecloud.workflow.service.IWorkflowService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -69,6 +78,10 @@ public class ChatServiceImpl implements IChatService {
     private final ILongTermMemoryService longTermMemoryService;
     private final LongTermMemoryExtractService longTermMemoryExtractService;
     private final ILlmTraceService llmTraceService;
+    private final IToolService toolService;
+    private final ISkillService skillService;
+    private final IRuleService ruleService;
+    private final IWorkflowService workflowService;
 
     @Autowired(required = false)
     private TraceCollector traceCollector;
@@ -86,7 +99,13 @@ public class ChatServiceImpl implements IChatService {
         ChatSessionEntity session = getOrCreateSession(request, application);
         List<Map<String, Object>> retrievalSources = new ArrayList<>();
 
-        // 构建上下文（历史消息）
+        // === 工作流路由 ===
+        // 如果应用类型是 workflow，走工作流执行
+        if ("workflow".equals(application.getType())) {
+            return routeToWorkflow(application, session, request, retrievalSources);
+        }
+
+        // 构建上下文（历史消息 + 知识库检索 + 技能 + 规则）
         Context context = buildContext(application, session.getSessionId(), request.getMessage(),
                 retrievalSources, traceId, request.getMessages());
 
@@ -140,7 +159,32 @@ public class ChatServiceImpl implements IChatService {
             ChatSessionEntity session = getOrCreateSession(request, application);
             List<Map<String, Object>> retrievalSources = new ArrayList<>();
 
-            // 构建上下文（历史消息）
+            // === 工作流路由 ===
+            if ("workflow".equals(application.getType())) {
+                ChatResponseDTO wfResult = routeToWorkflow(application, session, request, retrievalSources);
+                // 以 SSE 形式推送工作流结果
+                try {
+                    if (openAiFormat) {
+                        String json = buildOpenAiChunk("chatcmpl-" + traceId,
+                                getModelName(application.getModelId()), System.currentTimeMillis() / 1000,
+                                wfResult.getMessage(), "stop");
+                        emitter.send(SseEmitter.event().name("message").data(json));
+                        emitter.send(SseEmitter.event().name("message").data("[DONE]"));
+                    } else {
+                        emitter.send(SseEmitter.event().name("init")
+                                .data(Map.of("sessionId", session.getSessionId(), "sources", retrievalSources)));
+                        emitter.send(SseEmitter.event().name("message")
+                                .data(Map.of("delta", wfResult.getMessage(), "done", true)));
+                        emitter.send(SseEmitter.event().name("done")
+                                .data(Map.of("delta", "", "done", true, "finishReason", "stop")));
+                    }
+                } catch (IOException e) {
+                    log.warn("工作流 SSE 推送失败: {}", e.getMessage());
+                }
+                return;
+            }
+
+            // 构建上下文（历史消息 + 技能 + 规则）
             Context context = buildContext(application, session.getSessionId(), request.getMessage(),
                     retrievalSources, traceId, request.getMessages());
 
@@ -504,6 +548,62 @@ public class ChatServiceImpl implements IChatService {
             systemPrompt.append(application.getDescription());
         }
 
+        // === 注入技能 Skill 到 system prompt ===
+        List<String> skillIds = parseStringList(application.getSkillIds());
+        if (!skillIds.isEmpty()) {
+            try {
+                List<SkillEntity> skills = skillService.listByIds(skillIds).stream()
+                        .filter(s -> "active".equals(s.getStatus()))
+                        .toList();
+                if (!skills.isEmpty()) {
+                    systemPrompt.append("\n\n").append("【技能指令】以下是你可以使用的技能：\n\n");
+                    for (SkillEntity skill : skills) {
+                        systemPrompt.append("技能：").append(skill.getName()).append("\n");
+                        if (StringUtils.hasText(skill.getDescription())) {
+                            systemPrompt.append("描述：").append(skill.getDescription()).append("\n");
+                        }
+                        if (StringUtils.hasText(skill.getContent())) {
+                            systemPrompt.append("指令：").append(skill.getContent()).append("\n");
+                        }
+                        systemPrompt.append("\n");
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("加载技能失败: {}", e.getMessage());
+            }
+        }
+
+        // === 注入规则 Rule 到 system prompt ===
+        List<String> ruleIds = parseStringList(application.getRuleIds());
+        if (!ruleIds.isEmpty()) {
+            try {
+                List<RuleEntity> rules = ruleService.listByIds(ruleIds).stream()
+                        .filter(r -> "active".equals(r.getStatus()))
+                        .toList();
+                if (!rules.isEmpty()) {
+                    systemPrompt.append("\n\n").append("【行为规则】请严格遵守以下规则：\n\n");
+                    for (RuleEntity rule : rules) {
+                        systemPrompt.append("- ").append(rule.getName());
+                        if (StringUtils.hasText(rule.getDescription())) {
+                            systemPrompt.append("：").append(rule.getDescription());
+                        }
+                        if (StringUtils.hasText(rule.getCondition())) {
+                            systemPrompt.append("（当 ").append(rule.getCondition()).append(" 时");
+                        }
+                        if (StringUtils.hasText(rule.getAction())) {
+                            systemPrompt.append("，执行：").append(rule.getAction());
+                        }
+                        if (StringUtils.hasText(rule.getCondition())) {
+                            systemPrompt.append("）");
+                        }
+                        systemPrompt.append("\n");
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("加载规则失败: {}", e.getMessage());
+            }
+        }
+
         // 构建消息列表
         List<ChatMessage> messages = new ArrayList<>();
         if (StringUtils.hasText(systemPrompt)) {
@@ -553,36 +653,85 @@ public class ChatServiceImpl implements IChatService {
     private ChatResponse callModel(ApplicationEntity application, String sessionId, String userId,
                                    List<ChatMessage> messages, String traceId) {
         OpenAICompatibleClient client = getClient(application);
-        ChatRequest chatRequest = ChatRequest.builder()
-                .messages(messages)
-                .temperature(application.getTemperature() != null ? application.getTemperature() : 0.7)
-                .build();
-        long llmStart = System.currentTimeMillis();
         String modelName = getModelName(application.getModelId());
-        try {
-            ChatResponse response = client.chat(chatRequest);
-            if (traceCollector != null) {
-                recordTrace("chat", "llm_call", traceId,
-                        System.currentTimeMillis() - llmStart, "success",
-                        "模型: " + modelName + ", tokens: " + response.getTotalTokens());
+        long llmStart = System.currentTimeMillis();
+
+        // === 构建工具列表（Function Calling） ===
+        List<String> toolIds = parseStringList(application.getToolIds());
+        List<ToolSpecification> toolSpecs = toolIds.isEmpty()
+                ? List.of()
+                : toolService.getToolSpecifications(toolIds);
+        List<Map<String, Object>> tools = buildToolDefinitions(toolSpecs);
+
+        // 多轮 function calling 循环
+        int maxRounds = 5;
+        ChatResponse response = null;
+        List<ChatMessage> conversation = new ArrayList<>(messages);
+
+        for (int round = 0; round < maxRounds; round++) {
+            ChatRequest chatRequest = ChatRequest.builder()
+                    .messages(conversation)
+                    .temperature(application.getTemperature() != null ? application.getTemperature() : 0.7)
+                    .tools(tools)
+                    .toolChoice(tools.isEmpty() ? "none" : "auto")
+                    .build();
+
+            try {
+                response = client.chat(chatRequest);
+            } catch (Exception e) {
+                if (traceCollector != null) {
+                    recordTrace("chat", "llm_call", traceId,
+                            System.currentTimeMillis() - llmStart, "fail",
+                            "模型调用失败: " + e.getMessage());
+                }
+                recordLlmTrace(application, sessionId, userId, traceId, "chatcmpl-" + traceId, modelName,
+                        conversation, null, null, null, null, null,
+                        System.currentTimeMillis() - llmStart, "fail", e.getMessage(), llmStart);
+                log.error("模型调用失败: app={}, model={}", application.getName(), application.getModelId(), e);
+                throw new ApiException("模型调用失败: " + e.getMessage());
             }
+
+            // 检查是否有 tool calls
+            if (response.getToolCalls() != null && !response.getToolCalls().isEmpty() && !tools.isEmpty()) {
+                // 添加 assistant 消息（含 tool calls）
+                conversation.add(ChatMessage.assistant(response.getContent() != null ? response.getContent() : ""));
+
+                for (ChatResponse.ToolCall tc : response.getToolCalls()) {
+                    Map<String, Object> args;
+                    try {
+                        args = com.alibaba.fastjson.JSON.parseObject(tc.getArguments());
+                    } catch (Exception e) {
+                        args = Map.of();
+                    }
+                    String toolResult = toolService.executeToolCall(tc.getName(), args);
+                    // 添加 tool 结果消息
+                    conversation.add(new ChatMessage("tool",
+                            "工具调用结果(" + tc.getName() + "): " + toolResult));
+                    log.info("Function Calling 执行: {} -> args={}, result={}",
+                            tc.getName(), tc.getArguments(),
+                            toolResult != null && toolResult.length() > 200
+                                    ? toolResult.substring(0, 200) + "..." : toolResult);
+                }
+                // 继续下一轮
+                continue;
+            }
+
+            // 没有 tool calls，结束
+            break;
+        }
+
+        if (traceCollector != null) {
+            recordTrace("chat", "llm_call", traceId,
+                    System.currentTimeMillis() - llmStart, "success",
+                    "模型: " + modelName + ", tokens: " + (response != null ? response.getTotalTokens() : 0));
+        }
+        if (response != null) {
             recordLlmTrace(application, sessionId, userId, traceId, "chatcmpl-" + traceId, modelName,
-                    messages, (long) response.getPromptTokens(), (long) response.getCompletionTokens(),
+                    conversation, (long) response.getPromptTokens(), (long) response.getCompletionTokens(),
                     (long) response.getTotalTokens(), response.getContent(), response.getFinishReason(),
                     System.currentTimeMillis() - llmStart, "success", null, llmStart);
-            return response;
-        } catch (Exception e) {
-            if (traceCollector != null) {
-                recordTrace("chat", "llm_call", traceId,
-                        System.currentTimeMillis() - llmStart, "fail",
-                        "模型调用失败: " + e.getMessage());
-            }
-            recordLlmTrace(application, sessionId, userId, traceId, "chatcmpl-" + traceId, modelName,
-                    messages, null, null, null, null, null,
-                    System.currentTimeMillis() - llmStart, "fail", e.getMessage(), llmStart);
-            log.error("模型调用失败: app={}, model={}", application.getName(), application.getModelId(), e);
-            throw new ApiException("模型调用失败: " + e.getMessage());
         }
+        return response;
     }
 
     private void recordLlmTrace(ApplicationEntity application, String sessionId, String userId,
@@ -621,9 +770,19 @@ public class ChatServiceImpl implements IChatService {
                                                List<ChatMessage> messages,
                                                String traceId) {
         OpenAICompatibleClient client = getClient(application);
+
+        // 构建工具列表（Function Calling）
+        List<String> toolIds = parseStringList(application.getToolIds());
+        List<ToolSpecification> toolSpecs = toolIds.isEmpty()
+                ? List.of()
+                : toolService.getToolSpecifications(toolIds);
+        List<Map<String, Object>> tools = buildToolDefinitions(toolSpecs);
+
         ChatRequest chatRequest = ChatRequest.builder()
                 .messages(messages)
                 .temperature(application.getTemperature() != null ? application.getTemperature() : 0.7)
+                .tools(tools)
+                .toolChoice(tools.isEmpty() ? "none" : "auto")
                 .build();
         return client.streamChat(chatRequest);
     }
@@ -754,5 +913,85 @@ public class ChatServiceImpl implements IChatService {
 
     private record Context(List<ChatMessage> messages,
                            List<Map<String, Object>> retrievalSources) {
+    }
+
+    // ========== Tool / Workflow Integration ==========
+
+    /**
+     * 构建 OpenAI 兼容的 tool definitions
+     */
+    private List<Map<String, Object>> buildToolDefinitions(List<ToolSpecification> toolSpecs) {
+        if (toolSpecs == null || toolSpecs.isEmpty()) return List.of();
+        return toolSpecs.stream().map(spec -> {
+            Map<String, Object> toolDef = new HashMap<>();
+            toolDef.put("type", "function");
+            Map<String, Object> function = new HashMap<>();
+            function.put("name", spec.getName());
+            function.put("description", spec.getDescription());
+            if (spec.getParameters() != null) {
+                function.put("parameters", spec.getParameters());
+            } else {
+                function.put("parameters", Map.of("type", "object", "properties", Map.of()));
+            }
+            toolDef.put("function", function);
+            return toolDef;
+        }).toList();
+    }
+
+    /**
+     * 路由到工作流执行
+     * <p>
+     * 对于 type = "workflow" 的应用，通过工作流引擎完成整个对话流程
+     */
+    private ChatResponseDTO routeToWorkflow(ApplicationEntity application, ChatSessionEntity session,
+                                            ChatRequestDTO request,
+                                            List<Map<String, Object>> retrievalSources) {
+        // 查找关联工作流
+        WorkflowEntity wf = workflowService.getByApplicationId(application.getId());
+        if (wf == null) {
+            throw new ApiException("应用关联的工作流不存在");
+        }
+
+        // 保存用户消息
+        ChatMessageEntity userMessage = saveUserMessage(session, application, request.getMessage());
+
+        // 构建工作流输入
+        Map<String, Object> wfInputs = new HashMap<>();
+        wfInputs.put("message", request.getMessage());
+        wfInputs.put("userId", UserContext.getUserId());
+        wfInputs.put("applicationId", application.getId());
+        wfInputs.put("sessionId", session.getSessionId());
+
+        long start = System.currentTimeMillis();
+        WorkflowExecutionEntity execution = workflowService.execute(wf.getId(), wfInputs);
+        long duration = System.currentTimeMillis() - start;
+
+        // 从工作流输出中提取最终结果
+        String resultContent = execution.getOutputs() != null ? execution.getOutputs() : "";
+        if (!"completed".equals(execution.getStatus())) {
+            resultContent = "工作流执行失败: " + (execution.getErrorMessage() != null ? execution.getErrorMessage() : "未知错误");
+        }
+
+        // 保存 AI 回复
+        ChatResponse chatResponse = ChatResponse.builder()
+                .content(resultContent)
+                .totalTokens(0)
+                .build();
+        ChatMessageEntity aiMessage = saveAiMessage(session, application, chatResponse, retrievalSources, duration);
+        updateSessionStats(session, aiMessage);
+
+        log.info("工作流执行完成: app={}, workflow={}, status={}, duration={}ms",
+                application.getName(), wf.getName(), execution.getStatus(), duration);
+
+        return ChatResponseDTO.builder()
+                .sessionId(session.getSessionId())
+                .message(resultContent)
+                .role("assistant")
+                .retrievalSources(retrievalSources)
+                .tokens(0)
+                .promptTokens(0)
+                .completionTokens(0)
+                .duration(duration)
+                .build();
     }
 }

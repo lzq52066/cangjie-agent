@@ -16,19 +16,22 @@ public class ToolEntity extends BaseEntity {
     /** 工具描述 */
     private String description;
 
-    /** 工具类型：tool / function / api */
+    /** 工具类型：tool / function / api（旧版兼容） */
     private String type;
+
+    /** 工具子类型：HTTP / CUSTOM / MCP / SKILL / PLUGIN（新版策略分发用） */
+    private String toolType;
 
     /** 函数名（function calling 用） */
     private String functionName;
 
-    /** 参数定义（JSON） */
+    /** 参数定义（JSON Schema，用于 function calling） */
     private String parameters;
 
-    /** 实现类全限定类名 */
+    /** 实现类全限定类名（PLUGIN 类型使用） */
     private String implementation;
 
-    /** 配置（JSON） */
+    /** 工具代码/脚本内容（CUSTOM 类型）或配置（JSON） */
     private String config;
 
     /** 状态：active / inactive */

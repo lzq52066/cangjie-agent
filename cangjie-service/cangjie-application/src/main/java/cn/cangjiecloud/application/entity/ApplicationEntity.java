@@ -37,6 +37,9 @@ public class ApplicationEntity extends BaseEntity {
     /** 规则 ID 列表（JSON 数组） */
     private String ruleIds;
 
+    /** 工具 ID 列表（JSON 数组） */
+    private String toolIds;
+
     /** 是否启用记忆 */
     private Boolean memoryEnabled;
 

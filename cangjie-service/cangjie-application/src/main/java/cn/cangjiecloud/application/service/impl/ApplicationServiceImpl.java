@@ -33,6 +33,7 @@ public class ApplicationServiceImpl extends ServiceImpl<ApplicationMapper, Appli
         entity.setPromptTemplateId(dto.getPromptTemplateId());
         entity.setSkillIds(toJson(dto.getSkillIds()));
         entity.setRuleIds(toJson(dto.getRuleIds()));
+        entity.setToolIds(toJson(dto.getToolIds()));
         entity.setMemoryEnabled(dto.getMemoryEnabled() != null ? dto.getMemoryEnabled() : false);
         entity.setMaxTurns(dto.getMaxTurns() != null ? dto.getMaxTurns() : 20);
         entity.setTemperature(dto.getTemperature() != null ? dto.getTemperature() : 0.7);
@@ -60,6 +61,7 @@ public class ApplicationServiceImpl extends ServiceImpl<ApplicationMapper, Appli
         if (StringUtils.hasText(dto.getPromptTemplateId())) entity.setPromptTemplateId(dto.getPromptTemplateId());
         if (dto.getSkillIds() != null) entity.setSkillIds(toJson(dto.getSkillIds()));
         if (dto.getRuleIds() != null) entity.setRuleIds(toJson(dto.getRuleIds()));
+        if (dto.getToolIds() != null) entity.setToolIds(toJson(dto.getToolIds()));
         if (dto.getMemoryEnabled() != null) entity.setMemoryEnabled(dto.getMemoryEnabled());
         if (dto.getMaxTurns() != null) entity.setMaxTurns(dto.getMaxTurns());
         if (dto.getTemperature() != null) entity.setTemperature(dto.getTemperature());

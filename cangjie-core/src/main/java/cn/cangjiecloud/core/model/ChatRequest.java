@@ -39,4 +39,10 @@ public class ChatRequest {
 
     /** 额外参数（各模型特有） */
     private java.util.Map<String, Object> extra;
+
+    /** 工具列表（Function Calling） */
+    private java.util.List<java.util.Map<String, Object>> tools;
+
+    /** 工具选择策略：auto / none / required */
+    private String toolChoice;
 }
