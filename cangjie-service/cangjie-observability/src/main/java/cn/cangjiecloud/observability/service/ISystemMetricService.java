@@ -1,6 +1,6 @@
-package cn.cangjiecloud.oss.service;
+package cn.cangjiecloud.observability.service;
 
-import cn.cangjiecloud.oss.entity.SystemMetricEntity;
+import cn.cangjiecloud.observability.entity.SystemMetricEntity;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 

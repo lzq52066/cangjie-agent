@@ -1,8 +1,8 @@
-package cn.cangjiecloud.oss.service.impl;
+package cn.cangjiecloud.observability.service.impl;
 
-import cn.cangjiecloud.oss.entity.SystemMetricEntity;
-import cn.cangjiecloud.oss.mapper.SystemMetricMapper;
-import cn.cangjiecloud.oss.service.ISystemMetricService;
+import cn.cangjiecloud.observability.entity.SystemMetricEntity;
+import cn.cangjiecloud.observability.mapper.SystemMetricMapper;
+import cn.cangjiecloud.observability.service.ISystemMetricService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;

@@ -1,4 +1,4 @@
-package cn.cangjiecloud.oss.api.dto;
+package cn.cangjiecloud.observability.dto;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Data;

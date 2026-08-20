@@ -1,6 +1,6 @@
-package cn.cangjiecloud.oss.service;
+package cn.cangjiecloud.observability.service;
 
-import cn.cangjiecloud.oss.entity.OperationLogEntity;
+import cn.cangjiecloud.observability.entity.OperationLogEntity;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 

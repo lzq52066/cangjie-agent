@@ -27,18 +27,6 @@ spring:
   sql:
     init:
       mode: never
-  data:
-    redis:
-      host: 47.97.122.98
-      port: 6379
-      password: xiaovcloud
-      timeout: 5000
-      lettuce:
-        pool:
-          max-active: 8
-          max-idle: 8
-          min-idle: 0
-          max-wait: -1ms
 
 mybatis-plus:
   global-config:

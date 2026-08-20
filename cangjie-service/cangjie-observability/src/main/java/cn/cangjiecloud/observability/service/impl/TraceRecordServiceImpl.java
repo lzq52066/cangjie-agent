@@ -1,9 +1,9 @@
-package cn.cangjiecloud.oss.service.impl;
+package cn.cangjiecloud.observability.service.impl;
 
-import cn.cangjiecloud.oss.api.dto.TraceQueryDTO;
-import cn.cangjiecloud.oss.entity.TraceRecordEntity;
-import cn.cangjiecloud.oss.mapper.TraceRecordMapper;
-import cn.cangjiecloud.oss.service.ITraceRecordService;
+import cn.cangjiecloud.observability.dto.TraceQueryDTO;
+import cn.cangjiecloud.observability.entity.TraceRecordEntity;
+import cn.cangjiecloud.observability.mapper.TraceRecordMapper;
+import cn.cangjiecloud.observability.service.ITraceRecordService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;

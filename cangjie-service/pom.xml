@@ -20,6 +20,7 @@
         <module>cangjie-application</module>
         <module>cangjie-workflow</module>
         <module>cangjie-trigger</module>
+        <module>cangjie-observability</module>
         <module>cangjie-oss</module>
         <module>cangjie-system</module>
         <module>cangjie-chat</module>

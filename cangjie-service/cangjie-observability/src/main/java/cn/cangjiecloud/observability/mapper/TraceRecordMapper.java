@@ -1,6 +1,6 @@
-package cn.cangjiecloud.oss.mapper;
+package cn.cangjiecloud.observability.mapper;
 
-import cn.cangjiecloud.oss.entity.TraceRecordEntity;
+import cn.cangjiecloud.observability.entity.TraceRecordEntity;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 

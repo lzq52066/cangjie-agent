@@ -1,14 +1,14 @@
-package cn.cangjiecloud.oss.controller;
+package cn.cangjiecloud.observability.controller;
 
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
-import cn.cangjiecloud.oss.api.dto.TraceQueryDTO;
-import cn.cangjiecloud.oss.entity.OperationLogEntity;
-import cn.cangjiecloud.oss.entity.SystemMetricEntity;
-import cn.cangjiecloud.oss.entity.TraceRecordEntity;
-import cn.cangjiecloud.oss.service.IOperationLogService;
-import cn.cangjiecloud.oss.service.ISystemMetricService;
-import cn.cangjiecloud.oss.service.ITraceRecordService;
+import cn.cangjiecloud.observability.dto.TraceQueryDTO;
+import cn.cangjiecloud.observability.entity.OperationLogEntity;
+import cn.cangjiecloud.observability.entity.SystemMetricEntity;
+import cn.cangjiecloud.observability.entity.TraceRecordEntity;
+import cn.cangjiecloud.observability.service.IOperationLogService;
+import cn.cangjiecloud.observability.service.ISystemMetricService;
+import cn.cangjiecloud.observability.service.ITraceRecordService;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;

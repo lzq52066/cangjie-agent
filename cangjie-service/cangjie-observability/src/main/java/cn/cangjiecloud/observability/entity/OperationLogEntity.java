@@ -1,4 +1,4 @@
-package cn.cangjiecloud.oss.entity;
+package cn.cangjiecloud.observability.entity;
 
 import cn.cangjiecloud.common.mp.base.BaseEntity;
 import com.baomidou.mybatisplus.annotation.TableName;

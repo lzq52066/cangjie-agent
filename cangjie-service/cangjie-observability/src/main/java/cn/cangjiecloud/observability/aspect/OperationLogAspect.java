@@ -1,10 +1,10 @@
-package cn.cangjiecloud.oss.aspect;
+package cn.cangjiecloud.observability.aspect;
 
 import cn.cangjiecloud.common.annotation.Sensitive;
 import cn.cangjiecloud.common.context.UserContext;
 import cn.cangjiecloud.common.domain.UserIdentity;
-import cn.cangjiecloud.oss.entity.OperationLogEntity;
-import cn.cangjiecloud.oss.service.IOperationLogService;
+import cn.cangjiecloud.observability.entity.OperationLogEntity;
+import cn.cangjiecloud.observability.service.IOperationLogService;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.serializer.ValueFilter;
 import lombok.RequiredArgsConstructor;

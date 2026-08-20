@@ -1,8 +1,8 @@
-package cn.cangjiecloud.oss.service.impl;
+package cn.cangjiecloud.observability.service.impl;
 
-import cn.cangjiecloud.oss.entity.OperationLogEntity;
-import cn.cangjiecloud.oss.mapper.OperationLogMapper;
-import cn.cangjiecloud.oss.service.IOperationLogService;
+import cn.cangjiecloud.observability.entity.OperationLogEntity;
+import cn.cangjiecloud.observability.mapper.OperationLogMapper;
+import cn.cangjiecloud.observability.service.IOperationLogService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
