@@ -156,9 +156,10 @@
           </el-table-column>
           <el-table-column label="状态" width="90" align="center">
             <template #default="{ row }">
-              <el-tag size="small" :type="row.status === 'success' ? 'success' : 'danger'">
-                {{ row.status === 'success' ? '成功' : '失败' }}
-              </el-tag>
+              <el-tooltip v-if="row.errorMessage" :content="row.errorMessage" placement="top">
+                <el-tag size="small" type="danger">失败</el-tag>
+              </el-tooltip>
+              <el-tag v-else size="small" type="success">成功</el-tag>
             </template>
           </el-table-column>
         </el-table>

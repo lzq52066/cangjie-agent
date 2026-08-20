@@ -6,6 +6,7 @@ import cn.cangjiecloud.core.rag.RetrievalResult;
 import cn.cangjiecloud.core.rag.VectorStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -14,8 +15,8 @@ import java.util.stream.Collectors;
 /**
  * 混合检索器实现
  * <p>
- * 同时执行向量相似度检索和全文检索，使用 RRF（Reciprocal Rank Fusion）算法融合排序。
- * RRF 公式：score(d) = Σ 1 / (k + rank_i(d))，其中 k 为平滑参数（默认60）。
+ * 同时执行向量相似度检索和全文检索，使用加权分数融合排序。
+ * 支持相似度阈值过滤和动态 topK（实际结果数不强制凑满）。
  */
 @Slf4j
 @Component
@@ -25,21 +26,29 @@ public class HybridRetrieverImpl implements HybridRetriever {
     private final VectorStore vectorStore;
     private final EmbeddingProvider embeddingProvider;
 
-    private static final int RRF_K = 60;
+    /** 加权融合中向量分数的权重（可配置：cangjie.retrieval.vector-weight） */
+    @Value("${cangjie.retrieval.vector-weight:0.7}")
+    private double vectorWeight;
+
+    /** 加权融合中全文检索分数的权重（可配置：cangjie.retrieval.fulltext-weight） */
+    @Value("${cangjie.retrieval.fulltext-weight:0.3}")
+    private double fullTextWeight;
+
+    /** 候选倍数，用于融合前各通道多取一些 */
     private static final int CANDIDATE_MULTIPLIER = 3;
 
     @Override
-    public List<RetrievalResult> retrieve(String query, String knowledgeBaseId, int topK) {
-        return retrieve(query, List.of(knowledgeBaseId), topK);
+    public List<RetrievalResult> retrieve(String query, String knowledgeBaseId, int topK, double similarityThreshold) {
+        return retrieve(query, List.of(knowledgeBaseId), topK, similarityThreshold);
     }
 
     @Override
-    public List<RetrievalResult> retrieve(String query, List<String> knowledgeBaseIds, int topK) {
+    public List<RetrievalResult> retrieve(String query, List<String> knowledgeBaseIds, int topK, double similarityThreshold) {
         if (query == null || query.isBlank() || knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()) {
             return Collections.emptyList();
         }
 
-        // 取更多的候选用于融合
+        // 各通道取更多候选用于融合
         int candidateK = topK * CANDIDATE_MULTIPLIER;
 
         // 1. 向量检索
@@ -63,56 +72,67 @@ public class HybridRetrieverImpl implements HybridRetriever {
             }
         }
 
-        // 3. RRF 融合
-        return rrfFusion(vectorResults, fullTextResults, topK);
+        // 3. 加权融合 + 阈值过滤 + 动态 topK
+        return weightedFusion(vectorResults, fullTextResults, topK, similarityThreshold);
     }
 
     /**
-     * RRF 融合算法
+     * 加权分数融合
+     * <p>
+     * 对每条结果计算：finalScore = vectorWeight * vectorScore + fullTextWeight * normalizedFullTextScore
+     * <ul>
+     *   <li>向量分数（cosine similarity）本身即为 [0,1]，无需归一化</li>
+     *   <li>全文分数（ts_rank）无上界，按批次最大值归一化到 [0,1]</li>
+     *   <li>不修改输入对象的 vectorScore / fullTextScore，仅写 finalScore</li>
+     * </ul>
      */
-    private List<RetrievalResult> rrfFusion(List<RetrievalResult> vectorResults,
-                                            List<RetrievalResult> fullTextResults,
-                                            int topK) {
-        Map<String, RetrievalResult> paragraphMap = new LinkedHashMap<>();
-        Map<String, Double> rrfScores = new HashMap<>();
+    private List<RetrievalResult> weightedFusion(List<RetrievalResult> vectorResults,
+                                                  List<RetrievalResult> fullTextResults,
+                                                  int topK,
+                                                  double similarityThreshold) {
+        // ---- 阶段 1: 按段落 ID 收集分数和来源对象 ----
+        Map<String, RetrievalResult> sourceMap = new LinkedHashMap<>();
+        Map<String, Double> vecScoreMap = new HashMap<>();
+        Map<String, Double> ftScoreMap = new HashMap<>();
 
-        // 向量检索结果按 vectorScore 降序排名
-        List<RetrievalResult> sortedVector = vectorResults.stream()
-                .sorted(Comparator.comparingDouble(RetrievalResult::getVectorScore).reversed())
-                .toList();
-        for (int i = 0; i < sortedVector.size(); i++) {
-            RetrievalResult r = sortedVector.get(i);
+        for (RetrievalResult r : vectorResults) {
             String key = r.getParagraphId();
-            paragraphMap.putIfAbsent(key, r);
-            double score = 1.0 / (RRF_K + i + 1);
-            rrfScores.merge(key, score, Double::sum);
+            sourceMap.putIfAbsent(key, r);
+            vecScoreMap.merge(key, r.getVectorScore(), Math::max);
+        }
+        for (RetrievalResult r : fullTextResults) {
+            String key = r.getParagraphId();
+            sourceMap.putIfAbsent(key, r);
+            ftScoreMap.merge(key, r.getFullTextScore(), Math::max);
         }
 
-        // 全文检索结果按 fullTextScore 降序排名
-        List<RetrievalResult> sortedFullText = fullTextResults.stream()
-                .sorted(Comparator.comparingDouble(RetrievalResult::getFullTextScore).reversed())
-                .toList();
-        for (int i = 0; i < sortedFullText.size(); i++) {
-            RetrievalResult r = sortedFullText.get(i);
-            String key = r.getParagraphId();
-            RetrievalResult existing = paragraphMap.get(key);
-            if (existing == null) {
-                paragraphMap.put(key, r);
-            } else {
-                // 合并：保留两者的最高分
-                existing.setFullTextScore(Math.max(existing.getFullTextScore(), r.getFullTextScore()));
-            }
-            double score = 1.0 / (RRF_K + i + 1);
-            rrfScores.merge(key, score, Double::sum);
+        // ---- 阶段 2: 全文检索分数归一化（ts_rank 无上界 → [0,1]） ----
+        double maxFT = ftScoreMap.values().stream()
+                .mapToDouble(Double::doubleValue)
+                .max().orElse(1.0);
+
+        // ---- 阶段 3: 计算加权融合分数（vecScore 已是 [0,1] 无需归一化） ----
+        Set<String> allIds = new LinkedHashSet<>();
+        allIds.addAll(vecScoreMap.keySet());
+        allIds.addAll(ftScoreMap.keySet());
+
+        Map<String, Double> finalScoreMap = new LinkedHashMap<>();
+        for (String id : allIds) {
+            double vec = vecScoreMap.getOrDefault(id, 0.0);
+            double ft = ftScoreMap.getOrDefault(id, 0.0);
+            double normalizedFT = maxFT > 0 ? ft / maxFT : 0;
+            finalScoreMap.put(id, vectorWeight * vec + fullTextWeight * normalizedFT);
         }
 
-        // 设置最终分数并排序
-        return rrfScores.entrySet().stream()
+        // ---- 阶段 4: 阈值过滤 + 动态 topK ----
+        return finalScoreMap.entrySet().stream()
+                .filter(e -> similarityThreshold <= 0 || e.getValue() >= similarityThreshold)
                 .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
                 .limit(topK)
                 .map(e -> {
-                    RetrievalResult r = paragraphMap.get(e.getKey());
+                    RetrievalResult r = sourceMap.get(e.getKey());
                     r.setFinalScore(e.getValue());
+                    // 不改写 vectorScore / fullTextScore，保留原始分数语义
                     return r;
                 })
                 .collect(Collectors.toList());

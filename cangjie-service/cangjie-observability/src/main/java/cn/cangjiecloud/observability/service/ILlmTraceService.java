@@ -1,5 +1,6 @@
 package cn.cangjiecloud.observability.service;
 
+import cn.cangjiecloud.observability.dto.LlmTraceQueryDTO;
 import cn.cangjiecloud.observability.entity.LlmTraceEntity;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;

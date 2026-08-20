@@ -25,4 +25,13 @@ public class ChatChunk {
 
     /** 错误信息（发生异常时设置） */
     private String error;
+
+    /** 输入 token 数（done=true 时有值） */
+    private Long inputTokens;
+
+    /** 输出 token 数（done=true 时有值） */
+    private Long outputTokens;
+
+    /** 总 token 数（done=true 时有值） */
+    private Long totalTokens;
 }

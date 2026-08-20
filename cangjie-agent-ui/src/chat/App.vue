@@ -328,7 +328,14 @@ async function send() {
         continue
       }
       if (event === 'done' || event === 'error') {
-        if (chunk?.error && assistantMsg) assistantMsg.content += chunk.error
+        if (chunk?.error) {
+          if (assistantMsg) {
+            assistantMsg.content += chunk.error
+          } else {
+            // 流未产生任何内容就报错（如余额不足），追加错误提示
+            messages.value.push({ role: 'assistant', content: '回复失败：' + chunk.error })
+          }
+        }
         break
       }
       if (event === 'message' && chunk) {

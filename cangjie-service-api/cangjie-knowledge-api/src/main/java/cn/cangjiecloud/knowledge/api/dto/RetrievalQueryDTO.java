@@ -14,12 +14,12 @@ public class RetrievalQueryDTO {
     /** 知识库 ID 列表（多库检索时使用） */
     private java.util.List<String> knowledgeBaseIds;
 
-    /** 返回数量 */
+    /** 返回数量上限 */
     private Integer topK = 5;
+
+    /** 相似度阈值，低于此值的结果将被过滤（0.0 表示不过滤） */
+    private Double similarityThreshold = 0.0;
 
     /** 是否启用全文检索 */
     private Boolean enableFullText = true;
-
-    /** RRF 参数 k（默认 60） */
-    private Integer rrfK = 60;
 }

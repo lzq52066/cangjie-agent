@@ -69,4 +69,5 @@ springdoc:
 logging:
   level:
     cn.cangjiecloud: debug
+    cn.cangjiecloud.observability.mapper.SystemMetricMapper: warn
     com.baomidou.mybatisplus: info

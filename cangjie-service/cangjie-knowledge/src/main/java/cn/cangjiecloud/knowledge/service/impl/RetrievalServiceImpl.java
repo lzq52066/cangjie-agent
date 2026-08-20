@@ -22,12 +22,13 @@ public class RetrievalServiceImpl implements IRetrievalService {
     @Override
     public List<RetrievalResultDTO> retrieve(RetrievalQueryDTO query) {
         int topK = query.getTopK() != null ? query.getTopK() : 5;
+        double similarityThreshold = query.getSimilarityThreshold() != null ? query.getSimilarityThreshold() : 0.0;
         List<RetrievalResult> results;
 
         if (query.getKnowledgeBaseIds() != null && !query.getKnowledgeBaseIds().isEmpty()) {
-            results = hybridRetriever.retrieve(query.getQuery(), query.getKnowledgeBaseIds(), topK);
+            results = hybridRetriever.retrieve(query.getQuery(), query.getKnowledgeBaseIds(), topK, similarityThreshold);
         } else if (query.getKnowledgeBaseId() != null) {
-            results = hybridRetriever.retrieve(query.getQuery(), query.getKnowledgeBaseId(), topK);
+            results = hybridRetriever.retrieve(query.getQuery(), query.getKnowledgeBaseId(), topK, similarityThreshold);
         } else {
             throw new IllegalArgumentException("必须指定 knowledgeBaseId 或 knowledgeBaseIds");
         }

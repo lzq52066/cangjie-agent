@@ -97,7 +97,15 @@ public class OpenAICompatibleClient {
                     public void onCompleteResponse(dev.langchain4j.model.chat.response.ChatResponse response) {
                         try {
                             String finishReason = response.finishReason() != null ? response.finishReason().name() : "stop";
-                            queue.put(ChatChunk.builder().delta("").done(true).finishReason(finishReason).build());
+                            var usage = response.tokenUsage();
+                            queue.put(ChatChunk.builder()
+                                    .delta("")
+                                    .done(true)
+                                    .finishReason(finishReason)
+                                    .inputTokens(usage != null ? (long) usage.inputTokenCount() : null)
+                                    .outputTokens(usage != null ? (long) usage.outputTokenCount() : null)
+                                    .totalTokens(usage != null ? (long) usage.totalTokenCount() : null)
+                                    .build());
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                         }
@@ -106,11 +114,12 @@ public class OpenAICompatibleClient {
                     @Override
                     public void onError(Throwable error) {
                         log.error("流式调用模型失败: {}", error.getMessage());
+                        String friendlyMsg = LlmErrorMapper.map(error.getMessage());
                         try {
                             queue.put(ChatChunk.builder()
                                     .delta("")
                                     .done(true)
-                                    .error(error.getMessage())
+                                    .error(friendlyMsg)
                                     .build());
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
@@ -120,7 +129,7 @@ public class OpenAICompatibleClient {
             } catch (Exception e) {
                 log.error("流式调用模型异常: {}", e.getMessage(), e);
                 try {
-                    queue.put(ChatChunk.builder().delta("").done(true).error(e.getMessage()).build());
+                    queue.put(ChatChunk.builder().delta("").done(true).error(LlmErrorMapper.map(e.getMessage())).build());
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                 }
