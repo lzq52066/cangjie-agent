@@ -10,7 +10,9 @@ import cn.cangjiecloud.application.entity.ApplicationEntity;
 import cn.cangjiecloud.application.service.IApplicationService;
 import cn.cangjiecloud.chat.entity.ChatMessageEntity;
 import cn.cangjiecloud.chat.entity.ChatSessionEntity;
+import cn.cangjiecloud.chat.entity.LlmTraceEntity;
 import cn.cangjiecloud.chat.service.IChatMessageService;
+import cn.cangjiecloud.chat.service.ILlmTraceService;
 import cn.cangjiecloud.chat.service.IChatService;
 import cn.cangjiecloud.chat.service.IChatSessionService;
 import cn.cangjiecloud.chat.service.LongTermMemoryExtractService;
@@ -39,12 +41,17 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -61,6 +68,7 @@ public class ChatServiceImpl implements IChatService {
     private final IPromptTemplateService promptTemplateService;
     private final ILongTermMemoryService longTermMemoryService;
     private final LongTermMemoryExtractService longTermMemoryExtractService;
+    private final ILlmTraceService llmTraceService;
 
     @Autowired(required = false)
     private TraceCollector traceCollector;
@@ -90,7 +98,8 @@ public class ChatServiceImpl implements IChatService {
         ChatMessageEntity userMessage = saveUserMessage(session, application, request.getMessage());
 
         // 调用模型（同步）
-        ChatResponse chatResponse = callModel(application, messages, traceId);
+        ChatResponse chatResponse = callModel(application, session.getSessionId(),
+                UserContext.getUserId(), messages, traceId);
 
         long duration = System.currentTimeMillis() - start;
 
@@ -151,13 +160,25 @@ public class ChatServiceImpl implements IChatService {
             long created = System.currentTimeMillis() / 1000;
 
             StringBuilder fullContent = new StringBuilder();
+            // 流式调用状态收集（供 llm_trace 落库）
+            AtomicBoolean streamError = new AtomicBoolean(false);
+            AtomicReference<String> streamErrorMessage = new AtomicReference<>();
+            AtomicReference<String> streamFinishReason = new AtomicReference<>();
 
             if (openAiFormat) {
                 // OpenAI 兼容 SSE 格式
                 try {
                     chunkStream.forEach(chunk -> {
+                        if (chunk.getError() != null) {
+                            streamError.set(true);
+                            streamErrorMessage.set(chunk.getError());
+                            return;
+                        }
                         if (chunk.getDelta() != null) {
                             fullContent.append(chunk.getDelta());
+                            if (Boolean.TRUE.equals(chunk.isDone()) && chunk.getFinishReason() != null) {
+                                streamFinishReason.set(chunk.getFinishReason());
+                            }
                             try {
                                 String finishReason = Boolean.TRUE.equals(chunk.isDone()) ? "stop" : null;
                                 String json = buildOpenAiChunk(requestId, modelName, created, chunk.getDelta(), finishReason);
@@ -172,6 +193,8 @@ public class ChatServiceImpl implements IChatService {
                     });
                 } catch (Exception e) {
                     log.error("OpenAI 流式对话异常: app={}", application.getName(), e);
+                    streamError.set(true);
+                    streamErrorMessage.set(e.getMessage());
                     // 发送 OpenAI 兼容错误事件
                     try {
                         emitter.send(SseEmitter.event().name("message").data(buildOpenAiError(e.getMessage())));
@@ -199,6 +222,8 @@ public class ChatServiceImpl implements IChatService {
                     chunkStream.forEach(chunk -> {
                         if (chunk.getError() != null) {
                             // 模型流式调用异常
+                            streamError.set(true);
+                            streamErrorMessage.set(chunk.getError());
                             try {
                                 Map<String, Object> errorPayload = new HashMap<>();
                                 errorPayload.put("delta", "");
@@ -212,6 +237,9 @@ public class ChatServiceImpl implements IChatService {
                         }
                         if (chunk.getDelta() != null) {
                             fullContent.append(chunk.getDelta());
+                            if (Boolean.TRUE.equals(chunk.isDone()) && chunk.getFinishReason() != null) {
+                                streamFinishReason.set(chunk.getFinishReason());
+                            }
                             try {
                                 Map<String, Object> payload = new HashMap<>();
                                 payload.put("delta", chunk.getDelta());
@@ -228,6 +256,8 @@ public class ChatServiceImpl implements IChatService {
                     });
                 } catch (Exception e) {
                     log.error("流式对话异常: app={}", application.getName(), e);
+                    streamError.set(true);
+                    streamErrorMessage.set(e.getMessage());
                     try {
                         Map<String, Object> errorPayload = new HashMap<>();
                         errorPayload.put("delta", "");
@@ -255,6 +285,12 @@ public class ChatServiceImpl implements IChatService {
                             .finishReason(null)
                             .build(),
                     retrievalSources, duration);
+
+            // 记录 LLM 调用可观测数据（流式：token 统计需后续补充）
+            recordLlmTrace(application, session.getSessionId(), userId, traceId, requestId, modelName,
+                    messages, null, null, null, fullContent.toString(), streamFinishReason.get(),
+                    System.currentTimeMillis() - llmStart,
+                    streamError.get() ? "fail" : "success", streamErrorMessage.get(), llmStart);
 
             updateSessionStats(session, aiMessage);
 
@@ -385,7 +421,7 @@ public class ChatServiceImpl implements IChatService {
                                  List<ChatRequestDTO.ConversationMessage> requestMessages) {
         StringBuilder systemPrompt = new StringBuilder();
 
-        // 提示词模板
+        // 提示词模板（如绑定了模板，作为 system prompt 的基础）
         if (StringUtils.hasText(application.getPromptTemplateId())) {
             try {
                 PromptTemplateEntity template = promptTemplateService.getById(application.getPromptTemplateId());
@@ -397,7 +433,7 @@ public class ChatServiceImpl implements IChatService {
             }
         }
 
-        // 知识库检索
+        // 知识库检索（如绑定了知识库，自动拼接检索内容）
         List<String> kbIds = parseStringList(application.getKnowledgeBaseIds());
         if (!kbIds.isEmpty()) {
             long retrievalStart = System.currentTimeMillis();
@@ -409,7 +445,7 @@ public class ChatServiceImpl implements IChatService {
                             "知识库检索: " + results.size() + " 条结果");
                 }
                 if (!results.isEmpty()) {
-                    systemPrompt.append("以下是从知识库中检索到的相关内容，请据此回答用户问题：\n\n");
+                    systemPrompt.append("以下是从知识库中检索到的相关内容：\n\n");
                     for (int i = 0; i < results.size(); i++) {
                         RetrievalResult r = results.get(i);
                         systemPrompt.append("【片段").append(i + 1).append("】")
@@ -425,7 +461,6 @@ public class ChatServiceImpl implements IChatService {
                         source.put("documentName", getDocumentName(r));
                         retrievalSources.add(source);
                     }
-                    systemPrompt.append("请在回答时引用上述知识库内容，如未涉及请如实告知。\n\n");
                 }
             } catch (Exception e) {
                 if (traceCollector != null) {
@@ -437,7 +472,7 @@ public class ChatServiceImpl implements IChatService {
             }
         }
 
-        // 应用描述兜底
+        // 应用描述兜底（无模板、无知识库时使用）
         if (systemPrompt.length() == 0 && StringUtils.hasText(application.getDescription())) {
             systemPrompt.append(application.getDescription());
         }
@@ -488,20 +523,26 @@ public class ChatServiceImpl implements IChatService {
         return messages;
     }
 
-    private ChatResponse callModel(ApplicationEntity application, List<ChatMessage> messages, String traceId) {
+    private ChatResponse callModel(ApplicationEntity application, String sessionId, String userId,
+                                   List<ChatMessage> messages, String traceId) {
         OpenAICompatibleClient client = getClient(application);
         ChatRequest chatRequest = ChatRequest.builder()
                 .messages(messages)
                 .temperature(application.getTemperature() != null ? application.getTemperature() : 0.7)
                 .build();
         long llmStart = System.currentTimeMillis();
+        String modelName = getModelName(application.getModelId());
         try {
             ChatResponse response = client.chat(chatRequest);
             if (traceCollector != null) {
                 recordTrace("chat", "llm_call", traceId,
                         System.currentTimeMillis() - llmStart, "success",
-                        "模型: " + getModelName(application.getModelId()) + ", tokens: " + response.getTotalTokens());
+                        "模型: " + modelName + ", tokens: " + response.getTotalTokens());
             }
+            recordLlmTrace(application, sessionId, userId, traceId, "chatcmpl-" + traceId, modelName,
+                    messages, (long) response.getPromptTokens(), (long) response.getCompletionTokens(),
+                    (long) response.getTotalTokens(), response.getContent(), response.getFinishReason(),
+                    System.currentTimeMillis() - llmStart, "success", null, llmStart);
             return response;
         } catch (Exception e) {
             if (traceCollector != null) {
@@ -509,8 +550,43 @@ public class ChatServiceImpl implements IChatService {
                         System.currentTimeMillis() - llmStart, "fail",
                         "模型调用失败: " + e.getMessage());
             }
+            recordLlmTrace(application, sessionId, userId, traceId, "chatcmpl-" + traceId, modelName,
+                    messages, null, null, null, null, null,
+                    System.currentTimeMillis() - llmStart, "fail", e.getMessage(), llmStart);
             log.error("模型调用失败: app={}, model={}", application.getName(), application.getModelId(), e);
             throw new ApiException("模型调用失败: " + e.getMessage());
+        }
+    }
+
+    private void recordLlmTrace(ApplicationEntity application, String sessionId, String userId,
+                                String traceId, String requestId, String modelName,
+                                List<ChatMessage> messages, Long inputTokens, Long outputTokens,
+                                Long totalTokens, String responseContent, String finishReason,
+                                long duration, String status, String errorMessage, long startTime) {
+        try {
+            LlmTraceEntity trace = new LlmTraceEntity();
+            trace.setTraceId(traceId);
+            trace.setRequestId(requestId);
+            trace.setAppId(application.getId());
+            trace.setAppName(application.getName());
+            trace.setSessionId(sessionId);
+            trace.setUserId(userId);
+            trace.setModelId(application.getModelId());
+            trace.setModelName(modelName);
+            trace.setPromptContent(JSON.toJSONString(messages));
+            trace.setInputTokens(inputTokens);
+            trace.setOutputTokens(outputTokens);
+            trace.setTotalTokens(totalTokens);
+            trace.setResponseContent(responseContent);
+            trace.setFinishReason(finishReason);
+            trace.setDuration(duration);
+            trace.setStatus(status);
+            trace.setErrorMessage(errorMessage);
+            trace.setStartTime(LocalDateTime.ofInstant(
+                    Instant.ofEpochMilli(startTime), ZoneId.systemDefault()));
+            llmTraceService.save(trace);
+        } catch (Exception ex) {
+            log.warn("LLM trace 记录失败: {}", ex.getMessage());
         }
     }
 
