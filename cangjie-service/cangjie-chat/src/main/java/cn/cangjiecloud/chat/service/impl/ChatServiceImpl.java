@@ -33,6 +33,8 @@ import cn.cangjiecloud.prompt.entity.LongTermMemoryEntity;
 import cn.cangjiecloud.prompt.entity.PromptTemplateEntity;
 import cn.cangjiecloud.prompt.entity.RuleEntity;
 import cn.cangjiecloud.prompt.entity.SkillEntity;
+import cn.cangjiecloud.prompt.rule.RuleEvaluator;
+import cn.cangjiecloud.prompt.rule.RuleEvaluationResult;
 import cn.cangjiecloud.prompt.service.ILongTermMemoryService;
 import cn.cangjiecloud.prompt.service.IPromptTemplateService;
 import cn.cangjiecloud.prompt.service.IRuleService;
@@ -82,6 +84,7 @@ public class ChatServiceImpl implements IChatService {
     private final ISkillService skillService;
     private final IRuleService ruleService;
     private final IWorkflowService workflowService;
+    private final RuleEvaluator ruleEvaluator;
 
     @Autowired(required = false)
     private TraceCollector traceCollector;
@@ -573,7 +576,7 @@ public class ChatServiceImpl implements IChatService {
             }
         }
 
-        // === 注入规则 Rule 到 system prompt ===
+        // === 注入规则 Rule 到 system prompt（规则引擎评估） ===
         List<String> ruleIds = parseStringList(application.getRuleIds());
         if (!ruleIds.isEmpty()) {
             try {
@@ -581,26 +584,20 @@ public class ChatServiceImpl implements IChatService {
                         .filter(r -> "active".equals(r.getStatus()))
                         .toList();
                 if (!rules.isEmpty()) {
-                    systemPrompt.append("\n\n").append("【行为规则】请严格遵守以下规则：\n\n");
-                    for (RuleEntity rule : rules) {
-                        systemPrompt.append("- ").append(rule.getName());
-                        if (StringUtils.hasText(rule.getDescription())) {
-                            systemPrompt.append("：").append(rule.getDescription());
-                        }
-                        if (StringUtils.hasText(rule.getCondition())) {
-                            systemPrompt.append("（当 ").append(rule.getCondition()).append(" 时");
-                        }
-                        if (StringUtils.hasText(rule.getAction())) {
-                            systemPrompt.append("，执行：").append(rule.getAction());
-                        }
-                        if (StringUtils.hasText(rule.getCondition())) {
-                            systemPrompt.append("）");
-                        }
-                        systemPrompt.append("\n");
+                    // 使用规则引擎评估匹配
+                    Map<String, Object> ruleContext = Map.of(
+                            "applicationId", application.getId(),
+                            "applicationName", application.getName()
+                    );
+                    List<RuleEvaluationResult> matchedRules = ruleEvaluator.evaluate(
+                            rules, userMessage, ruleContext);
+                    String ruleInstructions = ruleEvaluator.compileInstructions(matchedRules);
+                    if (StringUtils.hasText(ruleInstructions)) {
+                        systemPrompt.append("\n\n").append(ruleInstructions);
                     }
                 }
             } catch (Exception e) {
-                log.warn("加载规则失败: {}", e.getMessage());
+                log.warn("规则评估失败: {}", e.getMessage());
             }
         }
 
@@ -658,9 +655,15 @@ public class ChatServiceImpl implements IChatService {
 
         // === 构建工具列表（Function Calling） ===
         List<String> toolIds = parseStringList(application.getToolIds());
-        List<ToolSpecification> toolSpecs = toolIds.isEmpty()
-                ? List.of()
-                : toolService.getToolSpecifications(toolIds);
+        List<ToolSpecification> toolSpecs = new ArrayList<>();
+        if (!toolIds.isEmpty()) {
+            toolSpecs.addAll(toolService.getToolSpecifications(toolIds));
+        }
+        // 技能也作为工具暴露给 function calling
+        List<String> skillIds = parseStringList(application.getSkillIds());
+        if (!skillIds.isEmpty()) {
+            toolSpecs.addAll(toolService.getSkillSpecifications(skillIds));
+        }
         List<Map<String, Object>> tools = buildToolDefinitions(toolSpecs);
 
         // 多轮 function calling 循环
@@ -773,9 +776,14 @@ public class ChatServiceImpl implements IChatService {
 
         // 构建工具列表（Function Calling）
         List<String> toolIds = parseStringList(application.getToolIds());
-        List<ToolSpecification> toolSpecs = toolIds.isEmpty()
-                ? List.of()
-                : toolService.getToolSpecifications(toolIds);
+        List<ToolSpecification> toolSpecs = new ArrayList<>();
+        if (!toolIds.isEmpty()) {
+            toolSpecs.addAll(toolService.getToolSpecifications(toolIds));
+        }
+        List<String> skillIds = parseStringList(application.getSkillIds());
+        if (!skillIds.isEmpty()) {
+            toolSpecs.addAll(toolService.getSkillSpecifications(skillIds));
+        }
         List<Map<String, Object>> tools = buildToolDefinitions(toolSpecs);
 
         ChatRequest chatRequest = ChatRequest.builder()

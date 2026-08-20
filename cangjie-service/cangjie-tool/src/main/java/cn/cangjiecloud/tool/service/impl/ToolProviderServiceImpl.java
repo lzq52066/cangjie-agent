@@ -5,6 +5,7 @@ import cn.cangjiecloud.tool.entity.ToolEntity;
 import cn.cangjiecloud.tool.handler.AbsToolHandler;
 import cn.cangjiecloud.tool.handler.ToolHandlerRegistry;
 import cn.cangjiecloud.tool.service.IToolProviderService;
+import cn.cangjiecloud.tool.service.ToolServiceImpl;
 import cn.cangjiecloud.tool.util.ToolNaming;
 import cn.cangjiecloud.core.tool.ToolSpecification;
 import com.alibaba.fastjson.JSON;
@@ -107,7 +108,7 @@ public class ToolProviderServiceImpl implements IToolProviderService {
         String toolType = resolveToolType(entity);
         AbsToolHandler handler = handlerRegistry.get(toolType);
         if (handler == null) {
-            log.warn("不支持的工��类型: toolName={}, toolType={}", toolName, toolType);
+            log.warn("不支持的工具类型: toolName={}, toolType={}", toolName, toolType);
             return JSON.toJSONString(Map.of("success", false, "error", "不支持的工具类型"));
         }
 

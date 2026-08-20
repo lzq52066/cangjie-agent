@@ -7,6 +7,7 @@ import cn.cangjiecloud.tool.entity.ToolEntity;
 import cn.cangjiecloud.tool.handler.AbsToolHandler;
 import cn.cangjiecloud.tool.handler.ToolHandlerRegistry;
 import cn.cangjiecloud.tool.service.IToolExecuteService;
+import cn.cangjiecloud.tool.service.ToolServiceImpl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -55,7 +56,7 @@ public class ToolExecuteServiceImpl implements IToolExecuteService {
     private ToolExecuteResultDTO dispatch(String toolType, ToolEntity entity, Map<String, Object> params) {
         AbsToolHandler handler = handlerRegistry.get(toolType);
         if (handler == null) {
-            throw new ApiException("不支持的工���类型: " + toolType);
+            throw new ApiException("不支持的工具类型: " + toolType);
         }
         return handler.execute(entity, params);
     }

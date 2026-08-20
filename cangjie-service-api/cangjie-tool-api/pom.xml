@@ -16,7 +16,10 @@
             <groupId>cn.cangjiecloud</groupId>
             <artifactId>cangjie-common</artifactId>
         </dependency>
-
+        <dependency>
+            <groupId>cn.cangjiecloud</groupId>
+            <artifactId>cangjie-core</artifactId>
+        </dependency>
     </dependencies>
 </project>
 

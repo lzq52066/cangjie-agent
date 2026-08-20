@@ -29,6 +29,12 @@
       <!-- 工具列表 -->
       <el-table v-if="activeTab === 'tool'" :data="list" v-loading="loading" stripe>
         <el-table-column label="名称" prop="name" min-width="150" />
+        <el-table-column label="子类型" width="130" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.toolType" size="small" type="primary">{{ label(toolTypeOptions, row.toolType) }}</el-tag>
+            <span v-else class="table-hint">-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="类型" width="120" align="center">
           <template #default="{ row }">
             <el-tag size="small" :type="toolTypeTag(row.type)">{{ label(toolTypes, row.type) }}</el-tag>
@@ -107,6 +113,12 @@
           <el-select v-model="toolForm.type" style="width:100%">
             <el-option v-for="t in toolTypes" :key="t.code" :label="t.label" :value="t.code" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="子类型">
+          <el-select v-model="toolForm.toolType" clearable placeholder="新版策略分发类型" style="width:100%">
+            <el-option v-for="t in toolTypeOptions" :key="t.code" :label="t.label" :value="t.code" />
+          </el-select>
+          <span class="hint-inline">新版策略分发用，选填；留空时兼容旧 type 字段</span>
         </el-form-item>
         <el-form-item label="分类">
           <el-select v-model="toolForm.category" allow-create filterable clearable style="width:100%">
@@ -219,10 +231,17 @@ import { Search, Plus, Refresh } from '@element-plus/icons-vue'
 import { toolApi, pluginApi } from '@admin/api/tool-api'
 
 const toolTypes = [
-  { code: 'http', label: 'HTTP 接口' },
-  { code: 'script', label: '脚本' },
-  { code: 'plugin', label: '插件' },
-  { code: 'builtin', label: '内置' }
+  { code: 'http', label: 'HTTP 接口（旧）' },
+  { code: 'script', label: '脚本（旧）' },
+  { code: 'plugin', label: '插件（旧）' },
+  { code: 'builtin', label: '内置（旧）' }
+]
+const toolTypeOptions = [
+  { code: 'HTTP', label: 'HTTP 接口' },
+  { code: 'CUSTOM', label: '自定义脚本' },
+  { code: 'MCP', label: 'MCP 协议' },
+  { code: 'SKILL', label: '技能' },
+  { code: 'PLUGIN', label: '旧版插件' }
 ]
 const pluginTypes = [
   { code: 'tool', label: '工具插件' },
@@ -254,7 +273,7 @@ const toolRules: FormRules = {
   functionName: [{ required: true, message: '请输入函数名', trigger: 'blur' }]
 }
 const toolDefaults = {
-  id: '', name: '', type: 'http', category: '', functionName: '',
+  id: '', name: '', type: 'http', toolType: '', category: '', functionName: '',
   parameters: '', implementation: '', config: '', icon: '', description: '', status: 'active'
 }
 

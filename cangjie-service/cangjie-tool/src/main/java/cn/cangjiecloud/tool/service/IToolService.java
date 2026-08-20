@@ -42,4 +42,12 @@ public interface IToolService extends IService<ToolEntity> {
      * @return 执行结果字符串
      */
     String executeToolCall(String toolName, Map<String, Object> arguments);
+
+    /**
+     * 获取激活的技能规格列表（用于 LLM function calling）
+     *
+     * @param skillIds 技能 ID 列表
+     * @return ToolSpecification 列表
+     */
+    List<ToolSpecification> getSkillSpecifications(List<String> skillIds);
 }

@@ -11,7 +11,7 @@ public final class ToolNaming {
     private static final String TOOL_PREFIX = "tool_";
     private static final String AGENT_PREFIX = "agent_";
     private static final String KNOWLEDGE_PREFIX = "knowledge_";
-    private static final String SKILL_PREFIX = "skill_";
+    public static final String SKILL_PREFIX = "skill_";
 
     /** 构建工具 function calling 名称 */
     public static String buildToolName(String toolId) {

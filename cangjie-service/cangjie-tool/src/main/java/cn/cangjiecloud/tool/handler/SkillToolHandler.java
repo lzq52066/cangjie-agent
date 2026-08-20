@@ -1,6 +1,5 @@
 package cn.cangjiecloud.tool.handler;
 
-import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.core.tool.ToolSpecification;
 import cn.cangjiecloud.prompt.entity.SkillEntity;
 import cn.cangjiecloud.prompt.service.ISkillService;

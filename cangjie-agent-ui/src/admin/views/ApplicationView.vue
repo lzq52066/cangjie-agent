@@ -117,6 +117,12 @@
             <el-option v-for="r in rulesList" :key="r.id" :label="r.name" :value="r.id" />
           </el-select>
         </el-form-item>
+        <el-form-item label="工具">
+          <el-select v-model="form.toolIds" multiple collapse-tags collapse-tags-tooltip
+                     placeholder="可选" filterable style="width:100%">
+            <el-option v-for="t in tools" :key="t.id" :label="t.name" :value="t.id" />
+          </el-select>
+        </el-form-item>
         <el-row :gutter="16">
           <el-col :span="8">
             <el-form-item label="启用记忆"><el-switch v-model="form.memoryEnabled" /></el-form-item>
@@ -198,6 +204,7 @@ import { applicationApi } from '@admin/api/application-api'
 import { modelApi } from '@admin/api/model-api'
 import { knowledgeApi } from '@admin/api/knowledge-api'
 import { promptApi } from '@admin/api/prompt-api'
+import { toolApi } from '@admin/api/tool-api'
 
 const appTypes = [
   { code: 'chat', label: '对话应用' },
@@ -217,6 +224,7 @@ const knowledgeBases = ref<any[]>([])
 const templates = ref<any[]>([])
 const skills = ref<any[]>([])
 const rulesList = ref<any[]>([])
+const tools = ref<any[]>([])
 
 const showDialog = ref(false)
 const editing = ref(false)
@@ -224,7 +232,7 @@ const formRef = ref<FormInstance>()
 const defaults = {
   id: '', name: '', description: '', type: 'chat', modelId: '',
   knowledgeBaseIds: [] as string[], promptTemplateId: '',
-  skillIds: [] as string[], ruleIds: [] as string[],
+  skillIds: [] as string[], ruleIds: [] as string[], toolIds: [] as string[],
   memoryEnabled: false, maxTurns: 20, temperature: 0.7, config: '', icon: '',
   suggestions: [] as string[]
 }
@@ -268,7 +276,7 @@ async function loadList() {
 
 function openCreate() {
   editing.value = false
-  Object.assign(form, { ...defaults, knowledgeBaseIds: [], skillIds: [], ruleIds: [], suggestions: [] })
+  Object.assign(form, { ...defaults, knowledgeBaseIds: [], skillIds: [], ruleIds: [], toolIds: [], suggestions: [] })
   showDialog.value = true
 }
 
@@ -286,6 +294,7 @@ function openEdit(row: any) {
     promptTemplateId: row.promptTemplateId || '',
     skillIds: parseIds(row.skillIds),
     ruleIds: parseIds(row.ruleIds),
+    toolIds: parseIds(row.toolIds),
     memoryEnabled: !!row.memoryEnabled,
     maxTurns: row.maxTurns ?? 20,
     temperature: row.temperature ?? 0.7,
@@ -381,15 +390,17 @@ async function copy(text?: string) {
 
 onMounted(async () => {
   loadList()
-  const [m, k, t, s, r] = await Promise.allSettled([
+  const [m, k, t, s, r, tl] = await Promise.allSettled([
     modelApi.list(), knowledgeApi.list(),
-    promptApi.template.list(), promptApi.skill.list(), promptApi.rule.list()
+    promptApi.template.list(), promptApi.skill.list(), promptApi.rule.list(),
+    toolApi.list()
   ])
   if (m.status === 'fulfilled') models.value = m.value
   if (k.status === 'fulfilled') knowledgeBases.value = k.value
   if (t.status === 'fulfilled') templates.value = t.value
   if (s.status === 'fulfilled') skills.value = s.value
   if (r.status === 'fulfilled') rulesList.value = r.value
+  if (tl.status === 'fulfilled') tools.value = tl.value
 })
 </script>
 

@@ -181,6 +181,11 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
 
     @Override
     public String executeToolCall(String toolName, Map<String, Object> arguments) {
+        // === 技能路由：skill_ 前缀直接走 SkillToolHandler ===
+        if (toolName != null && toolName.startsWith(ToolNaming.SKILL_PREFIX)) {
+            return executeSkillCall(toolName, arguments);
+        }
+
         String toolId = ToolNaming.parse(toolName);
         ToolEntity entity = getById(toolId);
         if (entity == null) {
@@ -190,7 +195,7 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
         String resolvedType = resolveToolType(entity);
         AbsToolHandler handler = handlerRegistry.get(resolvedType);
         if (handler == null) {
-            log.warn("不支持的工���类型: toolName={}, toolType={}", toolName, resolvedType);
+            log.warn("不支持的工具类型: toolName={}, toolType={}", toolName, resolvedType);
             return com.alibaba.fastjson.JSON.toJSONString(Map.of("success", false, "error", "不支持的工具类型"));
         }
 
@@ -202,6 +207,37 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
     }
 
     // ========== 被 ToolProviderServiceImpl 调用 ==========
+
+    /**
+     * 获取激活的技能规格列表（用于 LLM function calling）
+     *
+     * @param skillIds 技能 ID 列表
+     * @return ToolSpecification 列表
+     */
+    public List<ToolSpecification> getSkillSpecifications(List<String> skillIds) {
+        if (skillIds == null || skillIds.isEmpty() || skillToolHandler == null) {
+            return Collections.emptyList();
+        }
+        return skillIds.stream()
+                .map(skillToolHandler::buildToolSpecification)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    /**
+     * 执行技能调用（由 LLM function calling 触发，skill_ 前缀）
+     */
+    private String executeSkillCall(String toolName, Map<String, Object> arguments) {
+        if (skillToolHandler == null) {
+            return com.alibaba.fastjson.JSON.toJSONString(Map.of("success", false, "error", "技能处理器未初始化"));
+        }
+        String skillId = ToolNaming.parse(toolName);
+        var result = skillToolHandler.execute(skillId, arguments);
+        if (Boolean.TRUE.equals(result.getSuccess())) {
+            return result.getOutput() != null ? result.getOutput().toString() : "";
+        }
+        return com.alibaba.fastjson.JSON.toJSONString(Map.of("success", false, "error", result.getError()));
+    }
 
     /**
      * 获取 ApplicationService（供 Provider 使用）
