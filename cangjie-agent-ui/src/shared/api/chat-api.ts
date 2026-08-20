@@ -28,12 +28,13 @@ export const chatApi = {
       data
     })
   },
-  listSessions(apikey: string, applicationId: string) {
+  listSessions(apikey: string, applicationId: string, userId?: string) {
     return request<any[]>({
       baseURL: CHAT_BASE,
       method: 'GET',
       url: `/sessions/${applicationId}`,
-      headers: withKey(apikey)
+      headers: withKey(apikey),
+      params: userId ? { userId } : undefined
     })
   },
   listMessages(apikey: string, sessionId: string) {
@@ -62,7 +63,7 @@ export const chatApi = {
   },
   sendStream(
     apikey: string,
-    data: { applicationId: string; message: string; sessionId?: string }
+    data: { applicationId: string; message: string; sessionId?: string; userId?: string }
   ): AsyncIterable<{ event: string; data: any }> {
     return (async function* () {
       const res = await fetch('/api/chat/send-stream', {

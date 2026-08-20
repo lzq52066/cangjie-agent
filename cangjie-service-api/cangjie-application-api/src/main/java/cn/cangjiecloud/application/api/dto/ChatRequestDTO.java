@@ -22,6 +22,9 @@ public class ChatRequestDTO {
     /** 来源：web / api / wechat / dingtalk / feishu */
     private String source = "api";
 
+    /** 用户 ID（匿名用户可传自定义标识，用于隔离会话与消息历史） */
+    private String userId;
+
     /** 是否流式返回 */
     private Boolean stream = false;
 

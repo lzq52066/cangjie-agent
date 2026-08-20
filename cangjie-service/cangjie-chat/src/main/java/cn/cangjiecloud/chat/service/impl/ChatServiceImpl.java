@@ -331,6 +331,7 @@ public class ChatServiceImpl implements IChatService {
         session.setStatus("active");
         session.setMessageCount(0);
         session.setTokensUsed(0);
+        session.setUserId(StringUtils.hasText(request.getUserId()) ? request.getUserId() : null);
         chatSessionService.save(session);
         return session;
     }

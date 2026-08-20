@@ -11,6 +11,8 @@ public interface IChatSessionService extends IService<ChatSessionEntity> {
 
     List<ChatSessionEntity> listByApplication(String applicationId);
 
+    List<ChatSessionEntity> listByApplicationAndUser(String applicationId, String userId);
+
     ChatSessionEntity close(String sessionId);
 
     ChatSessionEntity getBySessionId(String sessionId);

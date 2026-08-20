@@ -51,7 +51,7 @@ public class ChatController {
             @Valid @RequestBody ChatRequestDTO request,
             HttpServletRequest httpRequest) {
         validateApikey(httpRequest, request.getApplicationId());
-        String userId = UserContext.getUserId();
+        String userId = StringUtils.hasText(request.getUserId()) ? request.getUserId() : UserContext.getUserId();
         org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter =
                 new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(600_000L);
         chatExecutor.execute(() -> chatService.chatStream(request, emitter, false, userId));
@@ -84,10 +84,12 @@ public class ChatController {
     }
 
     @GetMapping("/sessions/{applicationId}")
-    public R<List<ChatSessionEntity>> listSessionsByApp(@PathVariable String applicationId,
-                                                        HttpServletRequest httpRequest) {
+    public R<List<ChatSessionEntity>> listSessionsByApp(
+            @PathVariable String applicationId,
+            @RequestParam(required = false) String userId,
+            HttpServletRequest httpRequest) {
         validateApikey(httpRequest, applicationId);
-        return R.data(chatSessionService.listByApplication(applicationId));
+        return R.data(chatSessionService.listByApplicationAndUser(applicationId, userId));
     }
 
     @GetMapping("/messages/{sessionId}")

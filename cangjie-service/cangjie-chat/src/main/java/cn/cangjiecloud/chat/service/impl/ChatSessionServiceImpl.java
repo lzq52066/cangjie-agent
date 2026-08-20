@@ -42,6 +42,18 @@ public class ChatSessionServiceImpl extends ServiceImpl<ChatSessionMapper, ChatS
     }
 
     @Override
+    public List<ChatSessionEntity> listByApplicationAndUser(String applicationId, String userId) {
+        if (!StringUtils.hasText(userId)) {
+            return List.of();
+        }
+        LambdaQueryWrapper<ChatSessionEntity> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ChatSessionEntity::getApplicationId, applicationId)
+                .eq(ChatSessionEntity::getUserId, userId)
+                .orderByDesc(ChatSessionEntity::getCreateTime);
+        return list(wrapper);
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public ChatSessionEntity close(String sessionId) {
         ChatSessionEntity entity = getBySessionId(sessionId);

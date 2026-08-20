@@ -131,8 +131,8 @@
           </div>
         </div>
 
-        <!-- Typing indicator -->
-        <div v-if="typing" class="message-row assistant">
+        <!-- Typing indicator（仅流式开始前显示） -->
+        <div v-if="typing && !streamingStarted" class="message-row assistant">
           <div class="message-avatar">
             <div class="avatar ai-avatar">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>
@@ -180,7 +180,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { chatApi } from '@shared/api/chat-api'
 
@@ -197,6 +197,7 @@ const messages = ref<Msg[]>([])
 const sessions = ref<any[]>([])
 const input = ref('')
 const typing = ref(false)
+const streamingStarted = ref(false)
 const bodyRef = ref<HTMLElement | null>(null)
 const scrollAnchor = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLTextAreaElement | null>(null)
@@ -205,9 +206,22 @@ const showHistory = ref(false)
 const applicationId = ref('')
 const apikey = ref('')
 const sessionId = ref('')
+const userId = ref('')
 const embedded = ref(false)
 const title = ref('CangJie Chat')
 const configError = ref('')
+
+function ensureUserId() {
+  if (!userId.value) {
+    const stored = localStorage.getItem('cangjie_user_id')
+    if (stored) {
+      userId.value = stored
+    } else {
+      userId.value = crypto.randomUUID()
+      localStorage.setItem('cangjie_user_id', userId.value)
+    }
+  }
+}
 
 const subtitle = computed(() =>
   configError.value ? '配置异常' : '在线')
@@ -292,6 +306,7 @@ function newChat() {
 async function send() {
   const text = input.value.trim()
   if (!text || configError.value) return
+  ensureUserId()
   messages.value.push({ role: 'user', content: text })
   input.value = ''
   if (inputRef.value) inputRef.value.style.height = 'auto'
@@ -301,7 +316,8 @@ async function send() {
     const stream = chatApi.sendStream(apikey.value, {
       applicationId: applicationId.value,
       message: text,
-      sessionId: sessionId.value || undefined
+      sessionId: sessionId.value || undefined,
+      userId: userId.value
     })
     let assistantMsg: Msg | null = null
     let pendingSources: any[] | null = null
@@ -317,7 +333,8 @@ async function send() {
       }
       if (event === 'message' && chunk) {
         if (!assistantMsg) {
-          assistantMsg = { role: 'assistant', content: '', _sourcesCollapsed: true, sources: pendingSources || undefined }
+          streamingStarted.value = true
+          assistantMsg = reactive<Msg>({ role: 'assistant', content: '', _sourcesCollapsed: true, sources: pendingSources || undefined })
           messages.value.push(assistantMsg)
         }
         if (chunk.delta) assistantMsg.content += chunk.delta
@@ -331,14 +348,16 @@ async function send() {
     }
   } finally {
     typing.value = false
+    streamingStarted.value = false
     scroll()
   }
 }
 
 async function loadSessions() {
   if (!applicationId.value || !apikey.value) return
+  ensureUserId()
   try {
-    sessions.value = await chatApi.listSessions(apikey.value, applicationId.value)
+    sessions.value = await chatApi.listSessions(apikey.value, applicationId.value, userId.value)
   } catch {
     sessions.value = []
   }
@@ -394,6 +413,9 @@ onMounted(() => {
   const params = new URLSearchParams(location.search)
   applicationId.value = params.get('app') || ''
   apikey.value = params.get('apikey') || ''
+  // 优先使用 URL 参数中的 userId（业务方显式传入），否则从 localStorage 读取/生成
+  userId.value = params.get('user') || ''
+  ensureUserId()
   embedded.value = params.get('embed') === '1' || window.self !== window.top
   const customTitle = params.get('title')
   if (customTitle) {
