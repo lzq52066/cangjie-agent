@@ -14,13 +14,17 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -78,6 +82,79 @@ public class ObservabilityController {
     @GetMapping("/traces")
     public R<IPage<TraceRecordEntity>> traces(TraceQueryDTO query) {
         return R.data(traceRecordService.pageQuery(query));
+    }
+
+    /**
+     * 系统指标图表数据：支持时间范围过滤，按 metricType 分组多 series 返回
+     */
+    @GetMapping("/metrics/chart")
+    public R<Map<String, Object>> chart(
+            @RequestParam(required = false) String metricType,
+            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
+            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime) {
+
+        if (startTime == null) startTime = LocalDateTime.now().minusHours(2);
+        if (endTime == null) endTime = LocalDateTime.now();
+
+        String sql = "SELECT metric_type, metric_name, collect_time, metric_value, unit"
+                + " FROM system_metric WHERE deleted = 0 AND collect_time >= ? AND collect_time <= ?";
+        List<Object> params = new ArrayList<>();
+        params.add(startTime);
+        params.add(endTime);
+
+        if (StringUtils.hasText(metricType)) {
+            sql += " AND metric_type = ?";
+            params.add(metricType);
+        }
+        sql += " ORDER BY collect_time ASC";
+
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, params.toArray());
+
+        // 按 metricType 分组，每组下多个 series（按 metricName）
+        Map<String, Map<String, Object>> typeGroups = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            String type = (String) row.get("metric_type");
+            String name = (String) row.get("metric_name");
+            String unit = (String) row.get("unit");
+
+            Map<String, Object> typeGroup = typeGroups.computeIfAbsent(type, k -> {
+                Map<String, Object> g = new LinkedHashMap<>();
+                g.put("metricType", type);
+                g.put("series", new ArrayList<Map<String, Object>>());
+                return g;
+            });
+
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> seriesList = (List<Map<String, Object>>) typeGroup.get("series");
+
+            // 找到或创建对应 metricName 的 series
+            Map<String, Object> seriesObj = null;
+            for (Map<String, Object> s : seriesList) {
+                if (name.equals(s.get("name"))) {
+                    seriesObj = s;
+                    break;
+                }
+            }
+            if (seriesObj == null) {
+                seriesObj = new LinkedHashMap<>();
+                seriesObj.put("name", name);
+                seriesObj.put("unit", unit);
+                seriesObj.put("data", new ArrayList<Map<String, Object>>());
+                seriesList.add(seriesObj);
+            }
+
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> data = (List<Map<String, Object>>) seriesObj.get("data");
+            Map<String, Object> point = new LinkedHashMap<>();
+            Timestamp ts = (Timestamp) row.get("collect_time");
+            point.put("time", ts != null ? ts.toLocalDateTime().toString() : "");
+            point.put("value", row.get("metric_value"));
+            data.add(point);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("groups", new ArrayList<>(typeGroups.values()));
+        return R.data(result);
     }
 
     /**

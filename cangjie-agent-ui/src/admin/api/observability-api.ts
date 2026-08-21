@@ -18,6 +18,10 @@ export const observabilityApi = {
   metrics(params: { metricType?: string; startTime?: string; endTime?: string; pageNum?: number; pageSize?: number }) {
     return request<PageResult<any>>({ method: 'GET', url: '/observability/metrics', params })
   },
+  /** 图表数据：按 metricType 分组多 series，支持时间范围 */
+  metricsChart(params?: { metricType?: string; startTime?: string; endTime?: string }) {
+    return request<{ groups: any[] }>({ method: 'GET', url: '/observability/metrics/chart', params })
+  },
   /** 手动触发一次指标采集 */
   collectMetrics() {
     return request<any[]>({ method: 'GET', url: '/observability/metrics/collect' })

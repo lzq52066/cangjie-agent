@@ -299,7 +299,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Odometer } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
@@ -330,9 +330,139 @@ const stats = computed(() => [
   { key: 'trace', label: '调用追踪', value: dashboard.value.todayTraceCount ?? 0, unit: '条', color: '#7c4dff' }
 ])
 
+const metricChartData = ref<any[]>([])
+const chartRefs = ref<Record<string, any>>({})
+
+// 全局 resize 监听器 - 统一 resize 所有 chart，避免重复添加监听器
+let resizeHandler: (() => void) | null = null
+
+function initChart(group: any, index: number) {
+  const key = 'chart-' + index
+  const el = document.getElementById(key)
+  if (!el) return
+  if (chartRefs.value[key]) {
+    chartRefs.value[key].dispose()
+  }
+  const chart = echarts.init(el)
+  chartRefs.value[key] = chart
+
+  const seriesList: any[] = group.series || []
+
+  // 时间格式化：ISO 时间戳 -> 短格式 (HH:mm 或 MM-dd HH:mm)
+  function shortTime(iso: string): string {
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return iso
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const hhmm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+    // 如果跨天则显示日期+时间
+    const now = new Date()
+    const isToday = d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+    return isToday ? hhmm : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hhmm}`
+  }
+
+  // 收集所有时间点（取所有 series 的时间点并集，排序）
+  const allTimes: string[] = [...new Set(
+    seriesList.flatMap((s: any) => (s.data || []).map((d: any) => d.time).filter(Boolean))
+  )].sort()
+
+  // 格式化的横轴标签
+  const displayTimes = allTimes.map(t => shortTime(t))
+
+  // ECharts 配色
+  const colors = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc']
+
+  // 构建 series 配置
+  const seriesConfigs = seriesList.map((s: any, si: number) => {
+    const valueMap = new Map<string, number>()
+    ;(s.data || []).forEach((d: any) => {
+      valueMap.set(d.time, Number(d.value))
+    })
+    return {
+      name: s.name,
+      type: 'line',
+      smooth: true,
+      symbol: 'circle',
+      symbolSize: 5,
+      lineStyle: { width: 2 },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: colors[si % colors.length] + '40' },
+          { offset: 1, color: colors[si % colors.length] + '05' }
+        ])
+      },
+      emphasis: { focus: 'series' },
+      data: allTimes.map(t => valueMap.has(t) ? valueMap.get(t) : null)
+    }
+  })
+
+  const option = {
+    color: colors,
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(255,255,255,0.95)',
+      borderColor: '#e4e7ed',
+      borderWidth: 1,
+      textStyle: { fontSize: 12, color: '#303133' },
+      formatter: function (params: any[]) {
+        if (!params || params.length === 0) return ''
+        let html = `<div style="font-weight:600;font-size:13px;margin-bottom:6px;color:#303133">${params[0].axisValue}</div>`
+        params.forEach((p: any) => {
+          if (p.value != null) {
+            html += `<div style="display:flex;justify-content:space-between;gap:16px;padding:2px 0">
+              <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color};margin-right:6px"></span>${p.seriesName}</span>
+              <span style="font-weight:500;color:#303133">${p.value}</span>
+            </div>`
+          }
+        })
+        return html
+      }
+    },
+    legend: {
+      type: 'scroll',
+      bottom: 0,
+      icon: 'roundRect',
+      textStyle: { fontSize: 11, color: '#606266' }
+    },
+    grid: { left: 55, right: 25, top: 25, bottom: 50 },
+    xAxis: {
+      type: 'category',
+      data: displayTimes.length > 0 ? displayTimes : ['-'],
+      axisLine: { lineStyle: { color: '#dcdfe6' } },
+      axisTick: { alignWithLabel: true },
+      axisLabel: { fontSize: 10, color: '#909399', rotate: allTimes.length > 6 ? 30 : 0 },
+      splitLine: { show: false }
+    },
+    yAxis: {
+      type: 'value',
+      nameTextStyle: { fontSize: 10, color: '#909399' },
+      splitLine: { lineStyle: { color: '#f0f2f5', type: 'dashed' } },
+      axisLabel: { fontSize: 10, color: '#909399' }
+    },
+    series: seriesConfigs
+  }
+
+  chart.setOption(option)
+
+  // 注册全局 resize 监听器（只注册一次）
+  if (!resizeHandler) {
+    resizeHandler = () => {
+      Object.values(chartRefs.value).forEach((c: any) => c?.resize())
+    }
+    window.addEventListener('resize', resizeHandler)
+  }
+}
+
+function disposeCharts() {
+  Object.values(chartRefs.value).forEach((chart: any) => chart?.dispose())
+  chartRefs.value = {}
+  if (resizeHandler) {
+    window.removeEventListener('resize', resizeHandler)
+    resizeHandler = null
+  }
+}
+
 const operationLogs = ref<any[]>([])
 const logQuery = reactive({ module: '', action: '', status: '' })
-const systemMetrics = ref<any[]>([])
 const metricQuery = reactive({ metricType: '', dateRange: null as [string, string] | null })
 const callTraces = ref<any[]>([])
 const traceQuery = reactive({ traceId: '', module: '', action: '' })
@@ -540,7 +670,12 @@ async function loadLogs() {
   }
 }
 
-async function loadMetrics() {
+function formatTimeParam(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+async function loadMetricCharts() {
   loading.value = true
   try {
     // 后端每 60s 采集约 14 条指标；按时间范围动态放大 pageSize，超出上限时提示截断
@@ -597,7 +732,7 @@ async function loadLlmTraces() {
 
 function reload() {
   if (activeTab.value === 'logs') loadLogs()
-  else if (activeTab.value === 'metrics') loadMetrics()
+  else if (activeTab.value === 'metrics') loadMetricCharts()
   else if (activeTab.value === 'llm-traces') loadLlmTraces()
   else loadTraces()
 }
@@ -697,6 +832,31 @@ function handleResize() {
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .toolbar-left { display: flex; gap: 12px; flex-wrap: wrap; }
 .pager { margin-top: 16px; justify-content: flex-end; }
+.chart-grid { display: flex; flex-wrap: wrap; gap: 18px; }
+.chart-card {
+  background: #fff; border: 1px solid #e8eaef; border-radius: 10px;
+  padding: 0; flex: 1 1 48%; min-width: 460px; overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04); transition: box-shadow .25s;
+}
+.chart-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+.chart-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 18px; background: linear-gradient(135deg, #f8f9fc 0%, #f0f2f7 100%);
+  border-bottom: 1px solid #e8eaef;
+}
+.type-badge {
+  display: inline-block; padding: 3px 14px; border-radius: 20px;
+  font-size: 13px; font-weight: 600; letter-spacing: 0.5px;
+}
+.badge-cpu { background: #e6f7ff; color: #1890ff; }
+.badge-memory { background: #f6ffed; color: #52c41a; }
+.badge-thread { background: #fff7e6; color: #fa8c16; }
+.badge-disk { background: #fff0f6; color: #eb2f96; }
+.badge-gc { background: #f3e8ff; color: #7c3aed; }
+.badge-other { background: #f5f5f5; color: #8c8c8c; }
+.series-count { font-size: 12px; color: #8c8c8c; }
+.chart-body { height: 340px; width: 100%; padding: 4px 0; }
+.empty-chart { width: 100%; text-align: center; color: #a8abb2; padding: 60px 0; font-size: 14px; }
 .code-block {
   background: #f9fafc; border: 1px solid #ebeef5; border-radius: 8px; padding: 12px;
   max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all;
