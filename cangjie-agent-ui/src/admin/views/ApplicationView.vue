@@ -81,13 +81,14 @@
     <!-- 创建/编辑 -->
     <el-dialog v-model="showDialog" :title="editing ? '编辑应用' : '新建应用'" width="720px" destroy-on-close>
       <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
+        <el-divider content-position="left">基础信息</el-divider>
         <el-row :gutter="16">
           <el-col :span="12">
             <el-form-item label="应用名称" prop="name"><el-input v-model="form.name" /></el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="应用类型" prop="type">
-              <el-select v-model="form.type" style="width:100%">
+              <el-select v-model="form.type" style="width:100%" @change="onTypeChange">
                 <el-option v-for="t in appTypes" :key="t.code" :label="t.label" :value="t.code" />
               </el-select>
             </el-form-item>
@@ -96,76 +97,93 @@
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" :rows="2" />
         </el-form-item>
-        <el-form-item label="对话模型">
-          <el-select v-model="form.modelId" placeholder="选择模型" clearable filterable style="width:100%">
-            <el-option v-for="m in models" :key="m.id" :label="m.name + ' (' + m.modelName + ')'" :value="m.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="知识库">
-          <el-select v-model="form.knowledgeBaseIds" multiple collapse-tags collapse-tags-tooltip
-                     placeholder="可多选，检索时融合" filterable style="width:100%">
-            <el-option v-for="k in knowledgeBases" :key="k.id" :label="k.name" :value="k.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="RAG 模式">
-          <el-select v-model="form.ragMode" style="width:100%">
-            <el-option label="Simple（预处理检索）" value="simple" />
-            <el-option label="Agentic（LLM 自主检索）" value="agentic" />
-          </el-select>
-          <div class="form-hint">Simple：对话前固定注入 topK=5 检索结果；Agentic：LLM 自主决定是否调用检索工具</div>
-        </el-form-item>
-        <el-form-item label="提示词模板">
-          <el-select v-model="form.promptTemplateId" placeholder="可选" clearable filterable style="width:100%">
-            <el-option v-for="p in templates" :key="p.id" :label="p.name" :value="p.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="技能">
-          <el-select v-model="form.skillIds" multiple collapse-tags collapse-tags-tooltip
-                     placeholder="可选" filterable style="width:100%">
-            <el-option v-for="s in skills" :key="s.id" :label="s.name" :value="s.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="规则">
-          <el-select v-model="form.ruleIds" multiple collapse-tags collapse-tags-tooltip
-                     placeholder="可选" filterable style="width:100%">
-            <el-option v-for="r in rulesList" :key="r.id" :label="r.name" :value="r.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="工具">
-          <el-select v-model="form.toolIds" multiple collapse-tags collapse-tags-tooltip
-                     placeholder="可选" filterable style="width:100%">
-            <el-option v-for="t in tools" :key="t.id" :label="t.name" :value="t.id" />
-          </el-select>
-        </el-form-item>
-        <el-row :gutter="16">
-          <el-col :span="8">
-            <el-form-item label="启用记忆"><el-switch v-model="form.memoryEnabled" /></el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="最大轮数">
-              <el-input-number v-model="form.maxTurns" :min="1" :max="100" style="width:100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="温度">
-              <el-input-number v-model="form.temperature" :min="0" :max="2" :step="0.1" :precision="1" style="width:100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-form-item label="建议问题">
-          <div class="suggestion-editor">
-            <div v-for="(_, idx) in form.suggestions" :key="idx" class="suggestion-row">
-              <el-input v-model="form.suggestions[idx]" placeholder="输入建议问题，如：帮我介绍一下你们的产品" />
-              <el-button :icon="Delete" circle size="small" @click="removeSuggestion(idx)" />
+
+        <!-- 工作流应用：流程全部在工作流画布中配置，这里只保留基础信息 -->
+        <el-alert v-if="form.type === 'workflow'" type="info" :closable="false" show-icon
+                  title="工作流应用：业务流程请在「工作流」模块中使用节点编排（知识库/LLM/工具等），发布后对外仅走工作流引擎，下方对话能力配置不生效。" />
+        <template v-if="form.type !== 'workflow'">
+          <el-divider content-position="left">核心能力</el-divider>
+          <el-form-item label="对话模型">
+            <el-select v-model="form.modelId" placeholder="选择模型" clearable filterable style="width:100%">
+              <el-option v-for="m in models" :key="m.id" :label="m.name + ' (' + m.modelName + ')'" :value="m.id" />
+            </el-select>
+            <div class="form-hint">不选择时使用系统默认模型</div>
+          </el-form-item>
+          <el-form-item label="知识库">
+            <el-select v-model="form.knowledgeBaseIds" multiple collapse-tags collapse-tags-tooltip
+                       placeholder="可多选，检索时融合" filterable style="width:100%">
+              <el-option v-for="k in knowledgeBases" :key="k.id" :label="k.name" :value="k.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="form.knowledgeBaseIds.length" label="RAG 模式">
+            <el-select v-model="form.ragMode" style="width:100%">
+              <el-option label="Simple（预处理检索）" value="simple" />
+              <el-option label="Agentic（LLM 自主检索）" value="agentic" />
+            </el-select>
+            <div class="form-hint">Simple：对话前固定注入 topK=5 检索结果；Agentic：LLM 自主决定是否调用检索工具</div>
+          </el-form-item>
+          <el-form-item label="提示词模板">
+            <el-select v-model="form.promptTemplateId" placeholder="可选" clearable filterable style="width:100%">
+              <el-option v-for="p in templates" :key="p.id" :label="p.name" :value="p.id" />
+            </el-select>
+          </el-form-item>
+
+          <el-divider content-position="left">增强能力</el-divider>
+          <el-alert v-if="form.type === 'agent'" type="info" :closable="false" show-icon
+                    title="Agent 应用：建议绑定技能/工具/规则，让模型在 Function Calling 中自主决策与执行；规则用于约束回答边界。" />
+          <el-form-item label="技能">
+            <el-select v-model="form.skillIds" multiple collapse-tags collapse-tags-tooltip
+                       placeholder="可选" filterable style="width:100%">
+              <el-option v-for="s in skills" :key="s.id" :label="s.name" :value="s.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="工具">
+            <el-select v-model="form.toolIds" multiple collapse-tags collapse-tags-tooltip
+                       placeholder="可选" filterable style="width:100%">
+              <el-option v-for="t in tools" :key="t.id" :label="t.name" :value="t.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="规则">
+            <el-select v-model="form.ruleIds" multiple collapse-tags collapse-tags-tooltip
+                       placeholder="可选" filterable style="width:100%">
+              <el-option v-for="r in rulesList" :key="r.id" :label="r.name" :value="r.id" />
+            </el-select>
+          </el-form-item>
+          <el-divider content-position="left">对话设置</el-divider>
+          <el-row :gutter="16">
+            <el-col :span="8">
+              <el-form-item label="启用记忆"><el-switch v-model="form.memoryEnabled" /></el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="最大轮数">
+                <el-input-number v-model="form.maxTurns" :min="1" :max="100" style="width:100%" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="温度">
+                <el-input-number v-model="form.temperature" :min="0" :max="2" :step="0.1" :precision="1" style="width:100%" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <div class="form-hint" style="margin-top:-8px">记忆：记住用户偏好/背景，跨会话使用；建议仅对需要持续服务的场景（如客服/个人助理）开启</div>
+
+          <el-divider content-position="left">网页体验</el-divider>
+          <div class="form-hint" style="margin-top:-8px">仅当应用提供网页聊天入口时有意义；纯 API 调用可全部留空</div>
+          <el-form-item label="建议问题">
+            <div class="suggestion-editor">
+              <div v-for="(_, idx) in form.suggestions" :key="idx" class="suggestion-row">
+                <el-input v-model="form.suggestions[idx]" placeholder="输入建议问题，如：帮我介绍一下你们的产品" />
+                <el-button :icon="Delete" circle size="small" @click="removeSuggestion(idx)" />
+              </div>
+              <el-button type="primary" plain size="small" :icon="Plus" @click="addSuggestion">添加问题</el-button>
+              <div class="form-hint">展示在对话入口欢迎页，用户点击可直接提问；不配置则不显示</div>
             </div>
-            <el-button type="primary" plain size="small" :icon="Plus" @click="addSuggestion">添加问题</el-button>
-            <div class="form-hint">展示在对话入口欢迎页，用户点击可直接提问；不配置则不显示</div>
-          </div>
-        </el-form-item>
-        <el-form-item label="图标"><el-input v-model="form.icon" placeholder="图标名或 URL" /></el-form-item>
-        <el-form-item label="额外配置">
-          <el-input v-model="form.config" type="textarea" :rows="3" placeholder="JSON，如欢迎语、开场问题等" />
-        </el-form-item>
+          </el-form-item>
+          <el-form-item label="图标"><el-input v-model="form.icon" placeholder="图标名或 URL" /></el-form-item>
+          <el-form-item label="额外配置">
+            <el-input v-model="form.config" type="textarea" :rows="3" placeholder="JSON，如欢迎语、开场问题等" />
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
         <el-button @click="showDialog = false">取消</el-button>
@@ -325,6 +343,26 @@ function addSuggestion() {
   form.suggestions.push('')
 }
 
+/**
+ * 切换应用类型时清理不适用字段：workflow 不维护对话能力配置
+ */
+function onTypeChange(type: string) {
+  if (type === 'workflow') {
+    form.modelId = ''
+    form.knowledgeBaseIds = []
+    form.promptTemplateId = ''
+    form.skillIds = []
+    form.ruleIds = []
+    form.toolIds = []
+    form.memoryEnabled = false
+    form.suggestions = []
+    form.icon = ''
+    form.config = ''
+    form.temperature = 0.7
+    form.maxTurns = 20
+  }
+}
+
 function removeSuggestion(idx: number) {
   form.suggestions.splice(idx, 1)
 }
@@ -377,11 +415,11 @@ const chatOrigin = computed(() => {
   return location.origin
 })
 const chatUrl = computed(() =>
-  `${chatOrigin.value}/chat/?app=${current.value?.id || ''}&apikey=${current.value?.apikey || ''}&title=${encodeURIComponent(current.value?.name || '')}`)
+  `${chatOrigin.value}/chat/?app=${current.value?.id || ''}&title=${encodeURIComponent(current.value?.name || '')}`)
 const iframeSnippet = computed(() =>
   `<iframe\n  src="${chatUrl.value}"\n  style="width:420px;height:640px;border:none;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.12)"\n  allow="microphone">\n</iframe>`)
 const curlSnippet = computed(() =>
-  `curl -X POST ${origin.value}/api/chat/send \\\n  -H "Content-Type: application/json" \\\n  -H "X-API-Key: ${current.value?.apikey || ''}" \\\n  -d '{"applicationId":"${current.value?.id || ''}","message":"你好"}'`)
+  `curl -X POST ${origin.value}/api/open/chat/completions \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer ${current.value?.apikey || ''}" \\\n  -d '{"messages":[{"role":"user","content":"你好"}]}'`)
 
 function openAccess(row: any) {
   current.value = row
@@ -390,7 +428,7 @@ function openAccess(row: any) {
 
 function openChat(row: any) {
   current.value = row
-  const url = `${chatOrigin.value}/chat/?app=${row.id || ''}&apikey=${row.apikey || ''}&title=${encodeURIComponent(row.name || '')}`
+  const url = `${chatOrigin.value}/chat/?app=${row.id || ''}&title=${encodeURIComponent(row.name || '')}`
   window.open(url, '_blank')
 }
 

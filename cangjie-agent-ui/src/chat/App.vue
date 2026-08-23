@@ -204,7 +204,6 @@ const inputRef = ref<HTMLTextAreaElement | null>(null)
 const showHistory = ref(false)
 
 const applicationId = ref('')
-const apikey = ref('')
 const sessionId = ref('')
 const userId = ref('')
 const embedded = ref(false)
@@ -313,7 +312,7 @@ async function send() {
   scroll()
   typing.value = true
   try {
-    const stream = chatApi.sendStream(apikey.value, {
+    const stream = chatApi.webSendStream({
       applicationId: applicationId.value,
       message: text,
       sessionId: sessionId.value || undefined,
@@ -361,10 +360,10 @@ async function send() {
 }
 
 async function loadSessions() {
-  if (!applicationId.value || !apikey.value) return
+  if (!applicationId.value) return
   ensureUserId()
   try {
-    sessions.value = await chatApi.listSessions(apikey.value, applicationId.value, userId.value)
+    sessions.value = await chatApi.webSessions(applicationId.value, userId.value)
   } catch {
     sessions.value = []
   }
@@ -381,7 +380,7 @@ async function deleteSession(s: any) {
     return // 用户取消
   }
   try {
-    await chatApi.deleteSession(apikey.value, s.sessionId)
+    await chatApi.webDeleteSession(s.sessionId)
     sessions.value = sessions.value.filter((x: any) => x.sessionId !== s.sessionId)
     if (sessionId.value === s.sessionId) {
       sessionId.value = ''
@@ -401,7 +400,7 @@ async function openSession(s: any) {
   sessionId.value = s.sessionId
   messages.value = []
   try {
-    const history = await chatApi.listMessages(apikey.value, s.sessionId)
+    const history = await chatApi.webMessages(s.sessionId)
     messages.value = (history || []).map((m: any) => ({
       role: m.role === 'user' ? 'user' : 'assistant',
       content: m.content,
@@ -419,7 +418,6 @@ async function openSession(s: any) {
 onMounted(() => {
   const params = new URLSearchParams(location.search)
   applicationId.value = params.get('app') || ''
-  apikey.value = params.get('apikey') || ''
   // 优先使用 URL 参数中的 userId（业务方显式传入），否则从 localStorage 读取/生成
   userId.value = params.get('user') || ''
   ensureUserId()
@@ -434,8 +432,8 @@ onMounted(() => {
   showHistory.value = !embedded.value && window.innerWidth >= 1024
   window.addEventListener('resize', onWindowResize)
 
-  if (!applicationId.value || !apikey.value) {
-    configError.value = '缺少 app 或 apikey 参数，请通过后台「智能应用 - 接入方式」获取嵌入地址'
+  if (!applicationId.value) {
+    configError.value = '缺少 app 参数，请通过后台「智能应用 - 接入方式」获取嵌入地址'
     return
   }
   loadConfig()
@@ -445,10 +443,10 @@ onMounted(() => {
 // 加载应用配置（建议问题等）
 async function loadConfig() {
   try {
-    const cfg = await chatApi.getConfig(apikey.value, applicationId.value)
-    if (cfg?.title && !new URLSearchParams(location.search).get('title')) {
-      title.value = cfg.title
-      document.title = cfg.title
+    const cfg = await chatApi.getWebConfig(applicationId.value)
+    if (cfg?.name && !new URLSearchParams(location.search).get('title')) {
+      title.value = cfg.name
+      document.title = cfg.name
     }
     suggestionCards.value = (cfg?.suggestions || [])
       .filter((t: string) => t && t.trim())

@@ -65,6 +65,7 @@
         <module>cangjie-core</module>
         <module>cangjie-service-api</module>
         <module>cangjie-service</module>
+        <module>cangjie-api</module>
         <module>cangjie-start</module>
     </modules>
 
@@ -149,6 +150,11 @@
             <dependency>
                 <groupId>cn.cangjiecloud</groupId>
                 <artifactId>cangjie-observability</artifactId>
+                <version>1.0.0-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>cn.cangjiecloud</groupId>
+                <artifactId>cangjie-api</artifactId>
                 <version>1.0.0-SNAPSHOT</version>
             </dependency>
             <dependency>

@@ -42,6 +42,10 @@ public class LongTermMemoryExtractService {
                 || userMessage == null || aiMessage == null) {
             return;
         }
+        // 应用未启用记忆开关时跳过提取
+        if (!Boolean.TRUE.equals(application.getMemoryEnabled())) {
+            return;
+        }
         try {
             String extractPrompt = buildMemoryExtractPrompt(userMessage.getContent(), aiMessage.getContent());
 

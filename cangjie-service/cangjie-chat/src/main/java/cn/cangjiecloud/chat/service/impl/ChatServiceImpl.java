@@ -129,9 +129,11 @@ public class ChatServiceImpl implements IChatService {
         Context context = buildContext(application, session.getSessionId(), request.getMessage(),
                 retrievalSources, traceId, request.getMessages());
 
-        // 注入长期记忆（如有）
+        // 注入长期记忆（如应用启用了记忆开关）
         List<ChatMessage> messages = new ArrayList<>(context.messages());
-        injectLongTermMemory(request, messages);
+        if (Boolean.TRUE.equals(application.getMemoryEnabled())) {
+            injectLongTermMemory(request, messages);
+        }
 
         // 保存用户消息到数据库
         ChatMessageEntity userMessage = saveUserMessage(session, application, request.getMessage());
@@ -146,9 +148,11 @@ public class ChatServiceImpl implements IChatService {
         ChatMessageEntity aiMessage = saveAiMessage(session, application, chatResponse, retrievalSources, duration);
         updateSessionStats(session, chatResponse);
 
-        // 异步触发长期记忆提取
-        longTermMemoryExtractService.extract(
-                UserContext.getUserId(), application, userMessage, aiMessage);
+        // 异步触发长期记忆提取（仅应用启用记忆开关时）
+        if (Boolean.TRUE.equals(application.getMemoryEnabled())) {
+            longTermMemoryExtractService.extract(
+                    UserContext.getUserId(), application, userMessage, aiMessage);
+        }
 
         // 记录追踪
         recordTrace("chat", "send", traceId, duration, "success",
@@ -213,9 +217,11 @@ public class ChatServiceImpl implements IChatService {
             Context context = buildContext(application, session.getSessionId(), request.getMessage(),
                     retrievalSources, traceId, request.getMessages());
 
-            // 注入长期记忆（如有）
+            // 注入长期记忆（如应用启用了记忆开关）
             List<ChatMessage> messages = new ArrayList<>(context.messages());
-            injectLongTermMemory(request, messages, userId);
+            if (Boolean.TRUE.equals(application.getMemoryEnabled())) {
+                injectLongTermMemory(request, messages, userId);
+            }
 
             // 保存用户消息到数据库
             ChatMessageEntity userMessage = saveUserMessage(session, application, request.getMessage());
@@ -413,9 +419,11 @@ public class ChatServiceImpl implements IChatService {
 
                 updateSessionStats(session, aiMessage);
 
-                // 异步触发长期记忆提取
-                longTermMemoryExtractService.extract(
+                // 异步触发长期记忆提取（仅应用启用记忆开关时）
+                if (Boolean.TRUE.equals(application.getMemoryEnabled())) {
+                    longTermMemoryExtractService.extract(
                         userId, application, userMessage, aiMessage);
+                }
 
                 // 发送完成事件
                 try {

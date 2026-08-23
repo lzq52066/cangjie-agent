@@ -29,6 +29,12 @@ spring:
       mode: never
 
 cangjie:
+  openapi:
+    # 对外接口路径前缀
+    prefix: /api/open
+    # 是否允许网页匿名聊天（免 API Key，仅凭 appId 接入）。本地部署默认开启；
+    # 若需要更严格的安全控制，可关闭后仅允许开发者带 API Key 调用。
+    web-anonymous: true
   observability:
     metrics:
       enabled: true
