@@ -49,6 +49,12 @@ public class LlmTraceQueryDTO {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime endTime;
 
+    /** 输入内容关键词（prompt_content LIKE） */
+    private String promptKeyword;
+
+    /** 输出内容关键词（response_content LIKE） */
+    private String responseKeyword;
+
     /** 页码 */
     private Integer pageNum = 1;
 

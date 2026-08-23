@@ -32,6 +32,14 @@ cangjie:
   observability:
     metrics:
       enabled: true
+    llm-trace:
+      # 是否对 prompt/response 内容脱敏（默认 false，全量明文存储）
+      mask:
+        enabled: false
+      # 是否存储完整 prompt/response 内容（默认 true）
+      store-content: true
+      # 内容最大存储长度（字符，0 表示不限制），超长自动截断
+      max-content-length: 20000
 
   rag:
     query-rewrite:

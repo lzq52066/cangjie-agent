@@ -179,32 +179,61 @@
                       @keyup.enter="loadLlmTraces" />
             <el-input v-model="llmTraceQuery.modelName" placeholder="模型名称" clearable style="width:150px"
                       @keyup.enter="loadLlmTraces" />
+            <el-input v-model="llmTraceQuery.sessionId" placeholder="会话ID" clearable style="width:180px"
+                      @keyup.enter="loadLlmTraces" />
+            <el-input v-model="llmTraceQuery.promptKeyword" placeholder="输入关键词" clearable style="width:140px"
+                      @keyup.enter="loadLlmTraces" />
+            <el-input v-model="llmTraceQuery.responseKeyword" placeholder="输出关键词" clearable style="width:140px"
+                      @keyup.enter="loadLlmTraces" />
             <el-select v-model="llmTraceQuery.status" placeholder="全部状态" clearable style="width:120px" @change="loadLlmTraces">
               <el-option label="成功" value="success" />
               <el-option label="失败" value="fail" />
             </el-select>
+            <el-date-picker
+              v-model="llmTraceQuery.timeRange"
+              type="datetimerange"
+              range-separator="至"
+              start-placeholder="开始时间"
+              end-placeholder="结束时间"
+              format="YYYY-MM-DD HH:mm"
+              value-format="YYYY-MM-DDTHH:mm:ss"
+              style="width: 340px"
+              @change="loadLlmTraces"
+            />
             <el-button type="primary" @click="loadLlmTraces">查询</el-button>
           </div>
         </div>
-        <el-table :data="llmTraces" v-loading="loading" stripe>
+        <el-table :data="llmTraces" v-loading="loading" stripe @row-click="showLlmDetail">
           <el-table-column label="开始时间" width="170">
             <template #default="{ row }">{{ formatTime(row.startTime) }}</template>
           </el-table-column>
-          <el-table-column label="TraceId" prop="traceId" min-width="200" show-overflow-tooltip />
-          <el-table-column label="应用名称" prop="appName" min-width="140" />
-          <el-table-column label="模型" prop="modelName" min-width="120" />
-          <el-table-column label="输入Token" prop="inputTokens" width="110" align="center" />
-          <el-table-column label="输出Token" prop="outputTokens" width="110" align="center" />
-          <el-table-column label="总Token" prop="totalTokens" width="100" align="center" />
-          <el-table-column label="耗时" width="100" align="center">
+          <el-table-column label="TraceId" prop="traceId" min-width="180" show-overflow-tooltip />
+          <el-table-column label="应用名称" prop="appName" min-width="120" />
+          <el-table-column label="模型" prop="modelName" min-width="100" />
+          <el-table-column label="输入" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">{{ truncateContent(row.promptContent) }}</template>
+          </el-table-column>
+          <el-table-column label="输出" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">{{ truncateContent(row.responseContent) }}</template>
+          </el-table-column>
+          <el-table-column label="Token" width="130" align="center">
+            <template #default="{ row }">
+              <span style="font-size:12px">{{ row.inputTokens ?? '-' }} / {{ row.outputTokens ?? '-' }} / {{ row.totalTokens ?? '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="耗时" width="90" align="center">
             <template #default="{ row }">{{ row.duration != null ? row.duration + ' ms' : '-' }}</template>
           </el-table-column>
-          <el-table-column label="状态" width="90" align="center">
+          <el-table-column label="状态" width="80" align="center">
             <template #default="{ row }">
-              <el-tooltip v-if="row.errorMessage" :content="row.errorMessage" placement="top">
-                <el-tag size="small" type="danger">失败</el-tag>
-              </el-tooltip>
-              <el-tag v-else size="small" type="success">成功</el-tag>
+              <el-tag size="small" :type="row.status === 'success' ? 'success' : 'danger'">
+                {{ row.status === 'success' ? '成功' : '失败' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="70" align="center" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" link type="primary" @click.stop="showLlmDetail(row)">详情</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -235,6 +264,37 @@
         <pre class="code-block">{{ pretty(currentLog.result) }}</pre>
       </template>
     </el-dialog>
+
+    <!-- LLM 调用详情抽屉 -->
+    <el-drawer v-model="llmDetailDrawer" title="LLM 调用详情" size="720px" destroy-on-close>
+      <template v-if="currentLlmTrace">
+        <el-descriptions :column="2" border size="small" class="llm-detail-desc">
+          <el-descriptions-item label="开始时间">{{ formatTime(currentLlmTrace.startTime) }}</el-descriptions-item>
+          <el-descriptions-item label="耗时">{{ currentLlmTrace.duration != null ? currentLlmTrace.duration + ' ms' : '-' }}</el-descriptions-item>
+          <el-descriptions-item label="应用">{{ currentLlmTrace.appName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="模型">{{ currentLlmTrace.modelName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="会话 ID">{{ currentLlmTrace.sessionId || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="用户">{{ currentLlmTrace.userId || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="TraceId" :span="2">{{ currentLlmTrace.traceId || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="RequestId" :span="2">{{ currentLlmTrace.requestId || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="输入 Token">{{ currentLlmTrace.inputTokens ?? '-' }}</el-descriptions-item>
+          <el-descriptions-item label="输出 Token">{{ currentLlmTrace.outputTokens ?? '-' }}</el-descriptions-item>
+          <el-descriptions-item label="总 Token">{{ currentLlmTrace.totalTokens ?? '-' }}</el-descriptions-item>
+          <el-descriptions-item label="FinishReason">{{ currentLlmTrace.finishReason || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="状态" :span="2">
+            <el-tag size="small" :type="currentLlmTrace.status === 'success' ? 'success' : 'danger'">
+              {{ currentLlmTrace.status === 'success' ? '成功' : '失败' }}
+            </el-tag>
+          </el-descriptions-item>
+        </el-descriptions>
+        <el-alert v-if="currentLlmTrace.errorMessage" type="error" :closable="false" show-icon
+                  :title="currentLlmTrace.errorMessage" style="margin-top:12px" />
+        <el-divider>输入（Prompt）</el-divider>
+        <div class="llm-content-block">{{ currentLlmTrace.promptContent || '-' }}</div>
+        <el-divider>输出（Response）</el-divider>
+        <div class="llm-content-block">{{ currentLlmTrace.responseContent || '-' }}</div>
+      </template>
+    </el-drawer>
   </div>
 </template>
 
@@ -277,7 +337,7 @@ const metricQuery = reactive({ metricType: '', dateRange: null as [string, strin
 const callTraces = ref<any[]>([])
 const traceQuery = reactive({ traceId: '', module: '', action: '' })
 const llmTraces = ref<any[]>([])
-const llmTraceQuery = reactive({ traceId: '', appName: '', modelName: '', status: '' })
+const llmTraceQuery = reactive({ traceId: '', appName: '', modelName: '', sessionId: '', promptKeyword: '', responseKeyword: '', status: '', timeRange: null as [string, string] | null })
 
 // 图表相关
 const hasMetricsData = computed(() => systemMetrics.value.length > 0)
@@ -521,7 +581,13 @@ async function loadTraces() {
 async function loadLlmTraces() {
   loading.value = true
   try {
-    const page = await observabilityApi.llmTraces({ ...llmTraceQuery, pageNum: pageNum.value, pageSize: pageSize.value })
+    const params: any = { ...llmTraceQuery, pageNum: pageNum.value, pageSize: pageSize.value }
+    if (llmTraceQuery.timeRange) {
+      params.startTime = llmTraceQuery.timeRange[0]
+      params.endTime = llmTraceQuery.timeRange[1]
+    }
+    delete params.timeRange
+    const page = await observabilityApi.llmTraces(params)
     llmTraces.value = page?.records || []
     total.value = page?.total || 0
   } finally {
@@ -570,6 +636,34 @@ const currentLog = ref<any>(null)
 function showLog(row: any) {
   currentLog.value = row
   logDialog.value = true
+}
+
+// LLM 调用详情抽屉
+const llmDetailDrawer = ref(false)
+const currentLlmTrace = ref<any>(null)
+
+/** 从列表行直接展示（已有完整数据） */
+function showLlmDetail(row: any) {
+  currentLlmTrace.value = row
+  llmDetailDrawer.value = true
+}
+
+/** 截断内容用于列表预览（取 JSON 摘要） */
+function truncateContent(content: string | null | undefined): string {
+  if (!content) return '-'
+  let text = content
+  try {
+    // 尝试解析 JSON 列表，提取每条消息的 role + content 摘要
+    const arr = JSON.parse(content)
+    if (Array.isArray(arr)) {
+      text = arr.map((m: any) => {
+        const role = m.role || '?'
+        const c = typeof m.content === 'string' ? m.content : (m.content ? JSON.stringify(m.content) : '')
+        return `[${role}] ${c}`
+      }).join('  ')
+    }
+  } catch { /* 不是 JSON 或不需解析 */ }
+  return text.length > 120 ? text.substring(0, 120) + '...' : text
 }
 
 onMounted(() => {
@@ -630,6 +724,22 @@ function handleResize() {
 }
 .empty-hint {
   padding: 40px 0;
+}
+.llm-detail-desc {
+  margin-bottom: 4px;
+}
+.llm-content-block {
+  background: #fafafa;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  padding: 12px;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 13px;
+  line-height: 1.8;
+  font-family: 'Menlo', 'Consolas', monospace;
 }
 @media (max-width: 1200px) {
   .metrics-charts { grid-template-columns: 1fr; }

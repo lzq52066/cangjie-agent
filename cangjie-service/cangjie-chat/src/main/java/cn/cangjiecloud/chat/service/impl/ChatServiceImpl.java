@@ -10,9 +10,9 @@ import cn.cangjiecloud.application.entity.ApplicationEntity;
 import cn.cangjiecloud.application.service.IApplicationService;
 import cn.cangjiecloud.chat.entity.ChatMessageEntity;
 import cn.cangjiecloud.chat.entity.ChatSessionEntity;
-import cn.cangjiecloud.observability.entity.LlmTraceEntity;
 import cn.cangjiecloud.chat.service.IChatMessageService;
-import cn.cangjiecloud.observability.service.ILlmTraceService;
+import cn.cangjiecloud.observability.context.TraceContext;
+import cn.cangjiecloud.observability.service.ILlmTraceRecorder;
 import cn.cangjiecloud.chat.service.IChatService;
 import cn.cangjiecloud.chat.service.IChatSessionService;
 import cn.cangjiecloud.chat.service.LongTermMemoryExtractService;
@@ -56,9 +56,6 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -86,7 +83,7 @@ public class ChatServiceImpl implements IChatService {
     private final IPromptTemplateService promptTemplateService;
     private final ILongTermMemoryService longTermMemoryService;
     private final LongTermMemoryExtractService longTermMemoryExtractService;
-    private final ILlmTraceService llmTraceService;
+    private final ILlmTraceRecorder llmTraceRecorder;
     private final IToolService toolService;
     private final ISkillService skillService;
     private final IRuleService ruleService;
@@ -115,6 +112,11 @@ public class ChatServiceImpl implements IChatService {
 
         ApplicationEntity application = getApplication(request.getApplicationId());
         ChatSessionEntity session = getOrCreateSession(request, application);
+
+        // 设置链路上下文，供 LlmTraceRecorder 及其他下游自动获取
+        TraceContext.setTraceId(traceId);
+        TraceContext.setSessionId(session.getSessionId());
+        TraceContext.setUserId(UserContext.getUserId());
         List<Map<String, Object>> retrievalSources = new ArrayList<>();
 
         // === 工作流路由 ===
@@ -172,9 +174,14 @@ public class ChatServiceImpl implements IChatService {
         String traceId = UUID.randomUUID().toString().replace("-", "");
         long chatStart = System.currentTimeMillis();
 
+        // 设置链路上下文
+        TraceContext.setTraceId(traceId);
+        TraceContext.setUserId(userId);
+
         try {
             ApplicationEntity application = getApplication(request.getApplicationId());
             ChatSessionEntity session = getOrCreateSession(request, application);
+            TraceContext.setSessionId(session.getSessionId());
             List<Map<String, Object>> retrievalSources = new ArrayList<>();
 
             // === 工作流路由 ===
@@ -357,9 +364,16 @@ public class ChatServiceImpl implements IChatService {
                             System.currentTimeMillis() - llmStart, "fail",
                             "模型调用失败: " + streamErrorMessage.get());
                 }
-                recordLlmTrace(application, session.getSessionId(), userId, traceId, requestId, modelName,
-                        conversation, null, null, null, null, null,
-                        System.currentTimeMillis() - llmStart, "fail", streamErrorMessage.get(), llmStart);
+                llmTraceRecorder.recordFailure(ILlmTraceRecorder.LlmTraceRecord.builder()
+                        .requestId(requestId)
+                        .appId(application.getId())
+                        .appName(application.getName())
+                        .modelId(application.getModelId())
+                        .modelName(modelName)
+                        .promptContent(JSON.toJSONString(conversation))
+                        .duration(System.currentTimeMillis() - llmStart)
+                        .startTimeMs(llmStart)
+                        .build(), streamErrorMessage.get());
             } else {
                 if (traceCollector != null) {
                     recordTrace("chat", "llm_call", traceId,
@@ -381,9 +395,21 @@ public class ChatServiceImpl implements IChatService {
                         retrievalSources, duration);
 
                 // 记录 LLM 调用可观测数据
-                recordLlmTrace(application, session.getSessionId(), userId, traceId, requestId, modelName,
-                        conversation, inputTokens, outputTokens, totalTokens, fullContent.toString(), streamFinishReason.get(),
-                        System.currentTimeMillis() - llmStart, "success", null, llmStart);
+                llmTraceRecorder.recordSuccess(ILlmTraceRecorder.LlmTraceRecord.builder()
+                        .requestId(requestId)
+                        .appId(application.getId())
+                        .appName(application.getName())
+                        .modelId(application.getModelId())
+                        .modelName(modelName)
+                        .promptContent(JSON.toJSONString(conversation))
+                        .inputTokens(inputTokens)
+                        .outputTokens(outputTokens)
+                        .totalTokens(totalTokens)
+                        .responseContent(fullContent.toString())
+                        .finishReason(streamFinishReason.get())
+                        .duration(System.currentTimeMillis() - llmStart)
+                        .startTimeMs(llmStart)
+                        .build());
 
                 updateSessionStats(session, aiMessage);
 
@@ -751,9 +777,16 @@ public class ChatServiceImpl implements IChatService {
                             System.currentTimeMillis() - llmStart, "fail",
                             "模型调用失败: " + e.getMessage());
                 }
-                recordLlmTrace(application, sessionId, userId, traceId, "chatcmpl-" + traceId, modelName,
-                        conversation, null, null, null, null, null,
-                        System.currentTimeMillis() - llmStart, "fail", e.getMessage(), llmStart);
+                llmTraceRecorder.recordFailure(ILlmTraceRecorder.LlmTraceRecord.builder()
+                        .requestId("chatcmpl-" + traceId)
+                        .appId(application.getId())
+                        .appName(application.getName())
+                        .modelId(application.getModelId())
+                        .modelName(modelName)
+                        .promptContent(JSON.toJSONString(conversation))
+                        .duration(System.currentTimeMillis() - llmStart)
+                        .startTimeMs(llmStart)
+                        .build(), e.getMessage());
                 log.error("模型调用失败: app={}, model={}", application.getName(), application.getModelId(), e);
                 throw new ApiException("模型调用失败: " + e.getMessage());
             }
@@ -800,44 +833,23 @@ public class ChatServiceImpl implements IChatService {
                     "模型: " + modelName + ", tokens: " + (response != null ? response.getTotalTokens() : 0));
         }
         if (response != null) {
-            recordLlmTrace(application, sessionId, userId, traceId, "chatcmpl-" + traceId, modelName,
-                    conversation, (long) response.getPromptTokens(), (long) response.getCompletionTokens(),
-                    (long) response.getTotalTokens(), response.getContent(), response.getFinishReason(),
-                    System.currentTimeMillis() - llmStart, "success", null, llmStart);
+            llmTraceRecorder.recordSuccess(ILlmTraceRecorder.LlmTraceRecord.builder()
+                    .requestId("chatcmpl-" + traceId)
+                    .appId(application.getId())
+                    .appName(application.getName())
+                    .modelId(application.getModelId())
+                    .modelName(modelName)
+                    .promptContent(JSON.toJSONString(conversation))
+                    .inputTokens((long) response.getPromptTokens())
+                    .outputTokens((long) response.getCompletionTokens())
+                    .totalTokens((long) response.getTotalTokens())
+                    .responseContent(response.getContent())
+                    .finishReason(response.getFinishReason())
+                    .duration(System.currentTimeMillis() - llmStart)
+                    .startTimeMs(llmStart)
+                    .build());
         }
         return response;
-    }
-
-    private void recordLlmTrace(ApplicationEntity application, String sessionId, String userId,
-                                String traceId, String requestId, String modelName,
-                                List<ChatMessage> messages, Long inputTokens, Long outputTokens,
-                                Long totalTokens, String responseContent, String finishReason,
-                                long duration, String status, String errorMessage, long startTime) {
-        try {
-            LlmTraceEntity trace = new LlmTraceEntity();
-            trace.setTraceId(traceId);
-            trace.setRequestId(requestId);
-            trace.setAppId(application.getId());
-            trace.setAppName(application.getName());
-            trace.setSessionId(sessionId);
-            trace.setUserId(userId);
-            trace.setModelId(application.getModelId());
-            trace.setModelName(modelName);
-            trace.setPromptContent(JSON.toJSONString(messages));
-            trace.setInputTokens(inputTokens);
-            trace.setOutputTokens(outputTokens);
-            trace.setTotalTokens(totalTokens);
-            trace.setResponseContent(responseContent);
-            trace.setFinishReason(finishReason);
-            trace.setDuration(duration);
-            trace.setStatus(status);
-            trace.setErrorMessage(errorMessage);
-            trace.setStartTime(LocalDateTime.ofInstant(
-                    Instant.ofEpochMilli(startTime), ZoneId.systemDefault()));
-            llmTraceService.save(trace);
-        } catch (Exception ex) {
-            log.warn("LLM trace 记录失败: {}", ex.getMessage());
-        }
     }
 
     private Stream<ChatChunk> callModelStream(ApplicationEntity application,

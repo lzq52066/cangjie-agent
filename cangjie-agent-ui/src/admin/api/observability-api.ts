@@ -38,10 +38,23 @@ export const observabilityApi = {
     traceId?: string
     appName?: string
     modelName?: string
+    sessionId?: string
     status?: string
+    promptKeyword?: string
+    responseKeyword?: string
+    startTime?: string
+    endTime?: string
     pageNum?: number
     pageSize?: number
   }) {
     return request<PageResult<any>>({ method: 'GET', url: '/observability/llm-traces', params })
+  },
+  /** LLM 调用详情 */
+  llmTraceDetail(id: string) {
+    return request<any>({ method: 'GET', url: `/observability/llm-traces/${id}` })
+  },
+  /** 会话 LLM 调用时间线 */
+  llmTraceTimeline(sessionId: string) {
+    return request<any[]>({ method: 'GET', url: '/observability/llm-traces/timeline', params: { sessionId } })
   }
 }

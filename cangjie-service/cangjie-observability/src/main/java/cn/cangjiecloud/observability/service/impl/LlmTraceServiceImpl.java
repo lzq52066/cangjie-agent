@@ -13,6 +13,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.List;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -31,10 +33,25 @@ public class LlmTraceServiceImpl extends ServiceImpl<LlmTraceMapper, LlmTraceEnt
                 .eq(StringUtils.hasText(query.getModelId()), LlmTraceEntity::getModelId, query.getModelId())
                 .like(StringUtils.hasText(query.getModelName()), LlmTraceEntity::getModelName, query.getModelName())
                 .eq(StringUtils.hasText(query.getStatus()), LlmTraceEntity::getStatus, query.getStatus())
+                .like(StringUtils.hasText(query.getPromptKeyword()), LlmTraceEntity::getPromptContent, query.getPromptKeyword())
+                .like(StringUtils.hasText(query.getResponseKeyword()), LlmTraceEntity::getResponseContent, query.getResponseKeyword())
                 .ge(query.getStartTime() != null, LlmTraceEntity::getStartTime, query.getStartTime())
                 .le(query.getEndTime() != null, LlmTraceEntity::getStartTime, query.getEndTime())
                 .orderByDesc(LlmTraceEntity::getStartTime);
         return page(new Page<>(query.getPageNum() == null ? 1 : query.getPageNum(),
                 query.getPageSize() == null ? 10 : query.getPageSize()), wrapper);
+    }
+
+    @Override
+    public LlmTraceEntity getDetail(String id) {
+        return getById(id);
+    }
+
+    @Override
+    public List<LlmTraceEntity> timeline(String sessionId) {
+        LambdaQueryWrapper<LlmTraceEntity> wrapper = new LambdaQueryWrapper<LlmTraceEntity>()
+                .eq(LlmTraceEntity::getSessionId, sessionId)
+                .orderByAsc(LlmTraceEntity::getStartTime);
+        return list(wrapper);
     }
 }
