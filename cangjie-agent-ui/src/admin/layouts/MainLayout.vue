@@ -68,6 +68,7 @@ const userStore = useUserStore()
 const activeMenu = computed(() => {
   if (route.path.startsWith('/system/role')) return '/system/role'
   if (route.path.startsWith('/system/menu')) return '/system/menu'
+  if (route.path.startsWith('/observability/eval')) return '/observability/eval'
   const segments = route.path.split('/').filter(Boolean)
   return '/' + (segments[0] || 'dashboard')
 })

@@ -10,6 +10,7 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
@@ -17,6 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Spliterator;
 import java.util.Spliterators;
 import java.util.concurrent.BlockingQueue;
@@ -41,23 +43,51 @@ public class OpenAICompatibleClient {
     }
 
     /**
-     * 同步对话
+     * 同步对话（支持 Function Calling）
      */
     public ChatResponse chat(ChatRequest request) {
         dev.langchain4j.model.chat.ChatModel chatModel = buildChatModel(request);
         List<dev.langchain4j.data.message.ChatMessage> messages = convertMessages(request.getMessages());
-        dev.langchain4j.model.chat.response.ChatResponse response = chatModel.chat(messages);
-        AiMessage ai = response.aiMessage();
 
-        return ChatResponse.builder()
+        // 构建 langchain4j ChatRequest（携带 tools）
+        dev.langchain4j.model.chat.request.ChatRequest.Builder lcBuilder =
+                dev.langchain4j.model.chat.request.ChatRequest.builder().messages(messages);
+
+        if (request.getTools() != null && !request.getTools().isEmpty()) {
+            lcBuilder.toolSpecifications(convertTools(request.getTools()));
+            lcBuilder.toolChoice(
+                request.getToolChoice() != null && !"none".equals(request.getToolChoice())
+                    ? dev.langchain4j.model.chat.request.ToolChoice.AUTO
+                    : dev.langchain4j.model.chat.request.ToolChoice.NONE
+            );
+        }
+
+        dev.langchain4j.model.chat.response.ChatResponse lcResponse = chatModel.chat(lcBuilder.build());
+        AiMessage ai = lcResponse.aiMessage();
+
+        ChatResponse.ChatResponseBuilder builder = ChatResponse.builder()
                 .content(ai.text())
                 .role("assistant")
                 .model(modelConfig.getModelName())
-                .promptTokens(response.tokenUsage() != null ? response.tokenUsage().inputTokenCount() : 0)
-                .completionTokens(response.tokenUsage() != null ? response.tokenUsage().outputTokenCount() : 0)
-                .totalTokens(response.tokenUsage() != null ? response.tokenUsage().totalTokenCount() : 0)
-                .finishReason(response.finishReason() != null ? response.finishReason().name() : null)
-                .build();
+                .promptTokens(lcResponse.tokenUsage() != null ? lcResponse.tokenUsage().inputTokenCount() : 0)
+                .completionTokens(lcResponse.tokenUsage() != null ? lcResponse.tokenUsage().outputTokenCount() : 0)
+                .totalTokens(lcResponse.tokenUsage() != null ? lcResponse.tokenUsage().totalTokenCount() : 0)
+                .finishReason(lcResponse.finishReason() != null ? lcResponse.finishReason().name() : null);
+
+        // 解析工具调用
+        if (ai.hasToolExecutionRequests()) {
+            List<ChatResponse.ToolCall> toolCalls = new ArrayList<>();
+            for (dev.langchain4j.agent.tool.ToolExecutionRequest req : ai.toolExecutionRequests()) {
+                toolCalls.add(ChatResponse.ToolCall.builder()
+                        .id(req.id())
+                        .name(req.name())
+                        .arguments(req.arguments())
+                        .build());
+            }
+            builder.toolCalls(toolCalls);
+        }
+
+        return builder.build();
     }
 
     /**
@@ -76,14 +106,23 @@ public class OpenAICompatibleClient {
                 .topP(request.getTopP())
                 .build();
 
-        dev.langchain4j.model.chat.request.ChatRequest langchainRequest =
-                dev.langchain4j.model.chat.request.ChatRequest.builder()
-                        .messages(messages)
-                        .build();
+        dev.langchain4j.model.chat.request.ChatRequest.Builder lcBuilder =
+                dev.langchain4j.model.chat.request.ChatRequest.builder().messages(messages);
+
+        if (request.getTools() != null && !request.getTools().isEmpty()) {
+            lcBuilder.toolSpecifications(convertTools(request.getTools()));
+            lcBuilder.toolChoice(
+                request.getToolChoice() != null && !"none".equals(request.getToolChoice())
+                    ? dev.langchain4j.model.chat.request.ToolChoice.AUTO
+                    : dev.langchain4j.model.chat.request.ToolChoice.NONE
+            );
+        }
+
+        dev.langchain4j.model.chat.request.ChatRequest lcRequest = lcBuilder.build();
 
         new Thread(() -> {
             try {
-                streamingModel.chat(langchainRequest, new StreamingChatResponseHandler() {
+                streamingModel.chat(lcRequest, new StreamingChatResponseHandler() {
                     @Override
                     public void onPartialResponse(String token) {
                         try {
@@ -98,14 +137,29 @@ public class OpenAICompatibleClient {
                         try {
                             String finishReason = response.finishReason() != null ? response.finishReason().name() : "stop";
                             var usage = response.tokenUsage();
-                            queue.put(ChatChunk.builder()
+                            ChatChunk.ChatChunkBuilder chunkBuilder = ChatChunk.builder()
                                     .delta("")
                                     .done(true)
                                     .finishReason(finishReason)
                                     .inputTokens(usage != null ? (long) usage.inputTokenCount() : null)
                                     .outputTokens(usage != null ? (long) usage.outputTokenCount() : null)
-                                    .totalTokens(usage != null ? (long) usage.totalTokenCount() : null)
-                                    .build());
+                                    .totalTokens(usage != null ? (long) usage.totalTokenCount() : null);
+
+                            // 流式响应中的工具调用
+                            AiMessage ai = response.aiMessage();
+                            if (ai.hasToolExecutionRequests()) {
+                                List<ChatResponse.ToolCall> toolCalls = new ArrayList<>();
+                                for (dev.langchain4j.agent.tool.ToolExecutionRequest req : ai.toolExecutionRequests()) {
+                                    toolCalls.add(ChatResponse.ToolCall.builder()
+                                            .id(req.id())
+                                            .name(req.name())
+                                            .arguments(req.arguments())
+                                            .build());
+                                }
+                                chunkBuilder.toolCalls(toolCalls);
+                            }
+
+                            queue.put(chunkBuilder.build());
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                         }
@@ -174,6 +228,8 @@ public class OpenAICompatibleClient {
         return embedding.vector();
     }
 
+    // ============ 私有方法 ============
+
     private dev.langchain4j.model.chat.ChatModel buildChatModel(ChatRequest request) {
         return OpenAiChatModel.builder()
                 .apiKey(modelConfig.getApiKey())
@@ -182,6 +238,7 @@ public class OpenAICompatibleClient {
                 .temperature(request.getTemperature())
                 .maxTokens(request.getMaxTokens() > 0 ? request.getMaxTokens() : modelConfig.getMaxTokens())
                 .topP(request.getTopP())
+                .strictTools(true)
                 .build();
     }
 
@@ -193,10 +250,72 @@ public class OpenAICompatibleClient {
                 case "system" -> result.add(SystemMessage.from(msg.getContent()));
                 case "user" -> result.add(UserMessage.from(msg.getContent()));
                 case "assistant" -> result.add(AiMessage.from(msg.getContent()));
+                case "tool" -> result.add(dev.langchain4j.data.message.ToolExecutionResultMessage.from(
+                        msg.getToolName() != null ? msg.getToolName() : "",
+                        msg.getToolCallId() != null ? msg.getToolCallId() : "",
+                        msg.getContent()));
                 default -> result.add(UserMessage.from(msg.getContent()));
             }
         }
         return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<dev.langchain4j.agent.tool.ToolSpecification> convertTools(
+            List<Map<String, Object>> tools) {
+        List<dev.langchain4j.agent.tool.ToolSpecification> result = new ArrayList<>();
+        if (tools == null) return result;
+        for (Map<String, Object> tool : tools) {
+            Map<String, Object> function = (Map<String, Object>) tool.get("function");
+            if (function == null) continue;
+            String name = (String) function.get("name");
+            String description = (String) function.get("description");
+            Map<String, Object> params = (Map<String, Object>) function.get("parameters");
+
+            dev.langchain4j.agent.tool.ToolSpecification.Builder specBuilder =
+                    dev.langchain4j.agent.tool.ToolSpecification.builder()
+                            .name(name)
+                            .description(description != null ? description : "");
+
+            if (params != null) {
+                specBuilder.parameters(buildJsonSchema(params));
+            }
+
+            result.add(specBuilder.build());
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private JsonObjectSchema buildJsonSchema(Map<String, Object> params) {
+        JsonObjectSchema.Builder builder = JsonObjectSchema.builder();
+        Map<String, Object> properties = (Map<String, Object>) params.get("properties");
+        if (properties != null) {
+            for (Map.Entry<String, Object> entry : properties.entrySet()) {
+                Map<String, Object> prop = (Map<String, Object>) entry.getValue();
+                String type = (String) prop.get("type");
+                String desc = (String) prop.get("description");
+                addProperty(builder, entry.getKey(), type, desc != null ? desc : "");
+            }
+        }
+        List<String> required = (List<String>) params.get("required");
+        if (required != null && !required.isEmpty()) {
+            builder.required(required);
+        }
+        return builder.build();
+    }
+
+    private void addProperty(JsonObjectSchema.Builder builder, String name, String type, String desc) {
+        if ("string".equals(type)) {
+            builder.addStringProperty(name, desc);
+        } else if ("integer".equals(type)) {
+            builder.addIntegerProperty(name, desc);
+        } else if ("number".equals(type)) {
+            builder.addNumberProperty(name, desc);
+        } else if ("boolean".equals(type)) {
+            builder.addBooleanProperty(name, desc);
+        }
+        // 其他复杂类型（array/object）暂时跳过，不影响主流场景
     }
 
     /**

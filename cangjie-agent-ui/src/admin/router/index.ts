@@ -27,6 +27,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'application', component: () => import('../views/ApplicationView.vue'), meta: { title: '智能应用' } },
       { path: 'channel', component: () => import('../views/ChannelView.vue'), meta: { title: '渠道接入' } },
       { path: 'observability', component: () => import('../views/ObservabilityView.vue'), meta: { title: '可观测性' } },
+      { path: 'observability/eval', component: () => import('../views/EvalView.vue'), meta: { title: '评估体系' } },
       { path: 'file', component: () => import('../views/FileView.vue'), meta: { title: '文件管理' } },
       { path: 'system/role', component: () => import('../views/system/RoleView.vue'), meta: { title: '角色管理' } },
       { path: 'system/menu', component: () => import('../views/system/MenuView.vue'), meta: { title: '菜单管理' } },

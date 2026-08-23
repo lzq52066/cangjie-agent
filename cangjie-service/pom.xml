@@ -25,6 +25,7 @@
         <module>cangjie-system</module>
         <module>cangjie-chat</module>
         <module>cangjie-prompt</module>
+        <module>cangjie-eval</module>
     </modules>
 </project>
 

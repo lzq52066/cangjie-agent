@@ -6,6 +6,7 @@ import cn.cangjiecloud.tool.annotation.ToolHandlerType;
 import cn.cangjiecloud.tool.api.dto.ToolExecuteResultDTO;
 import cn.cangjiecloud.tool.entity.ToolEntity;
 import cn.cangjiecloud.tool.executor.McpClientExecutor;
+import cn.cangjiecloud.tool.mcp.McpClientManager;
 import cn.cangjiecloud.tool.util.ToolNaming;
 import cn.cangjiecloud.core.tool.ToolSpecification;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +21,12 @@ import java.util.Map;
 @Component
 @ToolHandlerType(ToolConstants.ToolType.MCP)
 public class McpToolHandler extends AbsToolHandler {
+
+    private final McpClientManager mcpClientManager;
+
+    public McpToolHandler(McpClientManager mcpClientManager) {
+        this.mcpClientManager = mcpClientManager;
+    }
 
     @Override
     public ToolSpecification buildToolSpecification(ToolEntity entity) {
@@ -40,7 +47,7 @@ public class McpToolHandler extends AbsToolHandler {
             String serverUrl = (String) config.getOrDefault("serverUrl", "");
             String toolName = entity.getFunctionName();
 
-            String result = new McpClientExecutor().execute(serverUrl, toolName, params);
+            String result = new McpClientExecutor(mcpClientManager).execute(serverUrl, toolName, params);
             long cost = System.currentTimeMillis() - start;
             log.info("MCP 工具执行成功: {} ({}), 耗时 {}ms", entity.getName(), entity.getId(), cost);
             return ToolExecuteResultDTO.builder()

@@ -28,6 +28,29 @@ spring:
     init:
       mode: never
 
+cangjie:
+  observability:
+    metrics:
+      enabled: true
+
+  rag:
+    query-rewrite:
+      enabled: false
+      type: none
+      llm:
+        api-key: ${OPENAI_API_KEY:}
+        base-url: ${OPENAI_BASE_URL:http://localhost:11434/v1}
+        model: gpt-4o-mini
+        temperature: 0.3
+        max-tokens: 200
+
+  workflow:
+    execution:
+      retry:
+        max-retries: 3
+        delay-ms: 1000
+        backoff-multiplier: 2.0
+
 mybatis-plus:
   global-config:
     db-config:

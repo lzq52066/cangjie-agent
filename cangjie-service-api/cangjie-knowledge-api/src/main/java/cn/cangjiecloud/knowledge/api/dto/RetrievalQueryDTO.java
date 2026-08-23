@@ -22,4 +22,7 @@ public class RetrievalQueryDTO {
 
     /** 是否启用全文检索 */
     private Boolean enableFullText = true;
+
+    /** 是否启用查询改写（默认 false；开启后改写器按系统配置执行） */
+    private Boolean rewrite = false;
 }

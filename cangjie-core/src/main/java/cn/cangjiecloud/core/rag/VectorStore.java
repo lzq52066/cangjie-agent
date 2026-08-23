@@ -55,6 +55,32 @@ public interface VectorStore {
      */
     void deleteByDocument(String documentId);
 
+    // ==================== 多粒度索引：文档级摘要向量 ====================
+
+    /**
+     * 存储文档级摘要向量
+     *
+     * @param documentId 文档 ID
+     * @param embedding  摘要向量
+     * @param summary    摘要文本
+     */
+    void storeDocumentSummary(String documentId, float[] embedding, String summary);
+
+    /**
+     * 检索文档级摘要（two-stage 第一阶段：筛选候选文档）
+     *
+     * @param queryEmbedding  查询向量
+     * @param knowledgeBaseId 知识库 ID
+     * @param topK            候选文档数量上限
+     * @return 文档 ID 列表，按相似度降序
+     */
+    List<String> searchDocumentSummaries(float[] queryEmbedding, String knowledgeBaseId, int topK);
+
+    /**
+     * 按文档 ID 列表做段落级向量检索（two-stage 第二阶段：精准段落检索）
+     */
+    List<RetrievalResult> searchByDocumentIds(float[] queryEmbedding, List<String> documentIds, int topK);
+
     /**
      * 向量条目
      */

@@ -4,6 +4,7 @@ import cn.cangjiecloud.observability.entity.SystemMetricEntity;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -17,7 +18,7 @@ public interface ISystemMetricService extends IService<SystemMetricEntity> {
     List<SystemMetricEntity> collect();
 
     /**
-     * 分页查询系统指标
+     * 分页查询系统指标（支持时间范围筛选）
      */
-    IPage<SystemMetricEntity> pageQuery(String metricType, Integer pageNum, Integer pageSize);
+    IPage<SystemMetricEntity> pageQuery(String metricType, LocalDateTime startTime, LocalDateTime endTime, Integer pageNum, Integer pageSize);
 }

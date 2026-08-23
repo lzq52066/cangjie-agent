@@ -17,6 +17,7 @@ import cn.cangjiecloud.common.exception.ApiException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
@@ -26,6 +27,7 @@ import java.util.concurrent.Executor;
 /**
  * 对话开放接口：通过应用 API Key 鉴权，不要求 Sa-Token 登录。
  */
+@Slf4j
 @RestController
 @RequiredArgsConstructor
 @RequestMapping(AppConst.CHAT_API)
@@ -95,12 +97,23 @@ public class ChatController {
     @GetMapping("/messages/{sessionId}")
     public R<List<ChatMessageEntity>> listMessages(@PathVariable String sessionId,
                                                    HttpServletRequest httpRequest) {
+        long t0 = System.currentTimeMillis();
+
         ChatSessionEntity session = chatSessionService.getBySessionId(sessionId);
         if (session == null) {
             throw new ApiException("会话不存在");
         }
+        long t1 = System.currentTimeMillis();
+
         validateApikey(httpRequest, session.getApplicationId());
-        return R.data(chatMessageService.listBySession(sessionId));
+        long t2 = System.currentTimeMillis();
+
+        List<ChatMessageEntity> messages = chatMessageService.listBySession(sessionId);
+        long t3 = System.currentTimeMillis();
+
+        log.info("[耗时] sessionId={} | getSession={}ms | validateApikey={}ms | listMessages={}ms | total={}ms",
+                sessionId, t1 - t0, t2 - t1, t3 - t2, t3 - t0);
+        return R.data(messages);
     }
 
     @DeleteMapping("/sessions/{sessionId}")

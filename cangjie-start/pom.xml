@@ -71,6 +71,11 @@
         </dependency>
         <dependency>
             <groupId>cn.cangjiecloud</groupId>
+            <artifactId>cangjie-eval</artifactId>
+            <version>1.0.0-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.cangjiecloud</groupId>
             <artifactId>cangjie-oss</artifactId>
             <version>1.0.0-SNAPSHOT</version>
         </dependency>

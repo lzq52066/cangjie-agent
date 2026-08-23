@@ -13,6 +13,7 @@ import cn.dev33.satoken.annotation.SaCheckLogin;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -52,13 +53,16 @@ public class ObservabilityController {
     }
 
     /**
-     * 系统指标分页
+     * 系统指标分页（支持时间范围筛选）
      */
     @GetMapping("/metrics")
-    public R<IPage<SystemMetricEntity>> metrics(@RequestParam(required = false) String metricType,
-                                                @RequestParam(defaultValue = "1") Integer pageNum,
-                                                @RequestParam(defaultValue = "10") Integer pageSize) {
-        return R.data(systemMetricService.pageQuery(metricType, pageNum, pageSize));
+    public R<IPage<SystemMetricEntity>> metrics(
+            @RequestParam(required = false) String metricType,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startTime,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endTime,
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(systemMetricService.pageQuery(metricType, startTime, endTime, pageNum, pageSize));
     }
 
     /**

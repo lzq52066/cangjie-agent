@@ -30,15 +30,15 @@ public interface KnowledgeParagraphMapper extends BaseMapper<KnowledgeParagraphE
             @Param("topK") int topK);
 
     /**
-     * 全文检索（PostgreSQL ts_vector + ts_query）
+     * 全文检索（pgroonga）
      */
     @Select("""
             SELECT p.*,
-                   ts_rank(p.ts_vector, plainto_tsquery('simple', #{query})) AS rank
+                   pgroonga_score(p.tableoid, p.ctid) AS rank
             FROM knowledge_paragraph p
             WHERE p.deleted = 0
               AND p.knowledge_base_id = #{knowledgeBaseId}
-              AND p.ts_vector @@ plainto_tsquery('simple', #{query})
+              AND p.content &@~ #{query}
             ORDER BY rank DESC
             LIMIT #{topK}
             """)

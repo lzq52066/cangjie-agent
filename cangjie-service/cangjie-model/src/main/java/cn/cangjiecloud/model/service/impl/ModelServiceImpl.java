@@ -16,11 +16,21 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
 public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
         implements IModelService {
+
+    /**
+     * 模型客户端缓存：key = modelId，value = OpenAICompatibleClient
+     * <p>
+     * 避免每次对话都重新创建客户端实例，减少连接开销。
+     * 模型配置变更时通过 {@link #evictClient(String)} 主动失效。
+     */
+    private final Map<String, OpenAICompatibleClient> clientCache = new ConcurrentHashMap<>();
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -74,6 +84,8 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
             entity.setIsDefault(true);
         }
         updateById(entity);
+        // 配置变更后失效缓存，避免生产路径继续使用旧配置
+        evictClient(id);
         return entity;
     }
 
@@ -83,6 +95,7 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
         ModelEntity entity = getById(id);
         if (entity == null) return;
         removeById(id);
+        evictClient(id);
         log.info("模型已删除: {} ({})", entity.getName(), id);
     }
 
@@ -147,28 +160,45 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
         clearOtherDefaults(modelId);
         entity.setIsDefault(true);
         updateById(entity);
+        evictClient(modelId);
     }
 
     /**
-     * 获取模型客户端
+     * 获取模型客户端（带缓存）
      */
     public OpenAICompatibleClient getClient(String modelId) {
-        ModelEntity entity = getById(modelId);
-        if (entity == null) {
-            throw new ApiException("模型不存在: " + modelId);
-        }
-        return new OpenAICompatibleClient(entity);
+        return clientCache.computeIfAbsent(modelId, id -> {
+            ModelEntity entity = getById(id);
+            if (entity == null) {
+                throw new ApiException("模型不存在: " + id);
+            }
+            log.info("创建模型客户端缓存: {} ({})", entity.getName(), id);
+            return new OpenAICompatibleClient(entity);
+        });
     }
 
     /**
-     * 获取默认模型客户端
+     * 获取默认模型客户端（带缓存）
      */
     public OpenAICompatibleClient getDefaultClient() {
         ModelEntity entity = getDefaultModel();
         if (entity == null) {
             throw new ApiException("未配置默认模型");
         }
-        return new OpenAICompatibleClient(entity);
+        return clientCache.computeIfAbsent(entity.getId(), id -> {
+            log.info("创建默认模型客户端缓存: {} ({})", entity.getName(), id);
+            return new OpenAICompatibleClient(entity);
+        });
+    }
+
+    /**
+     * 失效指定模型的客户端缓存
+     */
+    public void evictClient(String modelId) {
+        OpenAICompatibleClient removed = clientCache.remove(modelId);
+        if (removed != null) {
+            log.info("模型客户端缓存已失效: {}", modelId);
+        }
     }
 
     private void clearOtherDefaults(String excludeId) {

@@ -63,26 +63,71 @@
       <template v-else-if="activeTab === 'metrics'">
         <div class="toolbar">
           <div class="toolbar-left">
-            <el-select v-model="metricQuery.metricType" placeholder="全部类型" clearable style="width:160px"
+            <el-select v-model="metricQuery.metricType" placeholder="全部类型" clearable style="width:120px"
                        @change="loadMetrics">
-              <el-option v-for="t in metricTypes" :key="t" :label="t" :value="t" />
+              <el-option v-for="t in metricTypes" :key="t.value" :label="t.label" :value="t.value" />
             </el-select>
-            <el-button type="primary" @click="loadMetrics">查询</el-button>
+            <el-date-picker
+              v-model="metricQuery.dateRange"
+              type="datetimerange"
+              range-separator="至"
+              start-placeholder="开始时间"
+              end-placeholder="结束时间"
+              format="YYYY-MM-DD HH:mm"
+              value-format="YYYY-MM-DDTHH:mm:ss"
+              style="width: 360px"
+              @change="loadMetrics"
+            />
+            <el-button type="primary" :loading="loading" @click="loadMetrics">查询</el-button>
           </div>
-          <el-button type="success" :loading="collecting" @click="handleCollect">
-            <el-icon><Odometer /></el-icon> 立即采集
-          </el-button>
+          <div class="toolbar-right">
+            <el-button type="success" :loading="collecting" @click="handleCollect">
+              <el-icon><Odometer /></el-icon> 立即采集
+            </el-button>
+          </div>
         </div>
-        <el-table :data="systemMetrics" v-loading="loading" stripe>
-          <el-table-column label="采集时间" prop="collectTime" width="180" />
-          <el-table-column label="类型" prop="metricType" width="140" />
-          <el-table-column label="指标名" prop="metricName" min-width="200" />
-          <el-table-column label="数值" width="160" align="right">
-            <template #default="{ row }">{{ formatNumber(row.metricValue) }}</template>
-          </el-table-column>
-          <el-table-column label="单位" prop="unit" width="100" align="center" />
-          <el-table-column label="主机" prop="host" min-width="160" show-overflow-tooltip />
-        </el-table>
+
+        <div v-if="!hasMetricsData && !loading" class="empty-hint">
+          <el-empty description="暂无指标数据，请点击【立即采集】或等待自动采集" />
+        </div>
+
+        <template v-else>
+          <el-alert v-if="metricsTruncated" type="warning" :closable="false" show-icon
+                    :title="`时间范围内共 ${metricsTotal} 条指标，图表仅展示最新 ${systemMetrics.length} 条，建议缩小时间范围或按类型筛选`"
+                    style="margin-bottom:12px" />
+
+          <div class="metrics-charts">
+          <!-- CPU -->
+          <el-card v-if="chartData.cpu" class="chart-card" shadow="hover">
+            <template #header><span class="chart-title">CPU</span></template>
+            <div :ref="el => setChartRef('cpu', el)" class="chart-box"></div>
+          </el-card>
+
+          <!-- 内存 -->
+          <el-card v-if="chartData.memory" class="chart-card" shadow="hover">
+            <template #header><span class="chart-title">内存 (MB)</span></template>
+            <div :ref="el => setChartRef('memory', el)" class="chart-box"></div>
+          </el-card>
+
+          <!-- 线程 -->
+          <el-card v-if="chartData.thread" class="chart-card" shadow="hover">
+            <template #header><span class="chart-title">线程</span></template>
+            <div :ref="el => setChartRef('thread', el)" class="chart-box"></div>
+          </el-card>
+
+          <!-- 磁盘 -->
+          <el-card v-if="chartData.disk" class="chart-card" shadow="hover">
+            <template #header><span class="chart-title">磁盘 (GB)</span></template>
+            <div :ref="el => setChartRef('disk', el)" class="chart-box"></div>
+          </el-card>
+
+          <!-- GC -->
+          <el-card v-if="chartData.gc" class="chart-card" shadow="hover">
+            <template #header><span class="chart-title">GC</span></template>
+            <div :ref="el => setChartRef('gc', el)" class="chart-box"></div>
+          </el-card>
+          </div>
+        </template>
       </template>
 
       <!-- 调用追踪 -->
@@ -165,7 +210,7 @@
         </el-table>
       </template>
 
-      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
+      <el-pagination v-if="activeTab !== 'metrics'" class="pager" background layout="total, sizes, prev, pager, next"
                      :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
                      :page-sizes="[10, 20, 50, 100]" @size-change="reload" @current-change="reload" />
     </el-card>
@@ -194,12 +239,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Odometer } from '@element-plus/icons-vue'
+import * as echarts from 'echarts'
 import { observabilityApi } from '@admin/api/observability-api'
 
-const metricTypes = ['jvm', 'system', 'business']
+const metricTypes = [
+  { label: 'CPU', value: 'cpu' },
+  { label: '内存', value: 'memory' },
+  { label: '线程', value: 'thread' },
+  { label: '磁盘', value: 'disk' },
+  { label: 'GC', value: 'gc' },
+]
 
 const activeTab = ref<'logs' | 'metrics' | 'traces' | 'llm-traces'>('logs')
 const loading = ref(false)
@@ -221,11 +273,169 @@ const stats = computed(() => [
 const operationLogs = ref<any[]>([])
 const logQuery = reactive({ module: '', action: '', status: '' })
 const systemMetrics = ref<any[]>([])
-const metricQuery = reactive({ metricType: '' })
+const metricQuery = reactive({ metricType: '', dateRange: null as [string, string] | null })
 const callTraces = ref<any[]>([])
 const traceQuery = reactive({ traceId: '', module: '', action: '' })
 const llmTraces = ref<any[]>([])
 const llmTraceQuery = reactive({ traceId: '', appName: '', modelName: '', status: '' })
+
+// 图表相关
+const hasMetricsData = computed(() => systemMetrics.value.length > 0)
+const metricsTotal = ref(0)
+const metricsTruncated = computed(() => metricsTotal.value > systemMetrics.value.length)
+const chartRefs: Record<string, any> = {}
+const chartInstances: Record<string, echarts.ECharts> = {}
+const chartData = reactive<Record<string, { categories: string[]; series: { name: string; data: number[] }[]; multiDay: boolean }>>({})
+
+function setChartRef(key: string, el: any) {
+  if (el) chartRefs[key] = el
+}
+
+// 指标名中英映射
+const METRIC_NAME_CN: Record<string, string> = {
+  // 内存
+  heap_used: '堆内存已用',
+  heap_max: '堆内存上限',
+  heap_committed: '堆内存已提交',
+  non_heap_used: '非堆内存已用',
+  // 线程
+  thread_count: '线程数',
+  daemon_thread_count: '守护线程数',
+  peak_thread_count: '峰值线程数',
+  // CPU
+  available_processors: '可用处理器',
+  system_load_average: '系统负载均值',
+  process_cpu_load: '进程CPU使用率',
+  system_cpu_load: '系统CPU使用率',
+  // GC
+  collection_count: 'GC次数',
+  collection_time: 'GC耗时',
+}
+
+function translateMetricName(name: string): string {
+  // 精确匹配
+  if (METRIC_NAME_CN[name]) return METRIC_NAME_CN[name]
+  // 磁盘指标: xxx_total / xxx_usable / xxx_used
+  if (name.endsWith('_total')) return name.replace(/_total$/, '') + ' 总空间'
+  if (name.endsWith('_usable')) return name.replace(/_usable$/, '') + ' 可用空间'
+  if (name.endsWith('_used')) return name.replace(/_used$/, '') + ' 已用空间'
+  // GC 指标: xx_collection_count / xx_collection_time
+  const gcCount = name.match(/^(.+)_collection_count$/)
+  if (gcCount) return gcCount[1] + ' GC次数'
+  const gcTime = name.match(/^(.+)_collection_time$/)
+  if (gcTime) return gcTime[1] + ' GC耗时'
+  return name
+}
+
+function buildChartData(records: any[]): Record<string, { categories: string[]; series: { name: string; data: number[] }[]; multiDay: boolean }> {
+  const result: Record<string, any> = {}
+  const sorted = [...records].sort((a, b) =>
+    new Date(a.collectTime).getTime() - new Date(b.collectTime).getTime()
+  )
+  const timeSet = new Set<string>()
+  sorted.forEach(r => timeSet.add(r.collectTime))
+  const times = Array.from(timeSet)
+
+  // 判断是否跨天
+  let multiDay = false
+  if (times.length >= 2) {
+    const first = times[0].substring(0, 10)
+    const last = times[times.length - 1].substring(0, 10)
+    multiDay = first !== last
+  }
+
+  const grouped: Record<string, Record<string, Map<string, number>>> = {}
+  for (const r of sorted) {
+    const type = r.metricType
+    if (!grouped[type]) grouped[type] = {}
+    if (!grouped[type][r.metricName]) grouped[type][r.metricName] = new Map()
+    grouped[type][r.metricName].set(r.collectTime, r.metricValue)
+  }
+
+  for (const type of Object.keys(grouped)) {
+    const series: { name: string; data: number[] }[] = []
+    for (const name of Object.keys(grouped[type])) {
+      const map = grouped[type][name]
+      series.push({
+        name: translateMetricName(name),
+        data: times.map(t => map.get(t) ?? null as any)
+      })
+    }
+    result[type] = { categories: times, series, multiDay }
+  }
+  return result
+}
+
+function formatAxisTime(t: string, multiDay: boolean): string {
+  if (!t) return ''
+  // t 格式: "2026-08-20T23:38:34"
+  const datePart = t.substring(0, 10)  // "2026-08-20"
+  const timePart = t.substring(11, 16) // "23:38"
+  // 显示简短日期: "08-20" + 时间
+  return multiDay ? datePart.substring(5) + ' ' + timePart : timePart
+}
+
+function renderChart(type: string, data: { categories: string[]; series: { name: string; data: number[] }[]; multiDay?: boolean }) {
+  const dom = chartRefs[type]
+  if (!dom) return
+  if (chartInstances[type]) {
+    chartInstances[type].dispose()
+    delete chartInstances[type]
+  }
+  const chart = echarts.init(dom)
+  chartInstances[type] = chart
+  const multiDay = data.multiDay || false
+  chart.setOption({
+    tooltip: {
+      trigger: 'axis',
+      formatter(params: any) {
+        if (!params || params.length === 0) return ''
+        // tooltip 中显示完整日期时间
+        const fullTime = params[0].axisValue
+        let html = fullTime + '<br/>'
+        for (const p of params) {
+          html += `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color};margin-right:6px"></span>`
+          html += `${p.seriesName}: ${p.value != null ? p.value : '-'}<br/>`
+        }
+        return html
+      }
+    },
+    legend: { top: 0, type: 'scroll' },
+    grid: { left: 60, right: 24, top: 36, bottom: data.categories.length > 200 ? 56 : 48 },
+    xAxis: {
+      type: 'category',
+      data: data.categories.map((t: string) => formatAxisTime(t, multiDay)),
+      axisLabel: { rotate: 30, fontSize: 11 }
+    },
+    yAxis: { type: 'value' },
+    dataZoom: data.categories.length > 200
+      ? [
+          { type: 'inside', start: 0, end: 100 },
+          { type: 'slider', start: 0, end: 100, height: 16, bottom: 8 }
+        ]
+      : [],
+    series: data.series.map((s: any) => ({
+      name: s.name,
+      type: 'line',
+      data: s.data,
+      sampling: 'lttb',
+      smooth: true,
+      connectNulls: true,
+      symbol: 'none'
+    }))
+  })
+}
+
+function renderAllCharts() {
+  nextTick(() => {
+    Object.assign(chartData, buildChartData(systemMetrics.value))
+    nextTick(() => {
+      for (const type of Object.keys(chartData)) {
+        renderChart(type, chartData[type])
+      }
+    })
+  })
+}
 
 function formatNumber(value: any) {
   const num = Number(value)
@@ -273,9 +483,25 @@ async function loadLogs() {
 async function loadMetrics() {
   loading.value = true
   try {
-    const page = await observabilityApi.metrics({ ...metricQuery, pageNum: pageNum.value, pageSize: pageSize.value })
+    // 后端每 60s 采集约 14 条指标；按时间范围动态放大 pageSize，超出上限时提示截断
+    const DEFAULT_SIZE = 500
+    const MAX_SIZE = 5000
+    let size = DEFAULT_SIZE
+    if (metricQuery.dateRange) {
+      const start = new Date(metricQuery.dateRange[0]).getTime()
+      const end = new Date(metricQuery.dateRange[1]).getTime()
+      const minutes = Math.max(1, Math.ceil((end - start) / 60000))
+      size = Math.min(MAX_SIZE, Math.max(DEFAULT_SIZE, minutes * 15 + 100))
+    }
+    const params: any = { metricType: metricQuery.metricType || undefined, pageNum: 1, pageSize: size }
+    if (metricQuery.dateRange) {
+      params.startTime = metricQuery.dateRange[0]
+      params.endTime = metricQuery.dateRange[1]
+    }
+    const page = await observabilityApi.metrics(params)
     systemMetrics.value = page?.records || []
-    total.value = page?.total || 0
+    metricsTotal.value = page?.total || 0
+    renderAllCharts()
   } finally {
     loading.value = false
   }
@@ -313,7 +539,8 @@ function reload() {
 function onTabChange() {
   pageNum.value = 1
   total.value = 0
-  reload()
+  if (activeTab.value === 'metrics') loadMetrics()
+  else reload()
 }
 
 function refresh() {
@@ -326,7 +553,6 @@ async function handleCollect() {
   try {
     const result = await observabilityApi.collectMetrics()
     ElMessage.success(`采集完成，新增 ${result?.length ?? 0} 条指标`)
-    pageNum.value = 1
     loadMetrics()
   } finally {
     collecting.value = false
@@ -349,7 +575,21 @@ function showLog(row: any) {
 onMounted(() => {
   loadDashboard()
   loadLogs()
+  window.addEventListener('resize', handleResize)
 })
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleResize)
+  for (const key of Object.keys(chartInstances)) {
+    chartInstances[key]?.dispose()
+  }
+})
+
+function handleResize() {
+  for (const key of Object.keys(chartInstances)) {
+    chartInstances[key]?.resize()
+  }
+}
 </script>
 
 <style lang="scss" scoped>
@@ -370,5 +610,28 @@ onMounted(() => {
 }
 @media (max-width: 1440px) {
   .stat-grid { grid-template-columns: repeat(3, 1fr); }
+}
+.metrics-charts {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+.chart-card {
+  min-height: 320px;
+}
+.chart-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+}
+.chart-box {
+  width: 100%;
+  height: 300px;
+}
+.empty-hint {
+  padding: 40px 0;
+}
+@media (max-width: 1200px) {
+  .metrics-charts { grid-template-columns: 1fr; }
 }
 </style>

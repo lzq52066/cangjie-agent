@@ -50,6 +50,12 @@
             </el-table-column>
             <el-table-column label="段落数" prop="paragraphCount" width="70" align="center" />
             <el-table-column label="Token数" prop="tokenCount" width="80" align="center" />
+            <el-table-column label="摘要" width="120" align="center">
+              <template #default="{ row }">
+                <el-button v-if="row.summary" size="small" link type="primary" @click="showSummary(row)">查看</el-button>
+                <span v-else class="no-file">-</span>
+              </template>
+            </el-table-column>
             <el-table-column label="源文件" width="100" align="center">
               <template #default="{ row }">
                 <el-button v-if="row.fileId" size="small" link type="info" @click="openFile(row)">
@@ -78,6 +84,12 @@
         <!-- 检索测试 -->
         <el-tab-pane label="检索测试" name="retrieval">
           <div class="retrieval-panel">
+            <div class="retrieval-mode-tip">
+              <el-tag size="small" :type="kb.searchMode === 'two_stage' ? 'primary' : 'info'" effect="plain">
+                {{ kb.searchMode === 'two_stage' ? '摘要先行检索' : '段落检索' }}
+              </el-tag>
+              <span class="mode-tip-text">检索模式取自知识库配置，可在知识库编辑中切换</span>
+            </div>
             <div class="query-row">
               <el-input v-model="retrievalQuery" placeholder="输入检索文本..." type="textarea" :rows="2"
                         @keydown.ctrl.enter="handleSearch" />
@@ -126,6 +138,11 @@
         </el-table-column>
       </el-table>
     </el-dialog>
+
+    <!-- 文档摘要对话框 -->
+    <el-dialog v-model="summaryDialog" :title="`文档摘要 - ${summaryDoc?.name || ''}`" width="640px">
+      <div class="summary-content">{{ summaryDoc?.summary }}</div>
+    </el-dialog>
   </div>
 </template>
 
@@ -158,6 +175,10 @@ const searched = ref(false)
 const paragraphDialog = ref(false)
 const currentDoc = ref<any>(null)
 const paragraphs = ref<any[]>([])
+
+// 摘要对话框
+const summaryDialog = ref(false)
+const summaryDoc = ref<any>(null)
 
 async function loadKb() {
   loading.value = true
@@ -218,6 +239,11 @@ async function showParagraphs(doc: any) {
   paragraphs.value = await knowledgeApi.listParagraphs(doc.id)
 }
 
+function showSummary(doc: any) {
+  summaryDoc.value = doc
+  summaryDialog.value = true
+}
+
 async function handleSearch() {
   if (!retrievalQuery.value.trim()) return
   searching.value = true
@@ -270,6 +296,12 @@ onMounted(() => {
 .kb-title { margin: 0; font-size: 18px; }
 .kb-meta { color: #909399; font-size: 13px; }
 .retrieval-panel { padding: 8px 0; }
+.retrieval-mode-tip { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.mode-tip-text { font-size: 12px; color: #909399; }
+.summary-content {
+  color: #303133; line-height: 1.9; white-space: pre-wrap;
+  max-height: 480px; overflow-y: auto;
+}
 .results-area { margin-top: 20px; }
 .results-header { font-weight: 600; margin-bottom: 12px; color: #606266; }
 .result-item {

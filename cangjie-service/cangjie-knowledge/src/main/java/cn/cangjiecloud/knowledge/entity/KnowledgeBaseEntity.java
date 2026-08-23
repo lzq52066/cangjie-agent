@@ -38,6 +38,9 @@ public class KnowledgeBaseEntity extends BaseEntity {
     /** 目录结构（JSON） */
     private String directory;
 
+    /** 检索模式：simple（段落级检索）/ two_stage（摘要→段落两级检索） */
+    private String searchMode;
+
     /** 状态 */
     private String status;
 }

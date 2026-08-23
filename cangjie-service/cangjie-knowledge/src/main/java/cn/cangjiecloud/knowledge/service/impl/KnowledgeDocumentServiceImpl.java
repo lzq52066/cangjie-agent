@@ -18,6 +18,7 @@ import cn.cangjiecloud.knowledge.entity.KnowledgeDocumentEntity;
 import cn.cangjiecloud.knowledge.entity.KnowledgeParagraphEntity;
 import cn.cangjiecloud.knowledge.mapper.KnowledgeDocumentMapper;
 import cn.cangjiecloud.knowledge.rag.CustomSeparatorTextSplitter;
+import cn.cangjiecloud.knowledge.rag.DocumentSummaryService;
 import cn.cangjiecloud.knowledge.service.IKnowledgeBaseService;
 import cn.cangjiecloud.knowledge.service.IKnowledgeDocumentService;
 import cn.cangjiecloud.knowledge.service.IKnowledgeParagraphService;
@@ -25,6 +26,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayInputStream;
@@ -47,6 +50,7 @@ public class KnowledgeDocumentServiceImpl
     private final EmbeddingProvider embeddingProvider;
     private final VectorStore vectorStore;
     private final IFileService fileService;
+    private final DocumentSummaryService documentSummaryService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -262,6 +266,31 @@ public class KnowledgeDocumentServiceImpl
         // 6. 更新知识库计数
         updateKnowledgeBaseCount(kb.getId());
         log.info("文档处理完成: {} ({} 段落, {} tokens)", doc.getName(), paragraphs.size(), totalTokens);
+
+        // 7. 异步生成文档摘要（用于 two-stage 检索）
+        // 延迟到事务提交后触发，避免 @Async 线程在 READ COMMITTED 下读不到未提交的文档/段落
+        triggerSummaryAfterCommit(doc.getId());
+    }
+
+    /**
+     * 在事务提交后触发文档摘要生成；无活跃事务时直接触发。
+     */
+    private void triggerSummaryAfterCommit(String documentId) {
+        try {
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(
+                        new TransactionSynchronization() {
+                            @Override
+                            public void afterCommit() {
+                                documentSummaryService.generateSummary(documentId);
+                            }
+                        });
+            } else {
+                documentSummaryService.generateSummary(documentId);
+            }
+        } catch (Exception e) {
+            log.warn("触发文档摘要生成失败（不影响主流程）: {}", documentId, e.getMessage());
+        }
     }
 
     private void updateStatus(KnowledgeDocumentEntity doc, DocumentStatus status, String message) {

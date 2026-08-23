@@ -10,7 +10,7 @@
         </el-tag>
       </div>
       <div class="header-right">
-        <el-tooltip content="从开始节点拖出连线即可连接下游节点；选中节点/连线后按 Delete 删除；双击节点打开配置" placement="bottom">
+        <el-tooltip content="悬停节点出现连接点，可任意方向接线（支持左接左、右接左）；Ctrl+Z 撤销；单击选中节点/连线，双击打开配置；选中连线后从节点连接点或线端点拖出可调整接线；Delete 删除选中项" placement="bottom">
           <el-button text><el-icon><QuestionFilled /></el-icon></el-button>
         </el-tooltip>
         <el-button :loading="saving" @click="save(false)">保存</el-button>
@@ -41,11 +41,19 @@
           :delete-key-code="['Delete', 'Backspace']"
           :min-zoom="0.3"
           :max-zoom="2"
+          connection-mode="loose"
+          edges-updatable
           fit-view-on-init
           @init="onInit"
+          @connect-start="onConnectStart"
           @connect="onConnect"
+          @connect-end="onConnectEnd"
           @edge-click="onEdgeClick"
+          @edge-double-click="onEdgeDblClick"
+          @edge-update="onEdgeUpdate"
+          @pane-click="onPaneClick"
           @node-double-click="onNodeDblClick"
+          @node-drag-start="onNodeDragStart"
         >
           <template #node-flow="nodeProps">
             <FlowNodeCard :id="nodeProps.id" :data="nodeProps.data" :selected="nodeProps.selected"
@@ -146,7 +154,28 @@
         </template>
 
         <template v-else-if="configType === 'start'">
-          <el-alert type="info" :closable="false" show-icon title="开始节点无需配置，执行输入将注入为初始变量" />
+          <el-alert type="info" :closable="false" show-icon
+                    title="开始节点无需配置，执行输入将注入为初始变量" />
+        </template>
+
+        <!-- 执行策略：并行 + 失败重试（对所有非开始节点开放） -->
+        <template v-if="configType !== 'start'">
+          <el-divider content-position="left">执行策略</el-divider>
+          <el-form-item label="并行执行">
+            <el-switch v-model="configForm.parallelEnabled" />
+            <div class="field-tip">开启：与同轮就绪节点并发执行；关闭：所在轮次串行执行</div>
+          </el-form-item>
+          <el-form-item label="失败重试">
+            <el-switch v-model="configForm.retryEnabled" />
+          </el-form-item>
+          <template v-if="configForm.retryEnabled">
+            <el-form-item label="最大重试次数">
+              <el-input-number v-model="configForm.retryMaxRetries" :min="1" :max="10" />
+            </el-form-item>
+            <el-form-item label="重试延迟(ms)">
+              <el-input-number v-model="configForm.retryDelayMs" :min="100" :max="60000" :step="500" />
+            </el-form-item>
+          </template>
         </template>
 
         <el-collapse v-if="configType !== 'start'">
@@ -172,23 +201,29 @@
       </div>
     </Teleport>
 
-    <!-- 连线条件 -->
-    <el-dialog v-model="edgeDialog" title="连线条件" width="440px">
-      <el-form label-width="80px">
+    <!-- 连线编辑 -->
+    <el-drawer v-model="edgeDrawer" title="连线编辑" size="440px" direction="rtl" destroy-on-close>
+      <el-form label-width="90px" label-position="top">
+        <el-form-item label="源节点">
+          <el-input :model-value="edgeSourceName" disabled />
+        </el-form-item>
+        <el-form-item label="目标节点">
+          <el-input :model-value="edgeTargetName" disabled />
+        </el-form-item>
         <el-form-item label="条件标签">
           <el-input v-model="edgeCondition" placeholder="可选，condition 节点按此标签选择分支" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="edgeDialog = false">取消</el-button>
+        <el-button @click="edgeDrawer = false">取消</el-button>
         <el-button type="primary" @click="saveEdgeCondition">确定</el-button>
       </template>
-    </el-dialog>
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, QuestionFilled } from '@element-plus/icons-vue'
@@ -223,8 +258,7 @@ const canvasRef = ref<HTMLElement | null>(null)
 const ghost = reactive({ show: false, x: 0, y: 0, type: '' })
 
 const defaultEdgeOptions = {
-  markerEnd: MarkerType.ArrowClosed,
-  style: { stroke: '#b1b1b7', strokeWidth: 1.5 }
+  markerEnd: MarkerType.ArrowClosed
 }
 
 // 节点配置下拉数据源
@@ -387,6 +421,7 @@ function addNodeOfType(type: string, position?: { x: number; y: number }) {
     ElMessage.warning('开始节点只能有一个')
     return
   }
+  commitState()
   const meta = getMeta(type)
   const sameCount = nodes.value.filter(n => n.data?.type === type).length
   nodes.value.push({
@@ -400,12 +435,89 @@ function addNodeOfType(type: string, position?: { x: number; y: number }) {
 function removeNode(nodeId: string) {
   const idx = nodes.value.findIndex(n => n.id === nodeId)
   if (idx < 0) return
+  commitState()
   nodes.value.splice(idx, 1)
-  edges.value = edges.value.filter(e => e.source !== nodeId && e.target !== nodeId)
+  edges.value = edges.value.filter(e => {
+    if (e.source === nodeId || e.target === nodeId) {
+      if (e.id === selectedEdgeId.value) selectedEdgeId.value = null
+      return false
+    }
+    return true
+  })
 }
 
-function onConnect(connection: Connection) {
+const pendingEdgeUpdateId = ref<string | null>(null)
+let pendingConnectFrom: string | null = null
+
+/** 统一连线方向：始终"从拖拽起点节点 → 落点节点"，与 handle 类型（source/target）无关 */
+function normalizeConnection(connection: Connection, fromNodeId: string | null): Connection {
+  if (!fromNodeId || (connection.source !== fromNodeId && connection.target !== fromNodeId)) {
+    return connection
+  }
+  const isFromSource = connection.source === fromNodeId
+  return {
+    source: fromNodeId,
+    sourceHandle: isFromSource ? connection.sourceHandle : connection.targetHandle,
+    target: isFromSource ? connection.target : connection.source,
+    targetHandle: isFromSource ? connection.targetHandle : connection.sourceHandle
+  }
+}
+
+function onConnectStart(payload: any) {
+  // payload = { event, nodeId, handleId, handleType }
+  pendingConnectFrom = payload?.nodeId ?? null
+  if (selectedEdgeId.value) {
+    const selEdge = edges.value.find(e => e.id === selectedEdgeId.value)
+    const nodeId = payload?.nodeId
+    if (selEdge && nodeId && (selEdge.source === nodeId || selEdge.target === nodeId)) {
+      pendingEdgeUpdateId.value = selectedEdgeId.value
+      return
+    }
+  }
+  pendingEdgeUpdateId.value = null
+}
+
+function onConnectEnd() {
+  pendingEdgeUpdateId.value = null
+  pendingConnectFrom = null
+}
+
+function onConnect(raw: Connection) {
+  const connection = normalizeConnection(raw, pendingConnectFrom)
   if (!connection.source || !connection.target || connection.source === connection.target) return
+  commitState()
+
+  // 调整已有连线：pendingEdgeUpdateId 被 onConnectStart 设置
+  if (pendingEdgeUpdateId.value) {
+    const selEdge = edges.value.find(e => e.id === pendingEdgeUpdateId.value)
+    if (selEdge) {
+      const sameExists = edges.value.some(
+        e => e.id !== selEdge.id && e.source === connection.source && e.target === connection.target
+      )
+      if (sameExists) {
+        ElMessage.warning('目标节点之间已存在连线')
+        pendingEdgeUpdateId.value = null
+        return
+      }
+      // 用新数组替换，触发 Vue Flow 的 v-model 同步（原地修改不会同步到内部 store）
+      edges.value = edges.value.map(e => e.id === selEdge.id
+        ? {
+            ...e,
+            source: connection.source,
+            target: connection.target,
+            sourceHandle: connection.sourceHandle,
+            targetHandle: connection.targetHandle,
+            label: '',
+            data: { condition: '' }
+          }
+        : e)
+      const updated = edges.value.find(e => e.id === selEdge.id)
+      if (updated) store.value?.addSelectedEdges([updated as Edge])
+      pendingEdgeUpdateId.value = null
+      return
+    }
+  }
+
   const duplicated = edges.value.some(e => e.source === connection.source && e.target === connection.target)
   if (duplicated) {
     ElMessage.warning('这两个节点之间已存在连线')
@@ -415,6 +527,8 @@ function onConnect(connection: Connection) {
     id: `edge_${Date.now().toString(36)}_${edges.value.length}`,
     source: connection.source,
     target: connection.target,
+    sourceHandle: connection.sourceHandle,
+    targetHandle: connection.targetHandle,
     label: '',
     data: { condition: '' }
   })
@@ -433,7 +547,9 @@ const configForm = reactive<Record<string, any>>({
   name: '', modelId: '', prompt: '', temperature: 0.7,
   knowledgeBaseIds: [], topK: 5, toolId: '', inputText: '',
   expression: '', items: '', maxIterations: 10,
-  url: '', method: 'GET', bodyText: '', script: '', output: '', extraText: ''
+  url: '', method: 'GET', bodyText: '', script: '', output: '', extraText: '',
+  // 执行策略
+  parallelEnabled: true, retryEnabled: false, retryMaxRetries: 2, retryDelayMs: 1000
 })
 
 const STRUCTURED_KEYS: Record<string, string[]> = {
@@ -466,13 +582,20 @@ function openConfig(nodeId: string) {
     script: config.script || '', output: config.output || ''
   })
 
-  // 结构化字段之外的其余字段放到"高级"里
+  // 结构化字段之外的其余字段放到"高级"里（执行策略字段有专门 UI，不重复展示）
   const structured = STRUCTURED_KEYS[configType.value] || []
   const extra: Record<string, any> = {}
   Object.keys(config).forEach(k => {
-    if (!structured.includes(k)) extra[k] = config[k]
+    if (!structured.includes(k) && k !== 'parallel' && k !== 'retry') extra[k] = config[k]
   })
   configForm.extraText = Object.keys(extra).length ? JSON.stringify(extra, null, 2) : ''
+
+  // 执行策略回显
+  configForm.parallelEnabled = config.parallel !== false
+  const retryCfg = config.retry && typeof config.retry === 'object' ? config.retry : null
+  configForm.retryEnabled = retryCfg !== null && retryCfg.enabled !== false
+  configForm.retryMaxRetries = retryCfg?.maxRetries ?? 2
+  configForm.retryDelayMs = retryCfg?.delayMs ?? 1000
   configDrawer.value = true
 }
 
@@ -519,6 +642,23 @@ function saveConfig() {
     config = { output: configForm.output }
   }
 
+  // 执行策略：并行开关（默认并行，仅关闭时写入 parallel=false 供引擎串行执行）
+  if (configForm.parallelEnabled) {
+    delete config.parallel
+  } else {
+    config.parallel = false
+  }
+  // 执行策略：失败重试
+  if (configForm.retryEnabled) {
+    config.retry = {
+      enabled: true,
+      maxRetries: configForm.retryMaxRetries,
+      delayMs: configForm.retryDelayMs
+    }
+  } else {
+    delete config.retry
+  }
+
   if (configForm.extraText.trim()) {
     try {
       config = { ...config, ...JSON.parse(configForm.extraText) }
@@ -528,31 +668,158 @@ function saveConfig() {
     }
   }
 
+  commitState()
   node.data = { ...node.data, name: configForm.name.trim(), config }
   configDrawer.value = false
 }
 
-// ============ 连线条件 ============
+// ============ 连线编辑 ============
 
-const edgeDialog = ref(false)
-const edgeId = ref('')
+const edgeDrawer = ref(false)
+const edgeEditId = ref('')
 const edgeCondition = ref('')
+const selectedEdgeId = ref<string | null>(null)
+const edgeSourceName = computed(() => {
+  const edge = edges.value.find(e => e.id === edgeEditId.value)
+  if (!edge) return ''
+  const sourceNode = nodes.value.find(n => n.id === edge.source)
+  return sourceNode?.data?.name || edge.source
+})
+const edgeTargetName = computed(() => {
+  const edge = edges.value.find(e => e.id === edgeEditId.value)
+  if (!edge) return ''
+  const targetNode = nodes.value.find(n => n.id === edge.target)
+  return targetNode?.data?.name || edge.target
+})
 
 function onEdgeClick(payload: any) {
+  const eid = payload?.edge?.id ?? payload?.id
+  if (!eid) return
+  const wasSelected = selectedEdgeId.value === eid
+  const edge = edges.value.find(e => e.id === eid)
+  if (wasSelected) {
+    // 再次点击已选中的线 → 取消选中
+    selectedEdgeId.value = null
+    if (edge) store.value?.removeSelectedEdges([edge as Edge])
+  } else {
+    selectedEdgeId.value = eid
+    if (edge) store.value?.addSelectedEdges([edge as Edge])
+  }
+}
+
+function onEdgeDblClick(payload: any) {
   const edge = payload?.edge ?? payload
   if (!edge?.id) return
-  edgeId.value = edge.id
+  edgeEditId.value = edge.id
   edgeCondition.value = (edge.data as any)?.condition || ''
-  edgeDialog.value = true
+  edgeDrawer.value = true
+}
+
+/** 拖拽线自身端点（edges-updatable）调整接线 */
+function onEdgeUpdate(payload: any) {
+  const { edge, connection } = payload
+  if (!edge?.id || !connection) return
+  const sameExists = edges.value.some(
+    e => e.id !== edge.id && e.source === connection.source && e.target === connection.target
+  )
+  if (sameExists) {
+    ElMessage.warning('目标节点之间已存在连线')
+    return
+  }
+  commitState()
+  // 用新数组替换，触发 Vue Flow 的 v-model 同步（原地修改不会同步到内部 store）
+  edges.value = edges.value.map(e => e.id === edge.id
+    ? {
+        ...e,
+        source: connection.source,
+        target: connection.target,
+        sourceHandle: connection.sourceHandle,
+        targetHandle: connection.targetHandle,
+        label: '',
+        data: { condition: '' }
+      }
+    : e)
+  selectedEdgeId.value = edge.id
+  const updated = edges.value.find(e => e.id === edge.id)
+  if (updated) store.value?.addSelectedEdges([updated as Edge])
+}
+
+function onPaneClick() {
+  selectedEdgeId.value = null
+  store.value?.removeSelectedElements()
+}
+
+// ============ Ctrl+Z 撤销 / 重做 ============
+
+type GraphSnapshot = { nodes: any[]; edges: any[] }
+const undoStack = ref<GraphSnapshot[]>([])
+const redoStack = ref<GraphSnapshot[]>([])
+
+function snapshot(): GraphSnapshot {
+  return {
+    nodes: JSON.parse(JSON.stringify(nodes.value)),
+    edges: JSON.parse(JSON.stringify(edges.value))
+  }
+}
+
+/** 在每次变更前记录当前状态，供 Ctrl+Z 回退（初始化加载阶段不记录） */
+function commitState() {
+  if (loading.value) return
+  undoStack.value.push(snapshot())
+  if (undoStack.value.length > 50) undoStack.value.shift()
+  redoStack.value = []
+}
+
+function applyGraphState(s: GraphSnapshot) {
+  nodes.value = s.nodes
+  edges.value = s.edges
+  selectedEdgeId.value = null
+  pendingEdgeUpdateId.value = null
+  pendingConnectFrom = null
+  store.value?.removeSelectedElements()
+}
+
+function undo() {
+  const prev = undoStack.value.pop()
+  if (!prev) return
+  redoStack.value.push(snapshot())
+  applyGraphState(prev)
+}
+
+function redo() {
+  const next = redoStack.value.pop()
+  if (!next) return
+  undoStack.value.push(snapshot())
+  applyGraphState(next)
+}
+
+function onKeydown(e: KeyboardEvent) {
+  const t = e.target as HTMLElement | null
+  // 输入框中不拦截（避免 Ctrl+Z 影响表单）
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+    e.preventDefault()
+    if (e.shiftKey) redo()
+    else undo()
+  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+    e.preventDefault()
+    redo()
+  }
+}
+
+/** 节点拖动开始前记录位置快照，便于撤销位置变化 */
+function onNodeDragStart() {
+  commitState()
 }
 
 function saveEdgeCondition() {
-  const edge = edges.value.find(e => e.id === edgeId.value)
+  const edge = edges.value.find(e => e.id === edgeEditId.value)
   if (edge) {
+    commitState()
     edge.label = edgeCondition.value
     edge.data = { ...(edge.data || {}), condition: edgeCondition.value }
   }
-  edgeDialog.value = false
+  edgeDrawer.value = false
 }
 
 // ============ 初始化 ============
@@ -582,11 +849,23 @@ onMounted(async () => {
   // 注册 Pointer-based 拖拽（不依赖 HTML5 DnD，兼容 SVG 画布）
   document.addEventListener('pointerup', onPointerUp)
   document.addEventListener('pointermove', onPointerMove)
+  document.addEventListener('keydown', onKeydown)
+
+  // 记录初始状态作为撤销的基线
+  commitState()
+})
+
+// 选中的线被删除时（如按 Delete 键）清理选中状态
+watch(edges, () => {
+  if (selectedEdgeId.value && !edges.value.some(e => e.id === selectedEdgeId.value)) {
+    selectedEdgeId.value = null
+  }
 })
 
 onUnmounted(() => {
   document.removeEventListener('pointerup', onPointerUp)
   document.removeEventListener('pointermove', onPointerMove)
+  document.removeEventListener('keydown', onKeydown)
 })
 </script>
 
@@ -634,10 +913,25 @@ onUnmounted(() => {
   }
 
   .canvas-wrap { flex: 1; position: relative; }
+
+  .field-tip { font-size: 12px; color: #909399; line-height: 1.5; margin-top: 4px; }
 }
 
 :deep(.vue-flow__edge-textbg) { fill: #fff; }
 :deep(.vue-flow__edge-text) { fill: #606266; font-size: 12px; }
+/* 线颜色走 CSS（不设置内联 stroke，否则选中变色会被内联样式覆盖） */
+:deep(.vue-flow__edge .vue-flow__edge-path) { stroke: #b1b1b7; stroke-width: 1.5; transition: stroke 0.2s, stroke-width 0.2s; }
+:deep(.vue-flow__edge:hover .vue-flow__edge-path) { stroke: #a0c4ff; }
+:deep(.vue-flow__edge.selected .vue-flow__edge-path) { stroke: #409eff; stroke-width: 2.5; }
+/* 线端点调整点：平时隐藏，悬停/选中线时显示为蓝色圆点，可直接拖拽调整接线 */
+:deep(.vue-flow__edge .vue-flow__edgeupdater) { r: 5px; opacity: 0; transition: opacity 0.2s; }
+:deep(.vue-flow__edge:hover .vue-flow__edgeupdater),
+:deep(.vue-flow__edge.selected .vue-flow__edgeupdater) {
+  opacity: 1;
+  fill: #409eff !important;
+  stroke: #fff !important;
+  stroke-width: 2px;
+}
 </style>
 
 <style>

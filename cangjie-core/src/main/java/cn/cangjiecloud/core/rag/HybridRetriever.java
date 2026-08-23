@@ -6,6 +6,7 @@ import java.util.List;
  * 混合检索器接口
  * <p>
  * 融合向量检索与全文检索结果，使用加权融合算法排序。
+ * 支持 simple（段落级直接检索）与 two_stage（摘要→段落两级检索）两种模式。
  */
 public interface HybridRetriever {
 
@@ -44,4 +45,17 @@ public interface HybridRetriever {
      * @return 加权融合后的检索结果
      */
     List<RetrievalResult> retrieve(String query, List<String> knowledgeBaseIds, int topK, double similarityThreshold);
+
+    /**
+     * 混合检索（多知识库，支持检索模式）
+     *
+     * @param query               查询文本
+     * @param knowledgeBaseIds    知识库 ID 列表
+     * @param topK                返回数量上限
+     * @param similarityThreshold 相似度阈值
+     * @param searchMode          检索模式：simple（段落级直接检索）/ two_stage（先摘要定候选文档再段落精确检索）
+     * @return 加权融合后的检索结果
+     */
+    List<RetrievalResult> retrieve(String query, List<String> knowledgeBaseIds, int topK,
+                                   double similarityThreshold, String searchMode);
 }

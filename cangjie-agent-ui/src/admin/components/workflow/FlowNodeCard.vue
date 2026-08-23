@@ -1,6 +1,6 @@
 <template>
   <div class="flow-node-card" :class="{ selected: selected }" :style="{ borderTopColor: meta.color }">
-    <Handle v-if="data.type !== 'start'" type="target" :position="Position.Left" class="flow-handle" />
+    <Handle v-if="data.type !== 'start'" id="left" type="target" :position="Position.Left" class="flow-handle" />
 
     <div class="node-header" @dblclick="emit('config', id)">
       <span class="node-icon" :style="{ background: meta.color }">
@@ -15,7 +15,7 @@
 
     <div class="node-summary" v-if="summary" @dblclick="emit('config', id)">{{ summary }}</div>
 
-    <Handle v-if="data.type !== 'end'" type="source" :position="Position.Right" class="flow-handle" />
+    <Handle v-if="data.type !== 'end'" id="right" type="source" :position="Position.Right" class="flow-handle" />
   </div>
 </template>
 
@@ -99,5 +99,10 @@ const summary = computed(() => {
 .flow-handle {
   width: 10px !important; height: 10px !important; background: #409eff !important;
   border: 2px solid #fff !important;
+  opacity: 0; transition: opacity 0.2s;
+  pointer-events: all; /* 保持拖拽命中区域，即使不可见也能接线 */
 }
+
+/* 仅悬停节点时显示连接点，平时保持干净 */
+.flow-node-card:hover .flow-handle { opacity: 1; }
 </style>

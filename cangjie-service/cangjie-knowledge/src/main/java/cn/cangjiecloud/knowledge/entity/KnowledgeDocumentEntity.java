@@ -48,6 +48,9 @@ public class KnowledgeDocumentEntity extends BaseEntity {
     /** 关联的文件管理记录 ID */
     private String fileId;
 
+    /** 文档摘要（LLM 生成，用于 two-stage 检索的第一阶段） */
+    private String summary;
+
     /** 元数据（JSON） */
     private String metadata;
 }

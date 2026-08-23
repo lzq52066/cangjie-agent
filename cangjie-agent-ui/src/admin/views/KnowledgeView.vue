@@ -33,6 +33,13 @@
             <span v-else class="text-muted">自动</span>
           </template>
         </el-table-column>
+        <el-table-column label="检索模式" width="110" align="center">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.searchMode === 'two_stage' ? 'primary' : 'info'" effect="plain">
+              {{ row.searchMode === 'two_stage' ? '摘要先行' : '段落检索' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="文档数" prop="documentCount" width="80" align="center" />
         <el-table-column label="段落数" prop="paragraphCount" width="80" align="center" />
         <el-table-column label="创建时间" width="170" align="center">
@@ -96,6 +103,16 @@
             <div class="form-hint">段落最大字符数</div>
           </el-form-item>
         </template>
+        <el-form-item label="检索模式" prop="searchMode">
+          <el-radio-group v-model="form.searchMode">
+            <el-radio-button value="paragraph">段落检索</el-radio-button>
+            <el-radio-button value="two_stage">摘要先行</el-radio-button>
+          </el-radio-group>
+          <div class="form-hint" style="margin-top: 4px">
+            <span v-if="form.searchMode === 'paragraph'">直接对文档切片做向量 + 全文混合检索</span>
+            <span v-else>先用文档摘要筛选候选文档，再对候选做段落级精准检索</span>
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showCreate = false">取消</el-button>
@@ -155,6 +172,7 @@ function openEdit(row: any) {
   form.description = row.description || ''
   form.splitStrategy = row.splitStrategy || 'smart'
   form.chunkSize = row.chunkSize || 500
+  form.searchMode = row.searchMode || 'paragraph'
   // 解析 separators JSON 字符串
   try {
     form.separators = row.separators ? JSON.parse(row.separators) : []

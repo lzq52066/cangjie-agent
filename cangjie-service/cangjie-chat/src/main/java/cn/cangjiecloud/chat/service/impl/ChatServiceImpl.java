@@ -24,8 +24,10 @@ import cn.cangjiecloud.core.model.ChatRequest;
 import cn.cangjiecloud.core.model.ChatResponse;
 import cn.cangjiecloud.core.observability.TraceCollector;
 import cn.cangjiecloud.core.rag.HybridRetriever;
+import cn.cangjiecloud.core.rag.QueryRewriterFactory;
 import cn.cangjiecloud.core.rag.RetrievalResult;
 import cn.cangjiecloud.core.tool.ToolSpecification;
+import cn.cangjiecloud.knowledge.rag.RetrievalToolService;
 import cn.cangjiecloud.model.provider.OpenAICompatibleClient;
 import cn.cangjiecloud.model.entity.ModelEntity;
 import cn.cangjiecloud.model.service.IModelService;
@@ -39,6 +41,7 @@ import cn.cangjiecloud.prompt.service.ILongTermMemoryService;
 import cn.cangjiecloud.prompt.service.IPromptTemplateService;
 import cn.cangjiecloud.prompt.service.IRuleService;
 import cn.cangjiecloud.prompt.service.ISkillService;
+import cn.cangjiecloud.prompt.service.PromptCacheService;
 import cn.cangjiecloud.tool.service.IToolService;
 import cn.cangjiecloud.workflow.entity.WorkflowEntity;
 import cn.cangjiecloud.workflow.entity.WorkflowExecutionEntity;
@@ -46,6 +49,7 @@ import cn.cangjiecloud.workflow.service.IWorkflowService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -76,6 +80,9 @@ public class ChatServiceImpl implements IChatService {
     private final IChatMessageService chatMessageService;
     private final IModelService modelService;
     private final HybridRetriever hybridRetriever;
+    private final QueryRewriterFactory queryRewriterFactory;
+    private final PromptCacheService promptCacheService;
+    private final RetrievalToolService retrievalToolService;
     private final IPromptTemplateService promptTemplateService;
     private final ILongTermMemoryService longTermMemoryService;
     private final LongTermMemoryExtractService longTermMemoryExtractService;
@@ -88,6 +95,14 @@ public class ChatServiceImpl implements IChatService {
 
     @Autowired(required = false)
     private TraceCollector traceCollector;
+
+    /** 查询改写开关（默认关闭，关闭时行为与改造前完全一致） */
+    @Value("${cangjie.rag.query-rewrite.enabled:false}")
+    private boolean queryRewriteEnabled;
+
+    /** 查询改写器类型（none / llm） */
+    @Value("${cangjie.rag.query-rewrite.type:none}")
+    private String queryRewriteType;
 
     private static final int DEFAULT_TOP_K = 5;
     private static final long SSE_TIMEOUT = 5 * 60 * 1000L;
@@ -198,10 +213,8 @@ public class ChatServiceImpl implements IChatService {
             // 保存用户消息到数据库
             ChatMessageEntity userMessage = saveUserMessage(session, application, request.getMessage());
 
-            // 调用模型（流式）
+            // 调用模型（流式，支持多轮 Function Calling）
             long llmStart = System.currentTimeMillis();
-            Stream<ChatChunk> chunkStream = callModelStream(application, messages, traceId);
-
             String modelName = getModelName(application.getModelId());
             String requestId = "chatcmpl-" + traceId;
             long created = System.currentTimeMillis() / 1000;
@@ -215,56 +228,28 @@ public class ChatServiceImpl implements IChatService {
             AtomicReference<Long> streamOutputTokens = new AtomicReference<>();
             AtomicReference<Long> streamTotalTokens = new AtomicReference<>();
 
-            if (openAiFormat) {
-                // OpenAI 兼容 SSE 格式
-                try {
-                    chunkStream.forEach(chunk -> {
-                        if (chunk.getError() != null) {
-                            streamError.set(true);
-                            streamErrorMessage.set(chunk.getError());
-                            return;
-                        }
-                        if (chunk.getDelta() != null) {
-                            fullContent.append(chunk.getDelta());
-                            if (Boolean.TRUE.equals(chunk.isDone())) {
-                                if (chunk.getFinishReason() != null) {
-                                    streamFinishReason.set(chunk.getFinishReason());
-                                }
-                                if (chunk.getInputTokens() != null) streamInputTokens.set(chunk.getInputTokens());
-                                if (chunk.getOutputTokens() != null) streamOutputTokens.set(chunk.getOutputTokens());
-                                if (chunk.getTotalTokens() != null) streamTotalTokens.set(chunk.getTotalTokens());
-                            }
-                            try {
-                                String finishReason = Boolean.TRUE.equals(chunk.isDone()) ? "stop" : null;
-                                String json = buildOpenAiChunk(requestId, modelName, created, chunk.getDelta(), finishReason);
-                                emitter.send(SseEmitter.event()
-                                        .name("message")
-                                        .data(json));
-                            } catch (IOException e) {
-                                log.warn("OpenAI SSE 推送失败: {}", e.getMessage());
-                                throw new RuntimeException(e);
-                            }
-                        }
-                    });
-                } catch (Exception e) {
-                    log.error("OpenAI 流式对话异常: app={}", application.getName(), e);
-                    streamError.set(true);
-                    streamErrorMessage.set(e.getMessage());
-                    // 发送 OpenAI 兼容错误事件
-                    try {
-                        emitter.send(SseEmitter.event().name("message").data(buildOpenAiError(e.getMessage())));
-                    } catch (IOException ex) {
-                        log.warn("OpenAI SSE 错误推送失败: {}", ex.getMessage());
-                    }
-                }
-                // 发送结束标记
-                try {
-                    emitter.send(SseEmitter.event().name("message").data("[DONE]"));
-                } catch (IOException e) {
-                    log.warn("OpenAI SSE [DONE] 推送失败: {}", e.getMessage());
-                }
-            } else {
-                // 内部 SSE 格式
+            // 构建工具列表（Function Calling），与同步路径 callModel 对齐
+            List<String> toolIds = parseStringList(application.getToolIds());
+            List<ToolSpecification> toolSpecs = new ArrayList<>();
+            if (!toolIds.isEmpty()) {
+                toolSpecs.addAll(toolService.getToolSpecifications(toolIds));
+            }
+            List<String> skillIds = parseStringList(application.getSkillIds());
+            if (!skillIds.isEmpty()) {
+                toolSpecs.addAll(toolService.getSkillSpecifications(skillIds));
+            }
+            // Agentic RAG：知识库检索注册为工具
+            List<String> kbIdsStream = parseStringList(application.getKnowledgeBaseIds());
+            if ("agentic".equals(application.getRagMode()) && !kbIdsStream.isEmpty()) {
+                toolSpecs.add(retrievalToolService.buildSpec("agentic-retrieval"));
+            }
+            List<Map<String, Object>> tools = buildToolDefinitions(toolSpecs);
+
+            List<ChatMessage> conversation = new ArrayList<>(messages);
+            int maxRounds = 5;
+
+            // 内部格式先发送 init 事件
+            if (!openAiFormat) {
                 try {
                     Map<String, Object> initPayload = new HashMap<>();
                     initPayload.put("sessionId", session.getSessionId());
@@ -273,25 +258,24 @@ public class ChatServiceImpl implements IChatService {
                 } catch (IOException ex) {
                     log.warn("SSE init 事件推送失败: {}", ex.getMessage());
                 }
+            }
+
+            // 多轮 Function Calling 循环（与同步路径 callModel 对齐）
+            for (int round = 0; round < maxRounds && !streamError.get(); round++) {
+                Stream<ChatChunk> chunkStream = callModelStream(application, conversation, traceId);
+                StringBuilder roundContent = new StringBuilder();
+                List<ChatResponse.ToolCall> roundToolCalls = new ArrayList<>();
+
                 try {
                     chunkStream.forEach(chunk -> {
                         if (chunk.getError() != null) {
-                            // 模型流式调用异常
                             streamError.set(true);
                             streamErrorMessage.set(chunk.getError());
-                            try {
-                                Map<String, Object> errorPayload = new HashMap<>();
-                                errorPayload.put("delta", "");
-                                errorPayload.put("done", true);
-                                errorPayload.put("error", chunk.getError());
-                                emitter.send(SseEmitter.event().name("error").data(errorPayload));
-                            } catch (IOException e) {
-                                log.warn("SSE 错误推送失败: {}", e.getMessage());
-                            }
+                            pushStreamError(emitter, openAiFormat, chunk.getError());
                             return;
                         }
                         if (chunk.getDelta() != null) {
-                            fullContent.append(chunk.getDelta());
+                            roundContent.append(chunk.getDelta());
                             if (Boolean.TRUE.equals(chunk.isDone())) {
                                 if (chunk.getFinishReason() != null) {
                                     streamFinishReason.set(chunk.getFinishReason());
@@ -299,15 +283,23 @@ public class ChatServiceImpl implements IChatService {
                                 if (chunk.getInputTokens() != null) streamInputTokens.set(chunk.getInputTokens());
                                 if (chunk.getOutputTokens() != null) streamOutputTokens.set(chunk.getOutputTokens());
                                 if (chunk.getTotalTokens() != null) streamTotalTokens.set(chunk.getTotalTokens());
+                                if (chunk.getToolCalls() != null) {
+                                    roundToolCalls.addAll(chunk.getToolCalls());
+                                }
+                                // done chunk 通常内容为空，其信息已收集，完成标记由末尾统一发送
+                                return;
                             }
+                            // 普通内容 chunk 实时推送
                             try {
-                                Map<String, Object> payload = new HashMap<>();
-                                payload.put("delta", chunk.getDelta());
-                                payload.put("done", Boolean.TRUE.equals(chunk.isDone()));
-                                payload.put("finishReason", chunk.getFinishReason());
-                                emitter.send(SseEmitter.event()
-                                        .name("message")
-                                        .data(payload));
+                                if (openAiFormat) {
+                                    emitter.send(SseEmitter.event().name("message")
+                                            .data(buildOpenAiChunk(requestId, modelName, created, chunk.getDelta(), null)));
+                                } else {
+                                    Map<String, Object> payload = new HashMap<>();
+                                    payload.put("delta", chunk.getDelta());
+                                    payload.put("done", false);
+                                    emitter.send(SseEmitter.event().name("message").data(payload));
+                                }
                             } catch (IOException e) {
                                 log.warn("SSE 推送失败: {}", e.getMessage());
                                 throw new RuntimeException(e);
@@ -318,16 +310,44 @@ public class ChatServiceImpl implements IChatService {
                     log.error("流式对话异常: app={}", application.getName(), e);
                     streamError.set(true);
                     streamErrorMessage.set(e.getMessage());
-                    try {
-                        Map<String, Object> errorPayload = new HashMap<>();
-                        errorPayload.put("delta", "");
-                        errorPayload.put("done", true);
-                        errorPayload.put("error", e.getMessage());
-                        emitter.send(SseEmitter.event().name("error").data(errorPayload));
-                    } catch (IOException ex) {
-                        log.warn("SSE 错误推送失败: {}", ex.getMessage());
-                    }
+                    pushStreamError(emitter, openAiFormat, e.getMessage());
                 }
+
+                if (streamError.get()) {
+                    break;
+                }
+
+                // 本轮产生了工具调用：执行工具并继续下一轮
+                if (!roundToolCalls.isEmpty() && !tools.isEmpty()) {
+                    conversation.add(ChatMessage.assistant(roundContent.toString()));
+                    for (ChatResponse.ToolCall tc : roundToolCalls) {
+                        Map<String, Object> args;
+                        try {
+                            args = com.alibaba.fastjson.JSON.parseObject(tc.getArguments());
+                        } catch (Exception e) {
+                            args = Map.of();
+                        }
+                        // Agentic RAG 检索工具路由
+                        String toolResult;
+                        if (RetrievalToolService.TOOL_NAME.equals(tc.getName())) {
+                            toolResult = retrievalToolService.execute(
+                                    (String) args.getOrDefault("query", ""), kbIdsStream);
+                        } else {
+                            toolResult = toolService.executeToolCall(tc.getName(), args);
+                        }
+                        conversation.add(ChatMessage.tool(tc.getName(), tc.getId(),
+                                "工具调用结果(" + tc.getName() + "): " + toolResult));
+                        log.info("Function Calling 执行: {} -> args={}, result={}",
+                                tc.getName(), tc.getArguments(),
+                                toolResult != null && toolResult.length() > 200
+                                        ? toolResult.substring(0, 200) + "..." : toolResult);
+                    }
+                    continue;
+                }
+
+                // 最终轮：汇总内容
+                fullContent.append(roundContent);
+                break;
             }
 
             if (streamError.get()) {
@@ -338,7 +358,7 @@ public class ChatServiceImpl implements IChatService {
                             "模型调用失败: " + streamErrorMessage.get());
                 }
                 recordLlmTrace(application, session.getSessionId(), userId, traceId, requestId, modelName,
-                        messages, null, null, null, null, null,
+                        conversation, null, null, null, null, null,
                         System.currentTimeMillis() - llmStart, "fail", streamErrorMessage.get(), llmStart);
             } else {
                 if (traceCollector != null) {
@@ -362,7 +382,7 @@ public class ChatServiceImpl implements IChatService {
 
                 // 记录 LLM 调用可观测数据
                 recordLlmTrace(application, session.getSessionId(), userId, traceId, requestId, modelName,
-                        messages, inputTokens, outputTokens, totalTokens, fullContent.toString(), streamFinishReason.get(),
+                        conversation, inputTokens, outputTokens, totalTokens, fullContent.toString(), streamFinishReason.get(),
                         System.currentTimeMillis() - llmStart, "success", null, llmStart);
 
                 updateSessionStats(session, aiMessage);
@@ -370,18 +390,22 @@ public class ChatServiceImpl implements IChatService {
                 // 异步触发长期记忆提取
                 longTermMemoryExtractService.extract(
                         userId, application, userMessage, aiMessage);
-            }
 
-            // 非 OpenAI 格式下发送完成事件
-            if (!openAiFormat) {
+                // 发送完成事件
                 try {
-                    Map<String, Object> donePayload = new HashMap<>();
-                    donePayload.put("delta", "");
-                    donePayload.put("done", true);
-                    donePayload.put("finishReason", "stop");
-                    emitter.send(SseEmitter.event().name("done").data(donePayload));
+                    if (openAiFormat) {
+                        emitter.send(SseEmitter.event().name("message")
+                                .data(buildOpenAiChunk(requestId, modelName, created, "", "stop")));
+                        emitter.send(SseEmitter.event().name("message").data("[DONE]"));
+                    } else {
+                        Map<String, Object> donePayload = new HashMap<>();
+                        donePayload.put("delta", "");
+                        donePayload.put("done", true);
+                        donePayload.put("finishReason", "stop");
+                        emitter.send(SseEmitter.event().name("done").data(donePayload));
+                    }
                 } catch (IOException e) {
-                    log.warn("SSE done 事件推送失败: {}", e.getMessage());
+                    log.warn("SSE 完成事件推送失败: {}", e.getMessage());
                 }
             }
 
@@ -411,6 +435,25 @@ public class ChatServiceImpl implements IChatService {
         String safe = message == null ? "internal_error"
                 : message.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
         return "{\"error\":{\"message\":\"" + safe + "\",\"type\":\"internal_error\"}}";
+    }
+
+    /**
+     * 流式调用出错时推送 SSE 错误事件（按 OpenAI 格式或内部格式分别处理）
+     */
+    private void pushStreamError(SseEmitter emitter, boolean openAiFormat, String error) {
+        try {
+            if (openAiFormat) {
+                emitter.send(SseEmitter.event().name("message").data(buildOpenAiError(error)));
+            } else {
+                Map<String, Object> errorPayload = new HashMap<>();
+                errorPayload.put("delta", "");
+                errorPayload.put("done", true);
+                errorPayload.put("error", error);
+                emitter.send(SseEmitter.event().name("error").data(errorPayload));
+            }
+        } catch (IOException e) {
+            log.warn("SSE 错误推送失败: {}", e.getMessage());
+        }
     }
 
     private ApplicationEntity getApplication(String applicationId) {
@@ -498,21 +541,37 @@ public class ChatServiceImpl implements IChatService {
         // 提示词模板（如绑定了模板，作为 system prompt 的基础）
         if (StringUtils.hasText(application.getPromptTemplateId())) {
             try {
-                PromptTemplateEntity template = promptTemplateService.getById(application.getPromptTemplateId());
-                if (template != null && StringUtils.hasText(template.getContent())) {
-                    systemPrompt.append(template.getContent()).append("\n\n");
+                String templateContent = promptCacheService.getContent(application.getPromptTemplateId());
+                if (StringUtils.hasText(templateContent)) {
+                    systemPrompt.append(templateContent).append("\n\n");
                 }
             } catch (Exception e) {
                 log.warn("加载提示词模板失败: {}, {}", application.getPromptTemplateId(), e.getMessage());
             }
         }
 
+        // 查询改写（基于对话历史）
+        List<ChatMessage> rewriteHistory;
+        if (requestMessages != null && !requestMessages.isEmpty()) {
+            rewriteHistory = requestMessages.stream()
+                    .filter(m -> StringUtils.hasText(m.getRole()) && StringUtils.hasText(m.getContent()))
+                    .map(m -> ChatMessage.builder().role(m.getRole().toLowerCase()).content(m.getContent()).build())
+                    .toList();
+        } else {
+            rewriteHistory = loadHistoryMessages(sessionId, application.getMaxTurns(), null);
+        }
+        String retrievalQuery = queryRewriteEnabled
+                ? queryRewriterFactory.get(queryRewriteType).rewrite(userMessage, rewriteHistory)
+                : userMessage;
+
         // 知识库检索（如绑定了知识库，自动拼接检索内容）
+        // agentic 模式下跳过预处理检索，由 LLM 自主调用检索工具
         List<String> kbIds = parseStringList(application.getKnowledgeBaseIds());
-        if (!kbIds.isEmpty()) {
+        boolean isAgenticRag = "agentic".equals(application.getRagMode());
+        if (!kbIds.isEmpty() && !isAgenticRag) {
             long retrievalStart = System.currentTimeMillis();
             try {
-                List<RetrievalResult> results = hybridRetriever.retrieve(userMessage, kbIds, DEFAULT_TOP_K);
+                List<RetrievalResult> results = hybridRetriever.retrieve(retrievalQuery, kbIds, DEFAULT_TOP_K);
                 if (traceCollector != null) {
                     recordTrace("retrieval", "search", traceId,
                             System.currentTimeMillis() - retrievalStart, "success",
@@ -611,7 +670,7 @@ public class ChatServiceImpl implements IChatService {
             // OpenAI 兼容：使用请求携带的完整对话上下文（含当前消息）
             for (ChatRequestDTO.ConversationMessage m : requestMessages) {
                 if (StringUtils.hasText(m.getRole()) && StringUtils.hasText(m.getContent())) {
-                    messages.add(new ChatMessage(m.getRole().toLowerCase(), m.getContent()));
+                    messages.add(ChatMessage.builder().role(m.getRole().toLowerCase()).content(m.getContent()).build());
                 }
             }
         } else {
@@ -642,7 +701,7 @@ public class ChatServiceImpl implements IChatService {
             if (excludeMessageId != null && e.getId().equals(excludeMessageId)) {
                 continue;
             }
-            messages.add(new ChatMessage(e.getRole(), e.getContent()));
+            messages.add(ChatMessage.builder().role(e.getRole()).content(e.getContent()).build());
         }
         return messages;
     }
@@ -663,6 +722,11 @@ public class ChatServiceImpl implements IChatService {
         List<String> skillIds = parseStringList(application.getSkillIds());
         if (!skillIds.isEmpty()) {
             toolSpecs.addAll(toolService.getSkillSpecifications(skillIds));
+        }
+        // Agentic RAG：知识库检索注册为工具
+        List<String> kbIds = parseStringList(application.getKnowledgeBaseIds());
+        if ("agentic".equals(application.getRagMode()) && !kbIds.isEmpty()) {
+            toolSpecs.add(retrievalToolService.buildSpec("agentic-retrieval"));
         }
         List<Map<String, Object>> tools = buildToolDefinitions(toolSpecs);
 
@@ -706,9 +770,16 @@ public class ChatServiceImpl implements IChatService {
                     } catch (Exception e) {
                         args = Map.of();
                     }
-                    String toolResult = toolService.executeToolCall(tc.getName(), args);
+                    // Agentic RAG 检索工具路由
+                    String toolResult;
+                    if (RetrievalToolService.TOOL_NAME.equals(tc.getName())) {
+                        toolResult = retrievalToolService.execute(
+                                (String) args.getOrDefault("query", ""), kbIds);
+                    } else {
+                        toolResult = toolService.executeToolCall(tc.getName(), args);
+                    }
                     // 添加 tool 结果消息
-                    conversation.add(new ChatMessage("tool",
+                    conversation.add(ChatMessage.tool(tc.getName(), tc.getId(),
                             "工具调用结果(" + tc.getName() + "): " + toolResult));
                     log.info("Function Calling 执行: {} -> args={}, result={}",
                             tc.getName(), tc.getArguments(),
@@ -783,6 +854,11 @@ public class ChatServiceImpl implements IChatService {
         List<String> skillIds = parseStringList(application.getSkillIds());
         if (!skillIds.isEmpty()) {
             toolSpecs.addAll(toolService.getSkillSpecifications(skillIds));
+        }
+        // Agentic RAG
+        List<String> kbIds = parseStringList(application.getKnowledgeBaseIds());
+        if ("agentic".equals(application.getRagMode()) && !kbIds.isEmpty()) {
+            toolSpecs.add(retrievalToolService.buildSpec("agentic-retrieval"));
         }
         List<Map<String, Object>> tools = buildToolDefinitions(toolSpecs);
 

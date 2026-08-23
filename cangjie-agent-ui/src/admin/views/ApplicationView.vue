@@ -48,6 +48,13 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="RAG 模式" width="110" align="center">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.ragMode === 'agentic' ? 'primary' : 'info'" effect="plain">
+              {{ row.ragMode === 'agentic' ? 'Agentic' : 'Simple' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="100" align="center">
           <template #default="{ row }">
             <el-tag size="small" :type="row.status === 'published' ? 'success' : 'info'">
@@ -99,6 +106,13 @@
                      placeholder="可多选，检索时融合" filterable style="width:100%">
             <el-option v-for="k in knowledgeBases" :key="k.id" :label="k.name" :value="k.id" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="RAG 模式">
+          <el-select v-model="form.ragMode" style="width:100%">
+            <el-option label="Simple（预处理检索）" value="simple" />
+            <el-option label="Agentic（LLM 自主检索）" value="agentic" />
+          </el-select>
+          <div class="form-hint">Simple：对话前固定注入 topK=5 检索结果；Agentic：LLM 自主决定是否调用检索工具</div>
         </el-form-item>
         <el-form-item label="提示词模板">
           <el-select v-model="form.promptTemplateId" placeholder="可选" clearable filterable style="width:100%">
@@ -234,6 +248,7 @@ const defaults = {
   knowledgeBaseIds: [] as string[], promptTemplateId: '',
   skillIds: [] as string[], ruleIds: [] as string[], toolIds: [] as string[],
   memoryEnabled: false, maxTurns: 20, temperature: 0.7, config: '', icon: '',
+  ragMode: 'simple',
   suggestions: [] as string[]
 }
 const form = reactive<Record<string, any>>({ ...defaults })
@@ -298,6 +313,7 @@ function openEdit(row: any) {
     memoryEnabled: !!row.memoryEnabled,
     maxTurns: row.maxTurns ?? 20,
     temperature: row.temperature ?? 0.7,
+    ragMode: row.ragMode || 'simple',
     config: row.config || '',
     icon: row.icon || '',
     suggestions: parseIds(row.suggestions)

@@ -15,7 +15,7 @@ export const observabilityApi = {
   logs(params: { module?: string; action?: string; status?: string; pageNum?: number; pageSize?: number }) {
     return request<PageResult<any>>({ method: 'GET', url: '/observability/logs', params })
   },
-  metrics(params: { metricType?: string; pageNum?: number; pageSize?: number }) {
+  metrics(params: { metricType?: string; startTime?: string; endTime?: string; pageNum?: number; pageSize?: number }) {
     return request<PageResult<any>>({ method: 'GET', url: '/observability/metrics', params })
   },
   /** 手动触发一次指标采集 */

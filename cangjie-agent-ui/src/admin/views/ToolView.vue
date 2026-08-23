@@ -29,12 +29,6 @@
       <!-- 工具列表 -->
       <el-table v-if="activeTab === 'tool'" :data="list" v-loading="loading" stripe>
         <el-table-column label="名称" prop="name" min-width="150" />
-        <el-table-column label="子类型" width="130" align="center">
-          <template #default="{ row }">
-            <el-tag v-if="row.toolType" size="small" type="primary">{{ label(toolTypeOptions, row.toolType) }}</el-tag>
-            <span v-else class="table-hint">-</span>
-          </template>
-        </el-table-column>
         <el-table-column label="类型" width="120" align="center">
           <template #default="{ row }">
             <el-tag size="small" :type="toolTypeTag(row.type)">{{ label(toolTypes, row.type) }}</el-tag>
@@ -114,12 +108,6 @@
             <el-option v-for="t in toolTypes" :key="t.code" :label="t.label" :value="t.code" />
           </el-select>
         </el-form-item>
-        <el-form-item label="子类型">
-          <el-select v-model="toolForm.toolType" clearable placeholder="新版策略分发类型" style="width:100%">
-            <el-option v-for="t in toolTypeOptions" :key="t.code" :label="t.label" :value="t.code" />
-          </el-select>
-          <span class="hint-inline">新版策略分发用，选填；留空时兼容旧 type 字段</span>
-        </el-form-item>
         <el-form-item label="分类">
           <el-select v-model="toolForm.category" allow-create filterable clearable style="width:100%">
             <el-option v-for="c in toolCategories" :key="c" :label="c" :value="c" />
@@ -132,12 +120,9 @@
           <el-input v-model="toolForm.parameters" type="textarea" :rows="5"
                     :placeholder="schemaPlaceholder" />
         </el-form-item>
-        <el-form-item label="实现">
-          <el-input v-model="toolForm.implementation" type="textarea" :rows="4"
-                    placeholder="http 类型填写 URL；script 类型填写脚本；plugin 类型填写插件标识" />
-        </el-form-item>
-        <el-form-item label="扩展配置">
-          <el-input v-model="toolForm.config" type="textarea" :rows="3" placeholder="JSON，如超时、请求头等" />
+        <el-form-item label="配置">
+          <el-input v-model="toolForm.config" type="textarea" :rows="6" :placeholder="configPlaceholder" />
+          <span class="hint-inline">{{ configHint }}</span>
         </el-form-item>
         <el-form-item label="图标"><el-input v-model="toolForm.icon" placeholder="图标名或 URL" /></el-form-item>
         <el-form-item label="描述">
@@ -198,7 +183,7 @@
 
       <el-form v-if="execMode === 'form'" label-width="140px">
         <el-empty v-if="execParamKeys.length === 0" description="该工具未声明参数，可直接执行" :image-size="60" />
-        <el-form-item v-for="k in execParamKeys" :key="k" :label="k">
+        <el-form-item v-for="k in execParamKeys" :key="k" :label="k" :required="execParamRequired.includes(k)">
           <el-input v-model="execForm[k]" :placeholder="execParamDesc[k]" />
         </el-form-item>
       </el-form>
@@ -231,17 +216,11 @@ import { Search, Plus, Refresh } from '@element-plus/icons-vue'
 import { toolApi, pluginApi } from '@admin/api/tool-api'
 
 const toolTypes = [
-  { code: 'http', label: 'HTTP 接口（旧）' },
-  { code: 'script', label: '脚本（旧）' },
-  { code: 'plugin', label: '插件（旧）' },
-  { code: 'builtin', label: '内置（旧）' }
-]
-const toolTypeOptions = [
   { code: 'HTTP', label: 'HTTP 接口' },
   { code: 'CUSTOM', label: '自定义脚本' },
   { code: 'MCP', label: 'MCP 协议' },
   { code: 'SKILL', label: '技能' },
-  { code: 'PLUGIN', label: '旧版插件' }
+  { code: 'PLUGIN', label: '插件' }
 ]
 const pluginTypes = [
   { code: 'tool', label: '工具插件' },
@@ -250,9 +229,42 @@ const pluginTypes = [
   { code: 'node', label: '工作流节点' },
   { code: 'channel', label: '渠道插件' }
 ]
-const toolCategories = ['搜索', '数据库', '文件', '通知', '计算', '业务']
+const toolCategories = ['搜索', '数据库', '文件', '通知', '计算', '业务', '权限认证']
 const schemaPlaceholder =
   '{"type":"object","properties":{"city":{"type":"string","description":"城市名"}},"required":["city"]}'
+
+const configPlaceholder = computed(() => {
+  switch (toolForm.type) {
+    case 'HTTP':
+      return '{\n' +
+        '  "url": "https://api.example.com/endpoint",\n' +
+        '  "method": "GET"\n' +
+        '}'
+    case 'MCP':
+      return '{\n  "serverUrl": "http://localhost:3001/mcp"\n}'
+    case 'CUSTOM':
+      return '// Groovy 脚本内容，如：\nreturn "Hello"'
+    case 'SKILL':
+      return '{\n  "skillName": "my-skill",\n  "config": {}\n}'
+    default:
+      return '{}'
+  }
+})
+
+const configHint = computed(() => {
+  switch (toolForm.type) {
+    case 'HTTP':
+      return 'GET 请求参数自动拼到 URL 上；如需自定义请求头，添加 "headers": {"Authorization": "Bearer xxx"}；POST 请求参数自动放入 body'
+    case 'MCP':
+      return '填入 MCP Server 地址，functionName 即为要调用的工具名'
+    case 'CUSTOM':
+      return '填入 Groovy 脚本，脚本中可通过 params.参数名 获取调用参数'
+    case 'SKILL':
+      return '填入技能相关配置'
+    default:
+      return ''
+  }
+})
 
 const activeTab = ref<'tool' | 'plugin'>('tool')
 const currentTypes = computed(() => (activeTab.value === 'tool' ? toolTypes : pluginTypes))
@@ -273,8 +285,8 @@ const toolRules: FormRules = {
   functionName: [{ required: true, message: '请输入函数名', trigger: 'blur' }]
 }
 const toolDefaults = {
-  id: '', name: '', type: 'http', toolType: '', category: '', functionName: '',
-  parameters: '', implementation: '', config: '', icon: '', description: '', status: 'active'
+  id: '', name: '', type: 'HTTP', category: '', functionName: '',
+  parameters: '', config: '', icon: '', description: '', status: 'active'
 }
 
 const showPluginDialog = ref(false)
@@ -294,7 +306,7 @@ function label(dict: { code: string; label: string }[], code: string) {
   return dict.find(d => d.code === code)?.label || code || '-'
 }
 function toolTypeTag(code: string): any {
-  return ({ http: 'primary', script: 'warning', plugin: 'success', builtin: 'info' } as any)[code] || ''
+  return ({ HTTP: 'primary', CUSTOM: 'warning', MCP: 'success', SKILL: 'info', PLUGIN: '' } as any)[code] || ''
 }
 
 async function loadList() {
@@ -409,6 +421,7 @@ const execForm = ref<Record<string, any>>({})
 const execJson = ref('{}')
 const execParamKeys = ref<string[]>([])
 const execParamDesc = ref<Record<string, string>>({})
+const execParamRequired = ref<string[]>([])
 const execResult = ref<any>(null)
 const executing = ref(false)
 
@@ -420,10 +433,12 @@ function openExecute(row: any) {
   execMode.value = 'form'
   execParamKeys.value = []
   execParamDesc.value = {}
+  execParamRequired.value = []
   try {
     const schema = row.parameters ? JSON.parse(row.parameters) : null
     const props = schema?.properties || {}
     execParamKeys.value = Object.keys(props)
+    execParamRequired.value = schema?.required || []
     Object.keys(props).forEach(k => {
       execParamDesc.value[k] = props[k]?.description || props[k]?.type || ''
     })
@@ -444,7 +459,13 @@ async function runExecute() {
       return
     }
   } else {
-    input = { ...execForm.value }
+    input = {}
+    for (const k of execParamKeys.value) {
+      const v = execForm.value[k]
+      // 非必填且值为空时跳过，避免 URL 中出现 xx= 的空参数导致 400
+      if (!execParamRequired.value.includes(k) && (v === '' || v == null)) continue
+      input[k] = v
+    }
   }
   executing.value = true
   try {
@@ -473,4 +494,5 @@ onMounted(loadList)
   border-radius: 8px; padding: 14px; max-height: 280px; overflow: auto;
   white-space: pre-wrap; word-break: break-all; font-size: 13px; line-height: 1.7;
 }
+.hint-inline { display: block; font-size: 12px; color: #909399; margin-top: 4px; line-height: 1.5; }
 </style>

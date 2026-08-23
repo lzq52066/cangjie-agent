@@ -9,6 +9,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -31,6 +32,9 @@ import java.util.List;
 @RequiredArgsConstructor
 public class SystemMetricServiceImpl extends ServiceImpl<SystemMetricMapper, SystemMetricEntity>
         implements ISystemMetricService {
+
+    @Value("${cangjie.observability.metrics.enabled:true}")
+    private boolean metricsEnabled;
 
     /** 指标类型常量 */
     private static final String TYPE_CPU = "cpu";
@@ -57,9 +61,12 @@ public class SystemMetricServiceImpl extends ServiceImpl<SystemMetricMapper, Sys
     }
 
     @Override
-    public IPage<SystemMetricEntity> pageQuery(String metricType, Integer pageNum, Integer pageSize) {
+    public IPage<SystemMetricEntity> pageQuery(String metricType, LocalDateTime startTime, LocalDateTime endTime,
+                                               Integer pageNum, Integer pageSize) {
         LambdaQueryWrapper<SystemMetricEntity> wrapper = new LambdaQueryWrapper<SystemMetricEntity>()
                 .eq(StringUtils.hasText(metricType), SystemMetricEntity::getMetricType, metricType)
+                .ge(startTime != null, SystemMetricEntity::getCollectTime, startTime)
+                .le(endTime != null, SystemMetricEntity::getCollectTime, endTime)
                 .orderByDesc(SystemMetricEntity::getCollectTime);
         return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
@@ -69,6 +76,7 @@ public class SystemMetricServiceImpl extends ServiceImpl<SystemMetricMapper, Sys
      */
     @Scheduled(fixedDelay = 60000)
     public void scheduledCollect() {
+        if (!metricsEnabled) return;
         try {
             collect();
         } catch (Exception e) {

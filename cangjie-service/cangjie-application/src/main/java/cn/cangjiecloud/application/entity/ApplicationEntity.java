@@ -61,6 +61,9 @@ public class ApplicationEntity extends BaseEntity {
     /** 状态：draft / published */
     private String status;
 
+    /** RAG 模式：simple（预处理注入） / agentic（LLM 自主检索） */
+    private String ragMode;
+
     /** 对外 API Key */
     private String apikey;
 }

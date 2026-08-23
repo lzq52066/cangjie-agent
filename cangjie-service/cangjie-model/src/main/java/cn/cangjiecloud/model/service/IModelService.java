@@ -42,4 +42,9 @@ public interface IModelService extends IService<ModelEntity> {
      * 获取默认模型的客户端
      */
     OpenAICompatibleClient getDefaultClient();
+
+    /**
+     * 失效指定模型的客户端缓存（模型配置变更时调用）
+     */
+    void evictClient(String modelId);
 }

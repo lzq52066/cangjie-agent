@@ -797,7 +797,7 @@ function onWindowResize() {
     box-shadow: var(--cj-shadow);
   }
 }
-.suggestion-icon { font-size: 18px; flex-shrink: 0; }
+.suggestion-icon { font-size: 18px; flex-shrink: 0; pointer-events: none; }
 .suggestion-text { line-height: 1.4; }
 
 /* ===== Messages ===== */

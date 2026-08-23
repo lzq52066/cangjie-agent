@@ -34,4 +34,7 @@ public class ChatChunk {
 
     /** 总 token 数（done=true 时有值） */
     private Long totalTokens;
+
+    /** 工具调用列表（Function Calling 返回，done=true 时可能有值） */
+    private java.util.List<ChatResponse.ToolCall> toolCalls;
 }

@@ -30,8 +30,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * 操作日志切面：自动采集所有 Controller 的写操作（POST/PUT/DELETE/PATCH），
- * 记录模块、操作、参数、结果、耗时、用户等，写入 operation_log 表。
+ * 操作日志切面：拦截所有 Controller 请求，打印请求地址、参数、耗时等信息。
+ * 对于写操作（POST/PUT/DELETE/PATCH）同时持久化到 operation_log 表。
  * <p>
  * 敏感字段通过 {@link Sensitive} 注解标记，序列化时值替换为 ******。
  * </p>
@@ -57,36 +57,64 @@ public class OperationLogAspect {
     public Object around(ProceedingJoinPoint pjp) throws Throwable {
         ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         HttpServletRequest request = attrs == null ? null : attrs.getRequest();
-        if (request == null || !isWriteMethod(request.getMethod())) {
+        if (request == null) {
             return pjp.proceed();
         }
 
         MethodSignature signature = (MethodSignature) pjp.getSignature();
-        OperationLogEntity entity = new OperationLogEntity();
-        entity.setModule(resolveModule(signature.getDeclaringType()));
-        entity.setAction(signature.getMethod().getName());
-        entity.setMethod(request.getMethod());
-        entity.setUri(request.getRequestURI());
-        entity.setParams(serializeArgs(pjp.getArgs()));
-        entity.setTraceId(UUID.randomUUID().toString().replace("-", ""));
-        entity.setIp(resolveIp(request));
-        fillUser(entity);
+        String method = request.getMethod();
+        String uri = request.getRequestURI();
+        String params = serializeArgs(pjp.getArgs());
+        boolean isWrite = isWriteMethod(method);
 
         long start = System.currentTimeMillis();
         try {
             Object result = pjp.proceed();
-            entity.setDuration(System.currentTimeMillis() - start);
-            entity.setStatus("success");
-            entity.setResult(serializeResult(result));
-            record(entity);
+            long duration = System.currentTimeMillis() - start;
+
+            // 所有请求都打印日志
+            log.info("{} {} | params: {} | cost: {}ms", method, uri, params != null ? params : "-", duration);
+
+            // 写操作持久化到数据库
+            if (isWrite) {
+                OperationLogEntity entity = buildEntity(signature, method, uri, params, request, duration);
+                entity.setStatus("success");
+                entity.setResult(serializeResult(result));
+                record(entity);
+            }
+
             return result;
         } catch (Throwable e) {
-            entity.setDuration(System.currentTimeMillis() - start);
-            entity.setStatus("fail");
-            entity.setErrorMessage(truncate(e.getMessage()));
-            record(entity);
+            long duration = System.currentTimeMillis() - start;
+
+            log.error("{} {} | params: {} | cost: {}ms | error: {}", method, uri,
+                    params != null ? params : "-", duration, e.getMessage());
+
+            // 写操作失败也持久化，记录失败状态与错误信息
+            if (isWrite) {
+                OperationLogEntity entity = buildEntity(signature, method, uri, params, request, duration);
+                entity.setStatus("fail");
+                entity.setErrorMessage(e.getMessage());
+                record(entity);
+            }
+
             throw e;
         }
+    }
+
+    private OperationLogEntity buildEntity(MethodSignature signature, String method, String uri, String params,
+                                           HttpServletRequest request, long duration) {
+        OperationLogEntity entity = new OperationLogEntity();
+        entity.setModule(resolveModule(signature.getDeclaringType()));
+        entity.setAction(signature.getMethod().getName());
+        entity.setMethod(method);
+        entity.setUri(uri);
+        entity.setParams(params);
+        entity.setTraceId(UUID.randomUUID().toString().replace("-", ""));
+        entity.setIp(resolveIp(request));
+        entity.setDuration(duration);
+        fillUser(entity);
+        return entity;
     }
 
     private void record(OperationLogEntity entity) {
