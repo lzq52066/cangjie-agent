@@ -13,4 +13,6 @@ public class KnowledgeBaseUpdateDTO {
     private String separators;
     private String embeddingModelId;
     private String directory;
+    /** 可见性：public / private */
+    private String visibility;
 }

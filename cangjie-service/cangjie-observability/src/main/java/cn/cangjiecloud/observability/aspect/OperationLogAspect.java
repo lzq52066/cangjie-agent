@@ -3,6 +3,7 @@ package cn.cangjiecloud.observability.aspect;
 import cn.cangjiecloud.common.annotation.Sensitive;
 import cn.cangjiecloud.common.context.UserContext;
 import cn.cangjiecloud.common.domain.UserIdentity;
+import cn.cangjiecloud.observability.context.TraceContext;
 import cn.cangjiecloud.observability.entity.OperationLogEntity;
 import cn.cangjiecloud.observability.service.IOperationLogService;
 import com.alibaba.fastjson.JSON;
@@ -110,7 +111,12 @@ public class OperationLogAspect {
         entity.setMethod(method);
         entity.setUri(uri);
         entity.setParams(params);
-        entity.setTraceId(UUID.randomUUID().toString().replace("-", ""));
+        String traceId = TraceContext.getTraceId();
+        if (traceId == null || traceId.isEmpty()) {
+            traceId = UUID.randomUUID().toString().replace("-", "");
+            TraceContext.setTraceId(traceId);
+        }
+        entity.setTraceId(traceId);
         entity.setIp(resolveIp(request));
         entity.setDuration(duration);
         fillUser(entity);

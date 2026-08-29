@@ -25,4 +25,7 @@ public class RetrievalQueryDTO {
 
     /** 是否启用查询改写（默认 false；开启后改写器按系统配置执行） */
     private Boolean rewrite = false;
+
+    /** 是否启用问题路召回（匹配常见问题后取关联段落，默认开启） */
+    private Boolean enableProblem = true;
 }

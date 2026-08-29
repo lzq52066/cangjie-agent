@@ -18,6 +18,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
@@ -39,6 +40,10 @@ public class ChatController {
     private final IApplicationService applicationService;
     private final Executor chatExecutor;
 
+    /** SSE 流式连接超时（秒） */
+    @Value("${cangjie.chat.sse-timeout-seconds:600}")
+    private long sseTimeoutSeconds;
+
     private static final String API_KEY_HEADER = "X-API-Key";
 
     @PostMapping("/send")
@@ -55,7 +60,7 @@ public class ChatController {
         validateApikey(httpRequest, request.getApplicationId());
         String userId = StringUtils.hasText(request.getUserId()) ? request.getUserId() : UserContext.getUserId();
         org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter =
-                new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(600_000L);
+                new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(sseTimeoutSeconds * 1000);
         chatExecutor.execute(() -> chatService.chatStream(request, emitter, false, userId));
         return emitter;
     }
@@ -137,6 +142,28 @@ public class ChatController {
         validateApikey(httpRequest, session.getApplicationId());
         chatSessionService.deleteBySessionId(sessionId);
         return R.ok("对话记录已删除");
+    }
+
+    /**
+     * 消息反馈：点赞/点踩/取消（body: {"feedback":"like|dislike|none"}）
+     */
+    @PostMapping("/messages/{messageId}/feedback")
+    public R<ChatMessageEntity> feedback(@PathVariable String messageId,
+                                         @RequestBody java.util.Map<String, String> body,
+                                         HttpServletRequest httpRequest) {
+        requireAnyApikey(httpRequest);
+        return R.data(chatMessageService.feedback(messageId, body.get("feedback")));
+    }
+
+    /**
+     * 人工标注：为 AI 回复填写修正答案（body: {"annotation":"..."}）
+     */
+    @PostMapping("/messages/{messageId}/annotate")
+    public R<ChatMessageEntity> annotate(@PathVariable String messageId,
+                                         @RequestBody java.util.Map<String, String> body,
+                                         HttpServletRequest httpRequest) {
+        requireAnyApikey(httpRequest);
+        return R.data(chatMessageService.annotate(messageId, body.get("annotation")));
     }
 
     /**

@@ -8,6 +8,7 @@ import cn.cangjiecloud.core.workflow.WorkflowNodeRegistry;
 import cn.cangjiecloud.workflow.api.dto.WorkflowExecuteDTO;
 import cn.cangjiecloud.workflow.entity.WorkflowEntity;
 import cn.cangjiecloud.workflow.entity.WorkflowExecutionEntity;
+import cn.cangjiecloud.workflow.service.IWorkflowExecutionEventService;
 import cn.cangjiecloud.workflow.service.IWorkflowExecutionService;
 import cn.cangjiecloud.workflow.service.IWorkflowService;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +24,7 @@ public class WorkflowController {
 
     private final IWorkflowService workflowService;
     private final IWorkflowExecutionService workflowExecutionService;
+    private final IWorkflowExecutionEventService workflowExecutionEventService;
     private final WorkflowNodeRegistry workflowNodeRegistry;
 
     @GetMapping
@@ -63,6 +65,16 @@ public class WorkflowController {
         return R.data(workflowService.execute(id, dto.getInputs()));
     }
 
+    /**
+     * 异步执行：立即返回 executionId，后台执行，通过 /execution/{executionId} 轮询进度
+     */
+    @PostMapping("/{id}/execute/async")
+    public R<WorkflowExecutionEntity> executeAsync(@PathVariable String id,
+                                                   @RequestBody WorkflowExecuteDTO dto) {
+        dto.setWorkflowId(id);
+        return R.data(workflowService.executeAsync(id, dto.getInputs()));
+    }
+
     @GetMapping("/{id}/executions")
     public R<List<WorkflowExecutionEntity>> executions(@PathVariable String id) {
         return R.data(workflowExecutionService.listByWorkflow(id));
@@ -71,6 +83,15 @@ public class WorkflowController {
     @GetMapping("/execution/{executionId}")
     public R<WorkflowExecutionEntity> execution(@PathVariable String executionId) {
         return R.data(workflowExecutionService.getById(executionId));
+    }
+
+    /**
+     * 查询执行记录的节点级事件（执行历史/断点分析）
+     */
+    @GetMapping("/execution/{executionId}/events")
+    public R<List<cn.cangjiecloud.workflow.entity.WorkflowExecutionEventEntity>> executionEvents(
+            @PathVariable String executionId) {
+        return R.data(workflowExecutionEventService.listByExecution(executionId));
     }
 
     @GetMapping("/node-types")

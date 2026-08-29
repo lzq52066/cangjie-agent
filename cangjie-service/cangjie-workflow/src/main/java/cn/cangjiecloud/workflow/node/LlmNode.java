@@ -10,8 +10,13 @@ import cn.cangjiecloud.model.provider.OpenAICompatibleClient;
 import cn.cangjiecloud.model.service.IModelService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -36,6 +41,17 @@ public class LlmNode implements WorkflowNode {
     private static final Pattern VAR_PATTERN = Pattern.compile("\\{(\\w+)}");
 
     private final IModelService modelService;
+
+    /** 单次 LLM 请求超时（秒），与模型服务共用同一配置 */
+    @Value("${cangjie.model.timeout-seconds:120}")
+    private long timeoutSeconds;
+
+    @Autowired
+    @Qualifier("llmStreamExecutor")
+    private AsyncTaskExecutor streamExecutor;
+
+    @Autowired
+    private cn.cangjiecloud.model.circuitbreaker.ModelCircuitBreaker circuitBreaker;
 
     @Override
     public String getType() {
@@ -112,7 +128,8 @@ public class LlmNode implements WorkflowNode {
                 .build();
 
         // 调用模型
-        OpenAICompatibleClient client = new OpenAICompatibleClient(entity);
+        OpenAICompatibleClient client = new OpenAICompatibleClient(
+                entity, Duration.ofSeconds(timeoutSeconds), streamExecutor, circuitBreaker);
         ChatResponse response = client.chat(request);
 
         log.info("LLM节点执行完成, 模型: {}, tokens: {}", entity.getModelName(), response.getTotalTokens());

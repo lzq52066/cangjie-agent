@@ -14,7 +14,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -38,7 +37,7 @@ public class ObservabilityController {
     private final IOperationLogService operationLogService;
     private final ISystemMetricService systemMetricService;
     private final ITraceRecordService traceRecordService;
-    private final JdbcTemplate jdbcTemplate;
+    private final cn.cangjiecloud.observability.mapper.ObservabilityStatsMapper observabilityStatsMapper;
 
     /**
      * 操作日志分页
@@ -90,20 +89,15 @@ public class ObservabilityController {
         Map<String, Object> data = new LinkedHashMap<>();
 
         // 今日对话数（user 消息数）
-        Long todayChatCount = jdbcTemplate.queryForObject(
-                "SELECT count(*) FROM chat_message WHERE role = 'user' AND deleted = 0 AND create_time >= ?",
-                Long.class, todayStart);
+        Long todayChatCount = observabilityStatsMapper.countUserMessagesSince(todayStart);
         // 今日模型调用数（assistant 消息数）
-        Long todayModelCallCount = jdbcTemplate.queryForObject(
-                "SELECT count(*) FROM chat_message WHERE role = 'assistant' AND deleted = 0 AND create_time >= ?",
-                Long.class, todayStart);
+        Long todayModelCallCount = observabilityStatsMapper.countAssistantMessagesSince(todayStart);
         // 今日错误数
         Long todayErrorCount = operationLogService.count(new LambdaQueryWrapper<OperationLogEntity>()
                 .eq(OperationLogEntity::getStatus, "fail")
                 .ge(OperationLogEntity::getCreateTime, todayStart));
         // 操作平均耗时（毫秒）
-        Double avgDuration = jdbcTemplate.queryForObject(
-                "SELECT COALESCE(AVG(duration), 0) FROM operation_log WHERE deleted = 0", Double.class);
+        Double avgDuration = observabilityStatsMapper.avgOperationDuration();
         // 今日操作日志数
         Long todayLogCount = operationLogService.count(new LambdaQueryWrapper<OperationLogEntity>()
                 .ge(OperationLogEntity::getCreateTime, todayStart));

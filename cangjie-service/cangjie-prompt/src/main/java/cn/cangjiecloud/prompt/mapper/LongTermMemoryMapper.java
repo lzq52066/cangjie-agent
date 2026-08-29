@@ -30,4 +30,13 @@ public interface LongTermMemoryMapper extends BaseMapper<LongTermMemoryEntity> {
     @Update("UPDATE long_term_memory SET is_active = false, update_by = #{updateBy}, "
             + "update_time = CURRENT_TIMESTAMP WHERE id = #{id}")
     int deactivate(@Param("id") String id, @Param("updateBy") String updateBy);
+
+    @Update("UPDATE long_term_memory SET is_active = true, update_by = #{updateBy}, "
+            + "update_time = CURRENT_TIMESTAMP WHERE id = #{id}")
+    int reactivate(@Param("id") String id, @Param("updateBy") String updateBy);
+
+    @Select("SELECT * FROM long_term_memory WHERE session_id = #{sessionId} "
+            + "AND memory_type = 'scene' AND is_active = true AND deleted = 0 "
+            + "ORDER BY last_triggered_at DESC")
+    List<LongTermMemoryEntity> selectSceneMemories(@Param("sessionId") String sessionId);
 }

@@ -36,4 +36,17 @@ public class ChatMessageEntity extends BaseEntity {
 
     /** 响应耗时（毫秒） */
     private Long duration;
+
+    /** 用户反馈：none / like / dislike */
+    private String feedback;
+
+    /** 人工标注的修正答案 */
+    private String annotation;
+
+    /** 标注人 */
+    private String annotateBy;
+
+    /** 标注时间 */
+    @com.fasterxml.jackson.annotation.JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private java.time.LocalDateTime annotateTime;
 }

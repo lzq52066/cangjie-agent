@@ -25,4 +25,7 @@ public class KnowledgeBaseCreateDTO {
 
     /** 目录结构（JSON） */
     private String directory;
+
+    /** 可见性：public / private（默认 private） */
+    private String visibility;
 }

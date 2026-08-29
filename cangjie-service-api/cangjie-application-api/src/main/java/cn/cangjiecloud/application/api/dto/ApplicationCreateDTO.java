@@ -52,4 +52,7 @@ public class ApplicationCreateDTO {
 
     /** 图标 */
     private String icon;
+
+    /** token 配额（0 表示不限制） */
+    private Long tokenQuota;
 }

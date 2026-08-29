@@ -12,6 +12,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -41,6 +42,10 @@ public class OpenChatController {
     private final IChatService chatService;
     private final Executor chatExecutor;
 
+    /** SSE 流式连接超时（秒） */
+    @Value("${cangjie.chat.sse-timeout-seconds:600}")
+    private long sseTimeoutSeconds;
+
     @PostMapping("/chat/completions")
     public Object chatCompletions(@Valid @RequestBody ChatOpenAiRequest request,
                                   HttpServletRequest httpRequest,
@@ -52,7 +57,7 @@ public class OpenChatController {
         if (Boolean.TRUE.equals(request.getStream())) {
             httpResponse.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
             httpResponse.setCharacterEncoding("UTF-8");
-            SseEmitter emitter = new SseEmitter(5 * 60 * 1000L);
+            SseEmitter emitter = new SseEmitter(sseTimeoutSeconds * 1000);
             chatExecutor.execute(() -> chatService.chatStream(internalRequest, emitter, true,
                     request.getUser()));
             return emitter;

@@ -41,6 +41,9 @@ public class KnowledgeBaseEntity extends BaseEntity {
     /** 检索模式：simple（段落级检索）/ two_stage（摘要→段落两级检索） */
     private String searchMode;
 
+    /** 可见性：public（所有人可见）/ private（仅创建者与管理端可见） */
+    private String visibility;
+
     /** 状态 */
     private String status;
 }

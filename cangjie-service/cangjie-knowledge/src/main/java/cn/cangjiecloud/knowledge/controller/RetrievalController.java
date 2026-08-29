@@ -23,4 +23,12 @@ public class RetrievalController {
     public R<List<RetrievalResultDTO>> search(@RequestBody RetrievalQueryDTO query) {
         return R.data(retrievalService.retrieve(query));
     }
+
+    /**
+     * 命中测试：调试检索效果，返回每条结果的向量分/全文分/融合分与问题路命中标记
+     */
+    @PostMapping("/hit-test")
+    public R<List<RetrievalResultDTO>> hitTest(@RequestBody RetrievalQueryDTO query) {
+        return R.data(retrievalService.retrieve(query));
+    }
 }

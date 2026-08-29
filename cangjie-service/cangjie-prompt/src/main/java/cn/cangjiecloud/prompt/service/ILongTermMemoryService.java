@@ -1,10 +1,11 @@
 package cn.cangjiecloud.prompt.service;
 
+import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.prompt.entity.LongTermMemoryEntity;
 
 import java.util.List;
 
-public interface ILongTermMemoryService {
+public interface ILongTermMemoryService extends IService<LongTermMemoryEntity> {
 
     /**
      * 按用户 + 应用 + 维度查询激活记忆
@@ -30,4 +31,19 @@ public interface ILongTermMemoryService {
      * 软删除
      */
     void deactivate(String id);
+
+    /**
+     * 查询会话的场景记忆（激活状态）
+     */
+    List<LongTermMemoryEntity> findSceneMemories(String sessionId);
+
+    /**
+     * 重新激活被遗忘/停用的记忆
+     */
+    void reactivate(String id);
+
+    /**
+     * 彻底删除记忆
+     */
+    void deleteMemory(String id);
 }

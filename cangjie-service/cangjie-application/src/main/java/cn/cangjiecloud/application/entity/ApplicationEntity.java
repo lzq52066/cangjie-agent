@@ -66,4 +66,10 @@ public class ApplicationEntity extends BaseEntity {
 
     /** 对外 API Key */
     private String apikey;
+
+    /** token 配额（0 表示不限制） */
+    private Long tokenQuota;
+
+    /** 已消耗 token 累计 */
+    private Long tokensUsed;
 }

@@ -5,6 +5,7 @@ import cn.cangjiecloud.core.model.ChatMessage;
 import cn.cangjiecloud.core.model.ChatRequest;
 import cn.cangjiecloud.core.model.ChatResponse;
 import cn.cangjiecloud.core.model.ModelType;
+import cn.cangjiecloud.model.circuitbreaker.ModelCircuitBreaker;
 import cn.cangjiecloud.model.entity.ModelEntity;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.SystemMessage;
@@ -15,14 +16,19 @@ import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.task.AsyncTaskExecutor;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Spliterator;
 import java.util.Spliterators;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -36,16 +42,43 @@ import java.util.stream.StreamSupport;
 @Slf4j
 public class OpenAICompatibleClient {
 
-    private final ModelEntity modelConfig;
+    private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(120);
 
-    public OpenAICompatibleClient(ModelEntity modelConfig) {
+    private final ModelEntity modelConfig;
+    /** 单次 LLM 请求超时（同步与流式模型均生效） */
+    private final Duration requestTimeout;
+    /** 流式生产者任务使用的受管线程池 */
+    private final AsyncTaskExecutor streamExecutor;
+    /** 模型熔断器（可为 null，表示不参与熔断统计） */
+    private final ModelCircuitBreaker circuitBreaker;
+
+    public OpenAICompatibleClient(ModelEntity modelConfig, Duration requestTimeout,
+                                  AsyncTaskExecutor streamExecutor, ModelCircuitBreaker circuitBreaker) {
         this.modelConfig = modelConfig;
+        this.requestTimeout = requestTimeout != null ? requestTimeout : DEFAULT_REQUEST_TIMEOUT;
+        this.streamExecutor = streamExecutor;
+        this.circuitBreaker = circuitBreaker;
     }
 
     /**
      * 同步对话（支持 Function Calling）
      */
     public ChatResponse chat(ChatRequest request) {
+        try {
+            ChatResponse response = doChat(request);
+            if (circuitBreaker != null) {
+                circuitBreaker.recordSuccess(modelConfig.getId());
+            }
+            return response;
+        } catch (RuntimeException e) {
+            if (circuitBreaker != null) {
+                circuitBreaker.recordFailure(modelConfig.getId());
+            }
+            throw e;
+        }
+    }
+
+    private ChatResponse doChat(ChatRequest request) {
         dev.langchain4j.model.chat.ChatModel chatModel = buildChatModel(request);
         List<dev.langchain4j.data.message.ChatMessage> messages = convertMessages(request.getMessages());
 
@@ -94,6 +127,19 @@ public class OpenAICompatibleClient {
      * 流式对话 — 使用 LangChain4j 原生 token 级流式推送
      */
     public Stream<ChatChunk> streamChat(ChatRequest request) {
+        return streamChat(request, null);
+    }
+
+    /**
+     * 流式对话（可取消）
+     *
+     * @param cancelSignal 外部取消信号：消费方断开或超时时置 true，
+     *                     流停止读取并中断生产者任务，避免后台线程空转
+     */
+    public Stream<ChatChunk> streamChat(ChatRequest request, AtomicBoolean cancelSignal) {
+        if (streamExecutor == null) {
+            throw new IllegalStateException("模型客户端未配置流式线程池，无法发起流式调用");
+        }
         BlockingQueue<ChatChunk> queue = new LinkedBlockingQueue<>();
         List<dev.langchain4j.data.message.ChatMessage> messages = convertMessages(request.getMessages());
 
@@ -104,6 +150,7 @@ public class OpenAICompatibleClient {
                 .temperature(request.getTemperature())
                 .maxTokens(request.getMaxTokens() > 0 ? request.getMaxTokens() : modelConfig.getMaxTokens())
                 .topP(request.getTopP())
+                .timeout(requestTimeout)
                 .build();
 
         dev.langchain4j.model.chat.request.ChatRequest.Builder lcBuilder =
@@ -120,11 +167,14 @@ public class OpenAICompatibleClient {
 
         dev.langchain4j.model.chat.request.ChatRequest lcRequest = lcBuilder.build();
 
-        new Thread(() -> {
+        Future<?> producer = streamExecutor.submit(() -> {
             try {
                 streamingModel.chat(lcRequest, new StreamingChatResponseHandler() {
                     @Override
                     public void onPartialResponse(String token) {
+                        if (Thread.currentThread().isInterrupted()) {
+                            return;
+                        }
                         try {
                             queue.put(ChatChunk.builder().delta(token).done(false).build());
                         } catch (InterruptedException e) {
@@ -134,6 +184,12 @@ public class OpenAICompatibleClient {
 
                     @Override
                     public void onCompleteResponse(dev.langchain4j.model.chat.response.ChatResponse response) {
+                        if (circuitBreaker != null) {
+                            circuitBreaker.recordSuccess(modelConfig.getId());
+                        }
+                        if (Thread.currentThread().isInterrupted()) {
+                            return;
+                        }
                         try {
                             String finishReason = response.finishReason() != null ? response.finishReason().name() : "stop";
                             var usage = response.tokenUsage();
@@ -168,6 +224,12 @@ public class OpenAICompatibleClient {
                     @Override
                     public void onError(Throwable error) {
                         log.error("流式调用模型失败: {}", error.getMessage());
+                        if (circuitBreaker != null) {
+                            circuitBreaker.recordFailure(modelConfig.getId());
+                        }
+                        if (Thread.currentThread().isInterrupted()) {
+                            return;
+                        }
                         String friendlyMsg = LlmErrorMapper.map(error.getMessage());
                         try {
                             queue.put(ChatChunk.builder()
@@ -182,22 +244,33 @@ public class OpenAICompatibleClient {
                 });
             } catch (Exception e) {
                 log.error("流式调用模型异常: {}", e.getMessage(), e);
+                if (Thread.currentThread().isInterrupted()) {
+                    return;
+                }
                 try {
                     queue.put(ChatChunk.builder().delta("").done(true).error(LlmErrorMapper.map(e.getMessage())).build());
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                 }
             }
-        }, "llm-streaming").start();
+        });
 
         return StreamSupport.stream(
-                new Spliterators.AbstractSpliterator<>(Long.MAX_VALUE, Spliterator.ORDERED) {
+                new Spliterators.AbstractSpliterator<ChatChunk>(Long.MAX_VALUE, Spliterator.ORDERED) {
                     @Override
                     public boolean tryAdvance(Consumer<? super ChatChunk> action) {
                         try {
-                            ChatChunk chunk = queue.take();
-                            action.accept(chunk);
-                            return !chunk.isDone();
+                            while (true) {
+                                if (isCancelled(cancelSignal)) {
+                                    return false;
+                                }
+                                ChatChunk chunk = queue.poll(500, TimeUnit.MILLISECONDS);
+                                if (chunk == null) {
+                                    continue;
+                                }
+                                action.accept(chunk);
+                                return !chunk.isDone();
+                            }
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                             return false;
@@ -205,7 +278,11 @@ public class OpenAICompatibleClient {
                     }
                 },
                 false
-        );
+        ).onClose(() -> producer.cancel(true));
+    }
+
+    private static boolean isCancelled(AtomicBoolean cancelSignal) {
+        return (cancelSignal != null && cancelSignal.get()) || Thread.currentThread().isInterrupted();
     }
 
     /**
@@ -222,6 +299,7 @@ public class OpenAICompatibleClient {
                         .baseUrl(modelConfig.getBaseUrl())
                         .modelName(modelConfig.getModelName())
                         .dimensions(modelConfig.getEmbeddingDimension())
+                        .timeout(requestTimeout)
                         .build();
 
         dev.langchain4j.data.embedding.Embedding embedding = embeddingModel.embed(text).content();
@@ -238,6 +316,7 @@ public class OpenAICompatibleClient {
                 .temperature(request.getTemperature())
                 .maxTokens(request.getMaxTokens() > 0 ? request.getMaxTokens() : modelConfig.getMaxTokens())
                 .topP(request.getTopP())
+                .timeout(requestTimeout)
                 .strictTools(true)
                 .build();
     }

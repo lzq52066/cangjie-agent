@@ -42,4 +42,10 @@ public class ChatSessionEntity extends BaseEntity {
 
     /** 元数据（JSON） */
     private String metadata;
+
+    /** 会话滚动摘要（覆盖已摘要的历史消息） */
+    private String summary;
+
+    /** 已纳入摘要的消息数 */
+    private Integer summaryMsgCount;
 }

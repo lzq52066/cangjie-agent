@@ -3,6 +3,7 @@ package cn.cangjiecloud.model.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
+import cn.cangjiecloud.common.util.AesUtil;
 import cn.cangjiecloud.core.model.*;
 import cn.cangjiecloud.model.api.dto.ModelCreateDTO;
 import cn.cangjiecloud.model.api.dto.ModelUpdateDTO;
@@ -11,10 +12,15 @@ import cn.cangjiecloud.model.mapper.ModelMapper;
 import cn.cangjiecloud.model.provider.OpenAICompatibleClient;
 import cn.cangjiecloud.model.service.IModelService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -32,6 +38,68 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
      */
     private final Map<String, OpenAICompatibleClient> clientCache = new ConcurrentHashMap<>();
 
+    /** 单次 LLM 请求超时（秒） */
+    @Value("${cangjie.model.timeout-seconds:120}")
+    private long timeoutSeconds;
+
+    /** 指定降级模型 ID（可选，未配置时使用默认模型降级） */
+    @Value("${cangjie.model.fallback-model-id:}")
+    private String fallbackModelId;
+
+    /** 模型 API Key 加密密钥（生产环境务必修改） */
+    @Value("${cangjie.security.model-key-secret:cangjie-model-key-change-me-pls}")
+    private String keySecret;
+
+    @Autowired
+    @Qualifier("llmStreamExecutor")
+    private AsyncTaskExecutor streamExecutor;
+
+    @Autowired
+    private cn.cangjiecloud.model.circuitbreaker.ModelCircuitBreaker circuitBreaker;
+
+    private OpenAICompatibleClient newClient(ModelEntity entity) {
+        // 解密 API Key 后构建客户端，数据库始终存储密文
+        ModelEntity copy = new ModelEntity();
+        org.springframework.beans.BeanUtils.copyProperties(entity, copy);
+        copy.setApiKey(decryptApiKey(entity.getApiKey()));
+        return new OpenAICompatibleClient(copy, Duration.ofSeconds(timeoutSeconds),
+                streamExecutor, circuitBreaker);
+    }
+
+    private String encryptApiKey(String apiKey) {
+        if (!StringUtils.hasText(apiKey)) {
+            return apiKey;
+        }
+        return AesUtil.encrypt(apiKey, keySecret);
+    }
+
+    /**
+     * 解密 API Key；兼容存量明文数据（解密失败原样返回）
+     */
+    private String decryptApiKey(String stored) {
+        if (!StringUtils.hasText(stored)) {
+            return stored;
+        }
+        try {
+            return AesUtil.decrypt(stored, keySecret);
+        } catch (Exception e) {
+            log.debug("API Key 非密文格式，按明文处理（存量数据兼容）");
+            return stored;
+        }
+    }
+
+    @Override
+    public String maskApiKey(String stored) {
+        String plain = decryptApiKey(stored);
+        if (!StringUtils.hasText(plain)) {
+            return plain;
+        }
+        if (plain.length() <= 8) {
+            return "****";
+        }
+        return "****" + plain.substring(plain.length() - 4);
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ModelEntity create(ModelCreateDTO dto) {
@@ -40,7 +108,7 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
         ModelEntity entity = new ModelEntity();
         entity.setName(dto.getName());
         entity.setModelType(type.getCode());
-        entity.setApiKey(dto.getApiKey());
+        entity.setApiKey(encryptApiKey(dto.getApiKey()));
         entity.setBaseUrl(StringUtils.hasText(dto.getBaseUrl()) ? dto.getBaseUrl() : OpenAICompatibleClient.defaultBaseUrl(type));
         entity.setModelName(dto.getModelName());
         entity.setTemperature(dto.getTemperature() != null ? dto.getTemperature() : 0.7);
@@ -58,6 +126,7 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
             clearOtherDefaults(entity.getId());
         }
         log.info("模型已创建: {} ({})", entity.getName(), entity.getModelType());
+        entity.setApiKey(maskApiKey(entity.getApiKey()));
         return entity;
     }
 
@@ -69,7 +138,7 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
             throw new ApiException("模型不存在");
         }
         if (StringUtils.hasText(dto.getName())) entity.setName(dto.getName());
-        if (StringUtils.hasText(dto.getApiKey())) entity.setApiKey(dto.getApiKey());
+        if (StringUtils.hasText(dto.getApiKey())) entity.setApiKey(encryptApiKey(dto.getApiKey()));
         if (StringUtils.hasText(dto.getBaseUrl())) entity.setBaseUrl(dto.getBaseUrl());
         if (StringUtils.hasText(dto.getModelName())) entity.setModelName(dto.getModelName());
         if (dto.getTemperature() != null) entity.setTemperature(dto.getTemperature());
@@ -86,6 +155,7 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
         updateById(entity);
         // 配置变更后失效缓存，避免生产路径继续使用旧配置
         evictClient(id);
+        entity.setApiKey(maskApiKey(entity.getApiKey()));
         return entity;
     }
 
@@ -109,7 +179,9 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
         if (StringUtils.hasText(modelType)) {
             wrapper.eq(ModelEntity::getModelType, modelType);
         }
-        return list(wrapper);
+        List<ModelEntity> models = list(wrapper);
+        models.forEach(m -> m.setApiKey(maskApiKey(m.getApiKey())));
+        return models;
     }
 
     @Override
@@ -123,7 +195,7 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
         }
 
         try {
-            OpenAICompatibleClient client = new OpenAICompatibleClient(entity);
+            OpenAICompatibleClient client = newClient(entity);
             ChatRequest request = ChatRequest.builder()
                     .model(entity.getModelName())
                     .messages(List.of(
@@ -164,17 +236,49 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
     }
 
     /**
-     * 获取模型客户端（带缓存）
+     * 获取模型客户端（带缓存 + 熔断降级）
+     * <p>
+     * 目标模型处于熔断状态时，自动降级到配置的降级模型或默认模型；
+     * 降级目标也不可用时抛出友好异常。
      */
     public OpenAICompatibleClient getClient(String modelId) {
-        return clientCache.computeIfAbsent(modelId, id -> {
-            ModelEntity entity = getById(id);
-            if (entity == null) {
-                throw new ApiException("模型不存在: " + id);
+        if (circuitBreaker.allowRequest(modelId)) {
+            return clientCache.computeIfAbsent(modelId, id -> {
+                ModelEntity entity = getById(id);
+                if (entity == null) {
+                    throw new ApiException("模型不存在: " + id);
+                }
+                log.info("创建模型客户端缓存: {} ({})", entity.getName(), id);
+                return newClient(entity);
+            });
+        }
+        OpenAICompatibleClient fallback = resolveFallbackClient(modelId);
+        if (fallback != null) {
+            return fallback;
+        }
+        throw new ApiException("模型暂时不可用（熔断中）且无可用降级模型，请稍后重试");
+    }
+
+    /**
+     * 解析降级模型客户端：优先配置的 fallback 模型，其次默认模型
+     */
+    private OpenAICompatibleClient resolveFallbackClient(String failedModelId) {
+        ModelEntity fallback = null;
+        if (StringUtils.hasText(fallbackModelId) && !fallbackModelId.equals(failedModelId)) {
+            fallback = getById(fallbackModelId);
+        }
+        if (fallback == null) {
+            ModelEntity def = getDefaultModel();
+            if (def != null && !def.getId().equals(failedModelId)) {
+                fallback = def;
             }
-            log.info("创建模型客户端缓存: {} ({})", entity.getName(), id);
-            return new OpenAICompatibleClient(entity);
-        });
+        }
+        if (fallback == null || !circuitBreaker.allowRequest(fallback.getId())) {
+            return null;
+        }
+        log.warn("模型 {} 已熔断，降级到模型: {} ({})", failedModelId, fallback.getName(), fallback.getId());
+        ModelEntity target = fallback;
+        return clientCache.computeIfAbsent(target.getId(), id -> newClient(target));
     }
 
     /**
@@ -187,7 +291,7 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
         }
         return clientCache.computeIfAbsent(entity.getId(), id -> {
             log.info("创建默认模型客户端缓存: {} ({})", entity.getName(), id);
-            return new OpenAICompatibleClient(entity);
+            return newClient(entity);
         });
     }
 

@@ -35,4 +35,14 @@ public interface IWorkflowService extends IService<WorkflowEntity> {
      * @return 执行记录
      */
     WorkflowExecutionEntity execute(String workflowId, Map<String, Object> inputs);
+
+    /**
+     * 异步执行工作流：立即返回执行记录（status=running），
+     * 后台线程执行，通过执行记录 ID 查询进度与节点事件
+     *
+     * @param workflowId 工作流 ID
+     * @param inputs     输入参数
+     * @return 执行记录（初始状态）
+     */
+    WorkflowExecutionEntity executeAsync(String workflowId, Map<String, Object> inputs);
 }

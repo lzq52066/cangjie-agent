@@ -41,4 +41,10 @@ public class LongTermMemoryEntity extends BaseEntity {
 
     /** 是否激活 */
     private Boolean isActive;
+
+    /** 记忆类型：user（用户画像，跨会话）/ scene（场景事实，会话内） */
+    private String memoryType;
+
+    /** 场景记忆绑定的会话 ID */
+    private String sessionId;
 }

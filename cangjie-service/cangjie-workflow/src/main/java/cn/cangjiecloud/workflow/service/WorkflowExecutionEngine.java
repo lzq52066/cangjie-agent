@@ -65,6 +65,24 @@ public class WorkflowExecutionEngine {
     }
 
     /**
+     * 节点执行事件监听器（用于节点级持久化、监控等）
+     */
+    public interface NodeEventListener {
+        /**
+         * 节点执行完成（成功或失败）回调
+         *
+         * @param nodeId       节点 ID
+         * @param nodeType     节点类型
+         * @param status       success / failed
+         * @param outputs      节点输出（失败时为 null）
+         * @param durationMs   耗时（毫秒）
+         * @param errorMessage 错误信息（成功时为 null）
+         */
+        void onNodeCompleted(String nodeId, String nodeType, String status,
+                             Map<String, Object> outputs, long durationMs, String errorMessage);
+    }
+
+    /**
      * 并行执行工作流 DAG
      *
      * @param nodes      节点列表
@@ -74,6 +92,14 @@ public class WorkflowExecutionEngine {
      */
     public Map<String, Object> execute(List<WorkflowNodeDTO> nodes, JSONArray edgesArray,
                                         Map<String, Object> inputs) {
+        return execute(nodes, edgesArray, inputs, null);
+    }
+
+    /**
+     * 并行执行工作流 DAG（带节点事件监听）
+     */
+    public Map<String, Object> execute(List<WorkflowNodeDTO> nodes, JSONArray edgesArray,
+                                        Map<String, Object> inputs, NodeEventListener listener) {
         if (nodes == null || nodes.isEmpty()) {
             throw new ApiException("工作流节点为空");
         }
@@ -152,7 +178,7 @@ public class WorkflowExecutionEngine {
                 for (String nid : batch) {
                     try {
                         executeNode(nid, nodeMap, adjacency, inDegree,
-                                variables, nodeResults, readyQueue);
+                                variables, nodeResults, readyQueue, listener);
                     } catch (Exception e) {
                         hasFailure.set(true);
                         synchronized (failures) {
@@ -166,7 +192,7 @@ public class WorkflowExecutionEngine {
                         .map(nid -> CompletableFuture.runAsync(() -> {
                             try {
                                 executeNode(nid, nodeMap, adjacency, inDegree,
-                                        variables, nodeResults, readyQueue);
+                                        variables, nodeResults, readyQueue, listener);
                             } catch (Exception e) {
                                 hasFailure.set(true);
                                 synchronized (failures) {
@@ -212,7 +238,8 @@ public class WorkflowExecutionEngine {
                               Map<String, AtomicInteger> inDegree,
                               Map<String, Object> variables,
                               Map<String, Map<String, Object>> nodeResults,
-                              ConcurrentLinkedQueue<String> readyQueue) {
+                              ConcurrentLinkedQueue<String> readyQueue,
+                              NodeEventListener listener) {
 
         WorkflowNodeDTO nodeDTO = nodeMap.get(nodeId);
         if (nodeDTO == null) {
@@ -249,6 +276,7 @@ public class WorkflowExecutionEngine {
         long delayMs = getNodeRetryDelay(nodeDTO);
 
         // 执行节点（带重试）
+        long nodeStart = System.currentTimeMillis();
         Map<String, Object> result;
         try {
             if (maxRetries > 0) {
@@ -262,8 +290,13 @@ public class WorkflowExecutionEngine {
             }
         } catch (Exception e) {
             log.error("节点执行失败: {} ({})", nodeDTO.getName(), nodeId, e);
+            emitNodeEvent(listener, nodeId, nodeDTO.getType(), "failed", null,
+                    System.currentTimeMillis() - nodeStart, e.getMessage());
             throw new ApiException("节点 [" + nodeDTO.getName() + "] 执行失败: " + e.getMessage(), e);
         }
+
+        emitNodeEvent(listener, nodeId, nodeDTO.getType(), "success", result,
+                System.currentTimeMillis() - nodeStart, null);
 
         // 存储结果并合并到上下文变量
         nodeResults.put(nodeId, result);
@@ -274,6 +307,22 @@ public class WorkflowExecutionEngine {
         // 传播到后继节点
         propagateSuccessors(nodeId, nodeDTO.getType(), result,
                 adjacency, inDegree, readyQueue);
+    }
+
+    /**
+     * 回调节点事件（监听器异常不影响主流程）
+     */
+    private void emitNodeEvent(NodeEventListener listener, String nodeId, String nodeType,
+                               String status, Map<String, Object> outputs,
+                               long durationMs, String errorMessage) {
+        if (listener == null) {
+            return;
+        }
+        try {
+            listener.onNodeCompleted(nodeId, nodeType, status, outputs, durationMs, errorMessage);
+        } catch (Exception e) {
+            log.warn("节点事件回调失败: node={}, {}", nodeId, e.getMessage());
+        }
     }
 
     /**

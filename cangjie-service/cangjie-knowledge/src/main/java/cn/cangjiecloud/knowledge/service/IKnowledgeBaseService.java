@@ -14,4 +14,10 @@ public interface IKnowledgeBaseService extends IService<KnowledgeBaseEntity> {
     void delete(String id);
 
     List<KnowledgeBaseEntity> list(String keyword);
+
+    /**
+     * 校验当前用户对知识库的访问权限（管理员放行；私有库仅创建者可访问），
+     * 无权限时抛出业务异常
+     */
+    void checkAccess(String knowledgeBaseId);
 }

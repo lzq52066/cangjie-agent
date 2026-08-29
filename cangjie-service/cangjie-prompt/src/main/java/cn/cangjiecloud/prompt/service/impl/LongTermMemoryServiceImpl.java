@@ -82,11 +82,39 @@ public class LongTermMemoryServiceImpl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deactivate(String id) {
+        String updateBy = resolveOperator();
+        baseMapper.deactivate(id, updateBy);
+        log.info("长期记忆已停用: {}", id);
+    }
+
+    @Override
+    public List<LongTermMemoryEntity> findSceneMemories(String sessionId) {
+        if (!StringUtils.hasText(sessionId)) {
+            return List.of();
+        }
+        return baseMapper.selectSceneMemories(sessionId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void reactivate(String id) {
+        String updateBy = resolveOperator();
+        baseMapper.reactivate(id, updateBy);
+        log.info("长期记忆已重新激活: {}", id);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteMemory(String id) {
+        removeById(id);
+        log.info("长期记忆已删除: {}", id);
+    }
+
+    private String resolveOperator() {
         String updateBy = UserContext.getUserId();
         if (!StringUtils.hasText(updateBy)) {
             updateBy = "system";
         }
-        baseMapper.deactivate(id, updateBy);
-        log.info("长期记忆已停用: {}", id);
+        return updateBy;
     }
 }

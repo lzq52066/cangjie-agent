@@ -41,6 +41,7 @@ public class ApplicationServiceImpl extends ServiceImpl<ApplicationMapper, Appli
         entity.setSuggestions(toJson(dto.getSuggestions()));
         entity.setIcon(dto.getIcon());
         entity.setStatus("draft");
+        entity.setTokenQuota(dto.getTokenQuota() != null ? dto.getTokenQuota() : 0L);
         save(entity);
         log.info("应用已创建: {} ({}) type={}", entity.getName(), entity.getId(), entity.getType());
         return entity;
@@ -68,6 +69,7 @@ public class ApplicationServiceImpl extends ServiceImpl<ApplicationMapper, Appli
         if (StringUtils.hasText(dto.getConfig())) entity.setConfig(dto.getConfig());
         if (dto.getSuggestions() != null) entity.setSuggestions(toJson(dto.getSuggestions()));
         if (StringUtils.hasText(dto.getIcon())) entity.setIcon(dto.getIcon());
+        if (dto.getTokenQuota() != null) entity.setTokenQuota(dto.getTokenQuota());
         updateById(entity);
         return entity;
     }

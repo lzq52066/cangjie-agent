@@ -54,6 +54,10 @@ public class OpenWebChatController {
     @Value("${cangjie.openapi.web-anonymous:true}")
     private boolean webAnonymousEnabled;
 
+    /** SSE 流式连接超时（秒） */
+    @Value("${cangjie.chat.sse-timeout-seconds:600}")
+    private long sseTimeoutSeconds;
+
     /**
      * 网页聊天应用配置（名称、描述、建议问题），供聊天页面初始化
      */
@@ -113,7 +117,7 @@ public class OpenWebChatController {
                                  HttpServletRequest httpRequest) {
         ensureWebAnonymousEnabled();
         requirePublishedApplication(request.getApplicationId());
-        SseEmitter emitter = new SseEmitter(5 * 60 * 1000L);
+        SseEmitter emitter = new SseEmitter(sseTimeoutSeconds * 1000);
         String userId = StringUtils.hasText(request.getUserId()) ? request.getUserId() : null;
         chatExecutor.execute(() -> chatService.chatStream(request, emitter, false, userId));
         return emitter;

@@ -40,7 +40,11 @@ public class ModelController {
 
     @GetMapping("/{id}")
     public R<ModelEntity> get(@PathVariable String id) {
-        return R.data(modelService.getById(id));
+        ModelEntity entity = modelService.getById(id);
+        if (entity != null) {
+            entity.setApiKey(modelService.maskApiKey(entity.getApiKey()));
+        }
+        return R.data(entity);
     }
 
     @GetMapping

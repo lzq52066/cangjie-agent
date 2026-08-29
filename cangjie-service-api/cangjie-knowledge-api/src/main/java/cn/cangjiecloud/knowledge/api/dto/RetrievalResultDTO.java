@@ -22,4 +22,7 @@ public class RetrievalResultDTO {
     private double finalScore;
     private Map<String, Object> metadata;
     private String documentName;
+
+    /** 问题路命中的常见问题内容（未命中为 null） */
+    private String matchedProblem;
 }

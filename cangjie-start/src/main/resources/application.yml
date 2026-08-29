@@ -29,6 +29,63 @@ spring:
       mode: never
 
 cangjie:
+  security:
+    # 模型 API Key 加密密钥（AES），生产环境务必通过环境变量修改
+    model-key-secret: ${CANGJIE_MODEL_KEY_SECRET:cangjie-model-key-change-me-pls}
+  ratelimit:
+    # 对话接口限流开关（按应用维度）
+    enabled: true
+    # 每秒允许请求数
+    qps: 5
+    # 突发容量
+    burst: 10
+  model:
+    # 单次 LLM 请求超时（秒），同步/流式/嵌入调用均生效
+    timeout-seconds: 120
+    # 指定降级模型 ID（可选，为空时使用默认模型作为降级目标）
+    fallback-model-id:
+    breaker:
+      # 模型熔断开关
+      enabled: true
+      # 连续失败多少次后熔断
+      failure-threshold: 5
+      # 熔断冷却时长（秒），冷却后半开探测
+      cooldown-seconds: 30
+  chat:
+    # SSE 流式连接超时（秒）
+    sse-timeout-seconds: 600
+    agent:
+      # Function Calling 最大轮次
+      max-rounds: 5
+      # Agent 循环总超时（秒），超过后终止对话并返回超时提示
+      timeout-seconds: 300
+    history:
+      # 历史消息 token 预算（超出从最旧消息截断，0 表示不限制）
+      max-tokens: 6000
+    session:
+      # 会话滚动摘要开关
+      summary-enabled: true
+      # 每新增多少条消息触发一次摘要
+      summary-every: 10
+      # 摘要专用模型（可选，为空用应用绑定模型）
+      summary-model-id:
+  memory:
+    inject:
+      # 记忆注入最大条数（按强度评分取 TopN）
+      max-count: 20
+      # 记忆注入最大字符数
+      max-chars: 2000
+    decay:
+      # 记忆遗忘任务开关
+      enabled: true
+      # 执行周期（默认每日 03:00）
+      cron: "0 0 3 * * ?"
+      # 评分低于该阈值的记忆自动停用
+      threshold: 0.25
+      # 时近衰减半衰期（天）
+      half-life-days: 30
+      # 单用户单应用激活记忆容量上限（0 表示不限制）
+      capacity-per-user: 100
   openapi:
     # 对外接口路径前缀
     prefix: /api/open
@@ -108,3 +165,16 @@ logging:
     cn.cangjiecloud: debug
     cn.cangjiecloud.observability.mapper.SystemMetricMapper: warn
     com.baomidou.mybatisplus: info
+
+# 可观测性：暴露健康检查与 Prometheus 指标端点
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    tags:
+      application: ${spring.application.name:CangJieAgent}

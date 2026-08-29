@@ -99,6 +99,17 @@ public class McpClientManager {
     }
 
     /**
+     * 测试与 MCP 服务的连通性：强制重新握手
+     *
+     * @return true 握手成功
+     */
+    public boolean testConnection(String serverUrl) {
+        sessions.remove(serverUrl);
+        McpSession session = getOrCreateSession(serverUrl);
+        return session.isConnected();
+    }
+
+    /**
      * MCP 会话封装
      * <p>
      * 维护与单个 MCP 服务器的连接状态、tools/list 缓存和请求 id 计数。

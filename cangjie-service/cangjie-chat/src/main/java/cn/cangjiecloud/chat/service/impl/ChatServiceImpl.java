@@ -89,6 +89,8 @@ public class ChatServiceImpl implements IChatService {
     private final IRuleService ruleService;
     private final IWorkflowService workflowService;
     private final RuleEvaluator ruleEvaluator;
+    private final cn.cangjiecloud.chat.ratelimit.ChatRateLimiter chatRateLimiter;
+    private final cn.cangjiecloud.prompt.memory.MemoryScorer memoryScorer;
 
     @Autowired(required = false)
     private TraceCollector traceCollector;
@@ -101,8 +103,29 @@ public class ChatServiceImpl implements IChatService {
     @Value("${cangjie.rag.query-rewrite.type:none}")
     private String queryRewriteType;
 
+    /** Agent 循环（Function Calling）最大轮次 */
+    @Value("${cangjie.chat.agent.max-rounds:5}")
+    private int agentMaxRounds;
+
+    /** Agent 循环总超时（秒），超过后终止对话并返回超时提示 */
+    @Value("${cangjie.chat.agent.timeout-seconds:300}")
+    private long agentTimeoutSeconds;
+
+    /** 记忆注入最大条数（按强度评分取 TopN） */
+    @Value("${cangjie.memory.inject.max-count:20}")
+    private int memoryInjectMaxCount;
+
+    /** 记忆注入最大字符数 */
+    @Value("${cangjie.memory.inject.max-chars:2000}")
+    private int memoryInjectMaxChars;
+
+    /** 历史消息 token 预算（超出后从最旧消息开始截断，0 表示不限制） */
+    @Value("${cangjie.chat.history.max-tokens:6000}")
+    private int historyMaxTokens;
+
+    private final cn.cangjiecloud.chat.service.SessionSummaryService sessionSummaryService;
+
     private static final int DEFAULT_TOP_K = 5;
-    private static final long SSE_TIMEOUT = 5 * 60 * 1000L;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -111,6 +134,7 @@ public class ChatServiceImpl implements IChatService {
         String traceId = UUID.randomUUID().toString().replace("-", "");
 
         ApplicationEntity application = getApplication(request.getApplicationId());
+        checkChatAccess(application);
         ChatSessionEntity session = getOrCreateSession(request, application);
 
         // 设置链路上下文，供 LlmTraceRecorder 及其他下游自动获取
@@ -147,11 +171,13 @@ public class ChatServiceImpl implements IChatService {
         // 保存 AI 回复并更新统计
         ChatMessageEntity aiMessage = saveAiMessage(session, application, chatResponse, retrievalSources, duration);
         updateSessionStats(session, chatResponse);
+        addApplicationTokens(application.getId(), chatResponse.getTotalTokens());
+        sessionSummaryService.maybeSummarizeAsync(session.getSessionId(), application.getModelId());
 
         // 异步触发长期记忆提取（仅应用启用记忆开关时）
         if (Boolean.TRUE.equals(application.getMemoryEnabled())) {
             longTermMemoryExtractService.extract(
-                    UserContext.getUserId(), application, userMessage, aiMessage);
+                    UserContext.getUserId(), application, session.getSessionId(), userMessage, aiMessage);
         }
 
         // 记录追踪
@@ -182,8 +208,15 @@ public class ChatServiceImpl implements IChatService {
         TraceContext.setTraceId(traceId);
         TraceContext.setUserId(userId);
 
+        // 监听 SSE 生命周期：客户端断开或超时时置位取消信号，终止后续循环与流式读取
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        emitter.onCompletion(() -> cancelled.set(true));
+        emitter.onTimeout(() -> cancelled.set(true));
+        emitter.onError(t -> cancelled.set(true));
+
         try {
             ApplicationEntity application = getApplication(request.getApplicationId());
+            checkChatAccess(application);
             ChatSessionEntity session = getOrCreateSession(request, application);
             TraceContext.setSessionId(session.getSessionId());
             List<Map<String, Object>> retrievalSources = new ArrayList<>();
@@ -259,7 +292,7 @@ public class ChatServiceImpl implements IChatService {
             List<Map<String, Object>> tools = buildToolDefinitions(toolSpecs);
 
             List<ChatMessage> conversation = new ArrayList<>(messages);
-            int maxRounds = 5;
+            long deadline = chatStart + agentTimeoutSeconds * 1000L;
 
             // 内部格式先发送 init 事件
             if (!openAiFormat) {
@@ -273,14 +306,22 @@ public class ChatServiceImpl implements IChatService {
                 }
             }
 
-            // 多轮 Function Calling 循环（与同步路径 callModel 对齐）
-            for (int round = 0; round < maxRounds && !streamError.get(); round++) {
-                Stream<ChatChunk> chunkStream = callModelStream(application, conversation, traceId);
+            // 多轮 Function Calling 循环（带总超时与断开保护，与同步路径 callModel 对齐）
+            for (int round = 0; round < agentMaxRounds && !streamError.get() && !cancelled.get(); round++) {
+                if (System.currentTimeMillis() > deadline) {
+                    streamError.set(true);
+                    streamErrorMessage.set("对话处理超时：模型与工具调用总时长超过 " + agentTimeoutSeconds + " 秒，已终止");
+                    pushStreamError(emitter, openAiFormat, streamErrorMessage.get());
+                    break;
+                }
                 StringBuilder roundContent = new StringBuilder();
                 List<ChatResponse.ToolCall> roundToolCalls = new ArrayList<>();
 
-                try {
+                try (Stream<ChatChunk> chunkStream = callModelStream(application, conversation, traceId, cancelled)) {
                     chunkStream.forEach(chunk -> {
+                        if (cancelled.get()) {
+                            throw new IllegalStateException("SSE 连接已关闭，停止流式对话");
+                        }
                         if (chunk.getError() != null) {
                             streamError.set(true);
                             streamErrorMessage.set(chunk.getError());
@@ -331,7 +372,7 @@ public class ChatServiceImpl implements IChatService {
                 }
 
                 // 本轮产生了工具调用：执行工具并继续下一轮
-                if (!roundToolCalls.isEmpty() && !tools.isEmpty()) {
+                if (!roundToolCalls.isEmpty() && !tools.isEmpty() && !cancelled.get()) {
                     conversation.add(ChatMessage.assistant(roundContent.toString()));
                     for (ChatResponse.ToolCall tc : roundToolCalls) {
                         Map<String, Object> args;
@@ -418,11 +459,13 @@ public class ChatServiceImpl implements IChatService {
                         .build());
 
                 updateSessionStats(session, aiMessage);
+                addApplicationTokens(application.getId(), totalTokens);
+                sessionSummaryService.maybeSummarizeAsync(session.getSessionId(), application.getModelId());
 
                 // 异步触发长期记忆提取（仅应用启用记忆开关时）
                 if (Boolean.TRUE.equals(application.getMemoryEnabled())) {
                     longTermMemoryExtractService.extract(
-                        userId, application, userMessage, aiMessage);
+                        userId, application, session.getSessionId(), userMessage, aiMessage);
                 }
 
                 // 发送完成事件
@@ -487,6 +530,37 @@ public class ChatServiceImpl implements IChatService {
             }
         } catch (IOException e) {
             log.warn("SSE 错误推送失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 对话准入校验：请求限流 + token 配额
+     */
+    private void checkChatAccess(ApplicationEntity application) {
+        chatRateLimiter.checkRateLimit(application.getId());
+        Long quota = application.getTokenQuota();
+        if (quota != null && quota > 0) {
+            long used = application.getTokensUsed() != null ? application.getTokensUsed() : 0L;
+            if (used >= quota) {
+                throw new ApiException("应用 token 配额已用尽，请联系管理员提升配额");
+            }
+        }
+    }
+
+    /**
+     * 累计应用 token 消耗（SQL 原子自增，避免并发覆盖）
+     */
+    private void addApplicationTokens(String applicationId, long tokens) {
+        if (tokens <= 0) {
+            return;
+        }
+        try {
+            applicationService.lambdaUpdate()
+                    .eq(ApplicationEntity::getId, applicationId)
+                    .setSql("tokens_used = tokens_used + " + tokens)
+                    .update();
+        } catch (Exception e) {
+            log.warn("应用 token 消耗累计失败: appId={}, {}", applicationId, e.getMessage());
         }
     }
 
@@ -737,7 +811,36 @@ public class ChatServiceImpl implements IChatService {
             }
             messages.add(ChatMessage.builder().role(e.getRole()).content(e.getContent()).build());
         }
+
+        // token 预算：超预算时从最旧消息开始截断（始终保留最新一条）
+        if (historyMaxTokens > 0 && messages.size() > 1) {
+            int total = messages.stream().mapToInt(m -> estimateHistoryTokens(m.getContent())).sum();
+            int dropCount = 0;
+            while (total > historyMaxTokens && dropCount < messages.size() - 1) {
+                total -= estimateHistoryTokens(messages.get(dropCount).getContent());
+                dropCount++;
+            }
+            if (dropCount > 0) {
+                log.info("历史消息按 token 预算截断: sessionId={}, 截断 {} 条", sessionId, dropCount);
+                messages = new ArrayList<>(messages.subList(dropCount, messages.size()));
+            }
+        }
+
+        // 会话摘要注入头部（会话记忆：弥补被截断的早期上下文）
+        try {
+            ChatSessionEntity session = chatSessionService.getBySessionId(sessionId);
+            if (session != null && StringUtils.hasText(session.getSummary())) {
+                messages.add(0, ChatMessage.system(
+                        "【会话摘要】以下是本会话早前内容的摘要，供你了解上下文：\n" + session.getSummary()));
+            }
+        } catch (Exception e) {
+            log.warn("会话摘要注入失败: {}", e.getMessage());
+        }
         return messages;
+    }
+
+    private int estimateHistoryTokens(String content) {
+        return content == null ? 0 : (int) (content.length() * 0.75);
     }
 
     private ChatResponse callModel(ApplicationEntity application, String sessionId, String userId,
@@ -764,12 +867,20 @@ public class ChatServiceImpl implements IChatService {
         }
         List<Map<String, Object>> tools = buildToolDefinitions(toolSpecs);
 
-        // 多轮 function calling 循环
-        int maxRounds = 5;
+        // 多轮 function calling 循环（带总超时保护）
+        long deadline = System.currentTimeMillis() + agentTimeoutSeconds * 1000L;
         ChatResponse response = null;
         List<ChatMessage> conversation = new ArrayList<>(messages);
 
-        for (int round = 0; round < maxRounds; round++) {
+        for (int round = 0; round < agentMaxRounds; round++) {
+            if (System.currentTimeMillis() > deadline) {
+                if (traceCollector != null) {
+                    recordTrace("chat", "llm_call", traceId,
+                            System.currentTimeMillis() - llmStart, "fail",
+                            "Agent 循环总超时（>" + agentTimeoutSeconds + "s），已终止");
+                }
+                throw new ApiException("对话处理超时：模型与工具调用总时长超过 " + agentTimeoutSeconds + " 秒，已终止");
+            }
             ChatRequest chatRequest = ChatRequest.builder()
                     .messages(conversation)
                     .temperature(application.getTemperature() != null ? application.getTemperature() : 0.7)
@@ -862,7 +973,8 @@ public class ChatServiceImpl implements IChatService {
 
     private Stream<ChatChunk> callModelStream(ApplicationEntity application,
                                                List<ChatMessage> messages,
-                                               String traceId) {
+                                               String traceId,
+                                               AtomicBoolean cancelled) {
         OpenAICompatibleClient client = getClient(application);
 
         // 构建工具列表（Function Calling）
@@ -888,7 +1000,7 @@ public class ChatServiceImpl implements IChatService {
                 .tools(tools)
                 .toolChoice(tools.isEmpty() ? "none" : "auto")
                 .build();
-        return client.streamChat(chatRequest);
+        return client.streamChat(chatRequest, cancelled);
     }
 
     private OpenAICompatibleClient getClient(ApplicationEntity application) {
@@ -969,11 +1081,14 @@ public class ChatServiceImpl implements IChatService {
                 return;
             }
 
-            // 一次查询获取全部激活记忆，按维度分组，避免每个维度单独查询
-            List<LongTermMemoryEntity> allMemories = longTermMemoryService.findActiveAll(userId, appId);
-            if (allMemories == null || allMemories.isEmpty()) {
-                return;
-            }
+            StringBuilder memoryPrompt = new StringBuilder();
+
+            // 1. 用户记忆：按强度评分排序取 TopN（避免记忆膨胀稀释上下文）
+            List<LongTermMemoryEntity> userMemories = longTermMemoryService.findActiveAll(userId, appId).stream()
+                    .filter(m -> !"scene".equals(m.getMemoryType()))
+                    .sorted(java.util.Comparator.comparingDouble(memoryScorer::score).reversed())
+                    .limit(memoryInjectMaxCount)
+                    .toList();
 
             List<String> dimensionOrder = Arrays.asList("preference", "background", "convention", "goal");
             Map<String, String> dimLabels = Map.of(
@@ -982,24 +1097,50 @@ public class ChatServiceImpl implements IChatService {
                     "convention", "【用户习惯】",
                     "goal", "【用户目标】");
 
-            StringBuilder memoryPrompt = new StringBuilder();
+            int charBudget = memoryInjectMaxChars;
             for (String dim : dimensionOrder) {
-                List<LongTermMemoryEntity> memories = allMemories.stream()
+                List<LongTermMemoryEntity> memories = userMemories.stream()
                         .filter(m -> dim.equals(m.getDimension()))
                         .toList();
                 if (memories.isEmpty()) {
                     continue;
                 }
-                memoryPrompt.append(dimLabels.getOrDefault(dim, "【" + dim + "】")).append("\n");
+                StringBuilder block = new StringBuilder();
+                block.append(dimLabels.getOrDefault(dim, "【" + dim + "】")).append("\n");
+                boolean any = false;
                 for (LongTermMemoryEntity m : memories) {
-                    memoryPrompt.append("- ").append(m.getContent()).append("\n");
+                    String line = "- " + m.getContent() + "\n";
+                    if (block.length() + line.length() > charBudget) {
+                        break;
+                    }
+                    block.append(line);
+                    charBudget -= line.length();
+                    any = true;
                     longTermMemoryService.incrementTrigger(m.getId());
                 }
-                memoryPrompt.append("\n");
+                if (any) {
+                    memoryPrompt.append(block).append("\n");
+                }
             }
 
-            if (memoryPrompt.length() > 0) {
-                String fullMemoryContext = "以下是关于当前用户的长期记忆信息，请在回答时参考：\n\n"
+            // 2. 场景记忆：当前会话沉淀的事实（任务背景、约定等）
+            List<LongTermMemoryEntity> sceneMemories = longTermMemoryService
+                    .findSceneMemories(request.getSessionId());
+            if (!sceneMemories.isEmpty()) {
+                StringBuilder sceneBlock = new StringBuilder("【当前会话背景】\n");
+                for (LongTermMemoryEntity m : sceneMemories) {
+                    String line = "- " + m.getContent() + "\n";
+                    if (sceneBlock.length() + line.length() > memoryInjectMaxChars) {
+                        break;
+                    }
+                    sceneBlock.append(line);
+                    longTermMemoryService.incrementTrigger(m.getId());
+                }
+                memoryPrompt.append(sceneBlock);
+            }
+
+            if (!memoryPrompt.isEmpty()) {
+                String fullMemoryContext = "以下是关于当前用户与当前会话的记忆信息，请在回答时参考：\n\n"
                         + memoryPrompt.toString().trim();
                 // 插入到第一条消息之后（通常是 system prompt 之后）
                 if (!messages.isEmpty()) {
@@ -1007,8 +1148,8 @@ public class ChatServiceImpl implements IChatService {
                 } else {
                     messages.add(ChatMessage.system(fullMemoryContext));
                 }
-                log.debug("已注入长期记忆: userId={}, appId={}, length={}",
-                        userId, appId, memoryPrompt.length());
+                log.debug("已注入记忆: userId={}, appId={}, scene={} 条, user={} 条",
+                        userId, appId, sceneMemories.size(), userMemories.size());
             }
         } catch (Exception e) {
             log.warn("注入长期记忆失败: {}", e.getMessage());

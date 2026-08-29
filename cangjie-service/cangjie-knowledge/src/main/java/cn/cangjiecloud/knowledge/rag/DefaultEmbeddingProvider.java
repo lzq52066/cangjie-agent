@@ -48,13 +48,50 @@ public class DefaultEmbeddingProvider implements EmbeddingProvider {
         return embedViaApi(text);
     }
 
+    /** 单次批量嵌入请求的文本条数上限（兼顾 API 限制与失败重试粒度） */
+    private static final int EMBED_BATCH_SIZE = 16;
+
     @Override
     public List<float[]> embedBatch(List<String> texts) {
-        List<float[]> results = new ArrayList<>();
-        for (String text : texts) {
-            results.add(embed(text));
+        if (texts == null || texts.isEmpty()) {
+            return new ArrayList<>();
+        }
+        if (!isConfigured()) {
+            throw new IllegalStateException(
+                    "Embedding API Key 未配置。请在 application.yml 中设置 cangjie.embedding.api-key");
+        }
+        List<float[]> results = new ArrayList<>(texts.size());
+        for (int from = 0; from < texts.size(); from += EMBED_BATCH_SIZE) {
+            int to = Math.min(from + EMBED_BATCH_SIZE, texts.size());
+            List<String> batch = texts.subList(from, to);
+            results.addAll(embedBatchViaApi(batch));
         }
         return results;
+    }
+
+    /**
+     * 单批批量嵌入：整批失败时回退为逐条调用，隔离坏数据影响
+     */
+    private List<float[]> embedBatchViaApi(List<String> batch) {
+        List<dev.langchain4j.data.segment.TextSegment> segments = new ArrayList<>(batch.size());
+        for (String text : batch) {
+            segments.add(dev.langchain4j.data.segment.TextSegment.from(text == null ? "" : text));
+        }
+        try {
+            var response = getDelegate().embedAll(segments);
+            List<float[]> vectors = new ArrayList<>(response.content().size());
+            for (dev.langchain4j.data.embedding.Embedding embedding : response.content()) {
+                vectors.add(embedding.vector());
+            }
+            return vectors;
+        } catch (Exception e) {
+            log.warn("批量嵌入失败，回退为逐条嵌入 ({} 条): {}", batch.size(), e.getMessage());
+            List<float[]> vectors = new ArrayList<>(batch.size());
+            for (String text : batch) {
+                vectors.add(embed(text));
+            }
+            return vectors;
+        }
     }
 
     @Override
