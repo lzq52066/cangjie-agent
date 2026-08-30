@@ -33,6 +33,11 @@ public interface ILongTermMemoryService extends IService<LongTermMemoryEntity> {
     void deactivate(String id);
 
     /**
+     * 批量软删除（供定时任务使用，避免逐条更新产生 N+1）
+     */
+    void deactivateBatch(java.util.Collection<String> ids, String updateBy);
+
+    /**
      * 查询会话的场景记忆（激活状态）
      */
     List<LongTermMemoryEntity> findSceneMemories(String sessionId);

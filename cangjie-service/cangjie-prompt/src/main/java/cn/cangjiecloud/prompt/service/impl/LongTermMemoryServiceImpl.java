@@ -88,6 +88,21 @@ public class LongTermMemoryServiceImpl
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deactivateBatch(java.util.Collection<String> ids, String updateBy) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        lambdaUpdate()
+                .in(LongTermMemoryEntity::getId, ids)
+                .set(LongTermMemoryEntity::getIsActive, false)
+                .set(StringUtils.hasText(updateBy), LongTermMemoryEntity::getUpdateBy, updateBy)
+                .set(LongTermMemoryEntity::getUpdateTime, LocalDateTime.now())
+                .update();
+        log.info("长期记忆批量停用 {} 条", ids.size());
+    }
+
+    @Override
     public List<LongTermMemoryEntity> findSceneMemories(String sessionId) {
         if (!StringUtils.hasText(sessionId)) {
             return List.of();

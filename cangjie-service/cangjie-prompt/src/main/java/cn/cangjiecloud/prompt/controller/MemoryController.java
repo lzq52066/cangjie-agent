@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.context.UserContext;
+import cn.cangjiecloud.common.domain.UserIdentity;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.prompt.entity.LongTermMemoryEntity;
 import cn.cangjiecloud.prompt.memory.MemoryScorer;
@@ -42,6 +44,7 @@ public class MemoryController {
         if (!StringUtils.hasText(userId)) {
             throw new ApiException("userId 不能为空");
         }
+        requireOwnerOrAdmin(userId);
         LambdaQueryWrapper<LongTermMemoryEntity> wrapper = new LambdaQueryWrapper<LongTermMemoryEntity>()
                 .eq(LongTermMemoryEntity::getUserId, userId);
         if (StringUtils.hasText(applicationId)) {
@@ -72,6 +75,7 @@ public class MemoryController {
         if (!StringUtils.hasText(entity.getUserId()) || !StringUtils.hasText(entity.getContent())) {
             throw new ApiException("userId 与 content 不能为空");
         }
+        requireOwnerOrAdmin(entity.getUserId());
         if (!StringUtils.hasText(entity.getDimension())) {
             entity.setDimension("preference");
         }
@@ -94,10 +98,7 @@ public class MemoryController {
      */
     @PutMapping("/{id}")
     public R<LongTermMemoryEntity> update(@PathVariable String id, @RequestBody LongTermMemoryEntity patch) {
-        LongTermMemoryEntity entity = longTermMemoryService.getById(id);
-        if (entity == null) {
-            throw new ApiException("记忆不存在");
-        }
+        LongTermMemoryEntity entity = requireOwnedMemory(id);
         if (StringUtils.hasText(patch.getContent())) {
             entity.setContent(patch.getContent());
         }
@@ -116,6 +117,7 @@ public class MemoryController {
      */
     @PostMapping("/{id}/deactivate")
     public R<Void> deactivate(@PathVariable String id) {
+        requireOwnedMemory(id);
         longTermMemoryService.deactivate(id);
         return R.ok();
     }
@@ -125,6 +127,7 @@ public class MemoryController {
      */
     @PostMapping("/{id}/reactivate")
     public R<Void> reactivate(@PathVariable String id) {
+        requireOwnedMemory(id);
         longTermMemoryService.reactivate(id);
         return R.ok();
     }
@@ -134,8 +137,36 @@ public class MemoryController {
      */
     @DeleteMapping("/{id}")
     public R<Void> delete(@PathVariable String id) {
+        requireOwnedMemory(id);
         longTermMemoryService.deleteMemory(id);
         return R.ok();
+    }
+
+    /**
+     * 数据权限：仅管理员可跨用户操作，否则只能操作本人记忆
+     */
+    private void requireOwnerOrAdmin(String targetUserId) {
+        if (isAdmin()) {
+            return;
+        }
+        String currentUserId = UserContext.getUserId();
+        if (!StringUtils.hasText(currentUserId) || !currentUserId.equals(targetUserId)) {
+            throw new ApiException("无权操作其他用户的记忆");
+        }
+    }
+
+    private LongTermMemoryEntity requireOwnedMemory(String id) {
+        LongTermMemoryEntity entity = longTermMemoryService.getById(id);
+        if (entity == null) {
+            throw new ApiException("记忆不存在");
+        }
+        requireOwnerOrAdmin(entity.getUserId());
+        return entity;
+    }
+
+    private boolean isAdmin() {
+        UserIdentity identity = UserContext.getIdentity();
+        return identity != null && AppConst.ROLE_ADMIN.equalsIgnoreCase(identity.getRole());
     }
 
     private Map<String, Object> withScore(LongTermMemoryEntity memory) {

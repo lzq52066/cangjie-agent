@@ -138,7 +138,10 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
             throw new ApiException("模型不存在");
         }
         if (StringUtils.hasText(dto.getName())) entity.setName(dto.getName());
-        if (StringUtils.hasText(dto.getApiKey())) entity.setApiKey(encryptApiKey(dto.getApiKey()));
+        // 含掩码符的 apiKey 为前端回传的脱敏值，跳过更新避免覆盖真实密钥
+        if (StringUtils.hasText(dto.getApiKey()) && !dto.getApiKey().contains("*")) {
+            entity.setApiKey(encryptApiKey(dto.getApiKey()));
+        }
         if (StringUtils.hasText(dto.getBaseUrl())) entity.setBaseUrl(dto.getBaseUrl());
         if (StringUtils.hasText(dto.getModelName())) entity.setModelName(dto.getModelName());
         if (dto.getTemperature() != null) entity.setTemperature(dto.getTemperature());

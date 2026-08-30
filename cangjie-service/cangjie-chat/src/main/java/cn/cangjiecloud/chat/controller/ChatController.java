@@ -85,9 +85,9 @@ public class ChatController {
     @GetMapping("/sessions")
     public R<List<ChatSessionEntity>> listSessions(@RequestParam(required = false) String userId,
                                                   HttpServletRequest httpRequest) {
-        // 需要至少一个有效的 apikey 才能查询会话列表
-        requireAnyApikey(httpRequest);
-        return R.data(chatSessionService.listByUser(userId));
+        // 会话列表限定在请求 apikey 所属应用内，防止跨应用枚举任意用户会话
+        ApplicationEntity application = requireAnyApikey(httpRequest);
+        return R.data(chatSessionService.listByApplicationAndUser(application.getId(), userId));
     }
 
     @GetMapping("/sessions/{applicationId}")
@@ -151,7 +151,7 @@ public class ChatController {
     public R<ChatMessageEntity> feedback(@PathVariable String messageId,
                                          @RequestBody java.util.Map<String, String> body,
                                          HttpServletRequest httpRequest) {
-        requireAnyApikey(httpRequest);
+        validateMessageAccess(messageId, httpRequest);
         return R.data(chatMessageService.feedback(messageId, body.get("feedback")));
     }
 
@@ -162,8 +162,19 @@ public class ChatController {
     public R<ChatMessageEntity> annotate(@PathVariable String messageId,
                                          @RequestBody java.util.Map<String, String> body,
                                          HttpServletRequest httpRequest) {
-        requireAnyApikey(httpRequest);
+        validateMessageAccess(messageId, httpRequest);
         return R.data(chatMessageService.annotate(messageId, body.get("annotation")));
+    }
+
+    /**
+     * 消息级访问校验：请求 apikey 必须与消息所属应用匹配，防止跨应用篡改
+     */
+    private void validateMessageAccess(String messageId, HttpServletRequest httpRequest) {
+        ChatMessageEntity message = chatMessageService.getById(messageId);
+        if (message == null) {
+            throw new ApiException("消息不存在");
+        }
+        validateApikey(httpRequest, message.getApplicationId());
     }
 
     /**

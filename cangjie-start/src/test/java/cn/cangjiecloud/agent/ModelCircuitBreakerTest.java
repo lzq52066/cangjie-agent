@@ -54,15 +54,29 @@ class ModelCircuitBreakerTest {
 
     @Test
     void failureDuringHalfOpenReopens() {
+        // 以 0 秒冷却熔断 → 立即进入半开
+        ReflectionTestUtils.setField(breaker, "cooldownSeconds", 0L);
         for (int i = 0; i < 3; i++) {
             breaker.recordFailure("m1");
         }
-        ReflectionTestUtils.setField(breaker, "cooldownSeconds", 0L);
         assertTrue(breaker.allowRequest("m1"), "冷却 0 秒应立即半开");
-        // 半开探测失败（失败数累计超过阈值）→ 重新熔断
-        breaker.recordFailure("m1");
+        // 半开探测失败（失败数累计超过阈值）→ 以 60 秒冷却重新熔断
         ReflectionTestUtils.setField(breaker, "cooldownSeconds", 60L);
+        breaker.recordFailure("m1");
         assertFalse(breaker.allowRequest("m1"), "半开失败后应重新熔断");
+    }
+
+    @Test
+    void halfOpenAllowsOnlyOneProbe() {
+        // 以 0 秒冷却熔断 → 熔断后立即可半开探测
+        ReflectionTestUtils.setField(breaker, "cooldownSeconds", 0L);
+        for (int i = 0; i < 3; i++) {
+            breaker.recordFailure("m1");
+        }
+        assertTrue(breaker.allowRequest("m1"), "首个探测请求应放行");
+        assertFalse(breaker.allowRequest("m1"), "半开态其余并发请求应拒绝");
+        breaker.recordSuccess("m1");
+        assertTrue(breaker.allowRequest("m1"), "探测成功恢复闭合后应放行");
     }
 
     @Test

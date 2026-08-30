@@ -15,6 +15,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 会话记忆（滚动摘要）服务
@@ -44,12 +46,19 @@ public class SessionSummaryService {
     @Value("${cangjie.chat.session.summary-model-id:}")
     private String summaryModelId;
 
+    /** 正在生成摘要的会话集合：同一会话同一时刻只允许一个摘要任务，避免并发重复调用模型 */
+    private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
+
     /**
      * 检查并触发滚动摘要（异步执行，条件判断放在异步线程内避免阻塞对话主流程）
      */
     @Async
     public void maybeSummarizeAsync(String sessionId, String fallbackModelId) {
         if (!summaryEnabled || !StringUtils.hasText(sessionId)) {
+            return;
+        }
+        // CAS 抢占：添加失败说明该会话已有摘要任务在执行，直接跳过
+        if (!inFlight.add(sessionId)) {
             return;
         }
         try {
@@ -65,6 +74,8 @@ public class SessionSummaryService {
             doSummarize(session, fallbackModelId);
         } catch (Exception e) {
             log.warn("会话摘要生成失败: sessionId={}", sessionId, e);
+        } finally {
+            inFlight.remove(sessionId);
         }
     }
 

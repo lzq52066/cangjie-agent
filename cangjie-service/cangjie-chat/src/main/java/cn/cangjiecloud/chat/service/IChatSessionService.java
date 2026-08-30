@@ -7,8 +7,6 @@ import java.util.List;
 
 public interface IChatSessionService extends IService<ChatSessionEntity> {
 
-    List<ChatSessionEntity> listByUser(String userId);
-
     List<ChatSessionEntity> listByApplication(String applicationId);
 
     List<ChatSessionEntity> listByApplicationAndUser(String applicationId, String userId);

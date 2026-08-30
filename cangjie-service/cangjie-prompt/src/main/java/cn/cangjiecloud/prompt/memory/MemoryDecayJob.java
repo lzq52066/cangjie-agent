@@ -76,20 +76,21 @@ public class MemoryDecayJob {
      * 低分遗忘：评分低于阈值的推断类记忆停用
      */
     private int lowScoreDecay(List<LongTermMemoryEntity> active) {
-        int count = 0;
+        List<String> toDecay = new ArrayList<>();
         for (LongTermMemoryEntity memory : active) {
             if (isProtected(memory)) {
                 continue;
             }
             double score = memoryScorer.score(memory);
             if (score < decayThreshold) {
-                longTermMemoryService.deactivate(memory.getId());
-                count++;
+                toDecay.add(memory.getId());
                 log.debug("记忆低分遗忘: id={}, score={}, content={}",
                         memory.getId(), String.format("%.3f", score), memory.getContent());
             }
         }
-        return count;
+        // 定时任务无用户上下文，操作人统一记为 system
+        longTermMemoryService.deactivateBatch(toDecay, "system");
+        return toDecay.size();
     }
 
     /**
@@ -104,7 +105,7 @@ public class MemoryDecayJob {
             String key = memory.getUserId() + ":" + memory.getApplicationId();
             groups.computeIfAbsent(key, k -> new ArrayList<>()).add(memory);
         }
-        int count = 0;
+        List<String> toEvict = new ArrayList<>();
         for (List<LongTermMemoryEntity> group : groups.values()) {
             if (group.size() <= capacityPerUser) {
                 continue;
@@ -115,11 +116,12 @@ public class MemoryDecayJob {
                     .toList();
             int need = group.size() - capacityPerUser;
             for (int i = 0; i < need && i < evictable.size(); i++) {
-                longTermMemoryService.deactivate(evictable.get(i).getId());
-                count++;
+                toEvict.add(evictable.get(i).getId());
             }
         }
-        return count;
+        // 定时任务无用户上下文，操作人统一记为 system
+        longTermMemoryService.deactivateBatch(toEvict, "system");
+        return toEvict.size();
     }
 
     private boolean isProtected(LongTermMemoryEntity memory) {

@@ -24,16 +24,6 @@ public class ChatSessionServiceImpl extends ServiceImpl<ChatSessionMapper, ChatS
     private IChatMessageService chatMessageService;
 
     @Override
-    public List<ChatSessionEntity> listByUser(String userId) {
-        LambdaQueryWrapper<ChatSessionEntity> wrapper = new LambdaQueryWrapper<>();
-        if (StringUtils.hasText(userId)) {
-            wrapper.eq(ChatSessionEntity::getUserId, userId);
-        }
-        wrapper.orderByDesc(ChatSessionEntity::getCreateTime);
-        return list(wrapper);
-    }
-
-    @Override
     public List<ChatSessionEntity> listByApplication(String applicationId) {
         LambdaQueryWrapper<ChatSessionEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ChatSessionEntity::getApplicationId, applicationId)

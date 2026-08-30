@@ -1123,17 +1123,18 @@ public class ChatServiceImpl implements IChatService {
                 }
             }
 
-            // 2. 场景记忆：当前会话沉淀的事实（任务背景、约定等）
+            // 2. 场景记忆：当前会话沉淀的事实（任务背景、约定等），与用户记忆共享同一字符预算
             List<LongTermMemoryEntity> sceneMemories = longTermMemoryService
                     .findSceneMemories(request.getSessionId());
             if (!sceneMemories.isEmpty()) {
                 StringBuilder sceneBlock = new StringBuilder("【当前会话背景】\n");
                 for (LongTermMemoryEntity m : sceneMemories) {
                     String line = "- " + m.getContent() + "\n";
-                    if (sceneBlock.length() + line.length() > memoryInjectMaxChars) {
+                    if (line.length() > charBudget) {
                         break;
                     }
                     sceneBlock.append(line);
+                    charBudget -= line.length();
                     longTermMemoryService.incrementTrigger(m.getId());
                 }
                 memoryPrompt.append(sceneBlock);

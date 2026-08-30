@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -34,23 +35,30 @@ public class ModelCircuitBreaker {
     private final Map<String, ModelState> states = new ConcurrentHashMap<>();
 
     /**
-     * 是否允许向该模型发起请求（熔断中返回 false；冷却结束返回 true 并进入半开）
+     * 是否允许向该模型发起请求（熔断中返回 false；冷却结束仅放行单个探测请求进入半开）
      */
     public boolean allowRequest(String modelId) {
         if (!enabled || modelId == null) {
             return true;
         }
         ModelState state = states.get(modelId);
-        if (state == null || state.openUntilMs == 0) {
+        if (state == null) {
             return true;
+        }
+        if (state.openUntilMs == 0) {
+            // 闭合态放行；半开探测进行中拒绝其余请求
+            return !state.probing.get();
         }
         if (System.currentTimeMillis() < state.openUntilMs) {
             return false;
         }
-        // 冷却结束：进入半开，放行探测请求
-        state.openUntilMs = 0;
-        log.info("模型熔断进入半开状态，放行探测请求: {}", modelId);
-        return true;
+        // 冷却结束：CAS 抢占唯一探测名额，避免恢复期并发穿透
+        if (state.probing.compareAndSet(false, true)) {
+            state.openUntilMs = 0;
+            log.info("模型熔断进入半开状态，放行探测请求: {}", modelId);
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -64,6 +72,7 @@ public class ModelCircuitBreaker {
         if (state != null) {
             state.failures.set(0);
             state.openUntilMs = 0;
+            state.probing.set(false);
         }
     }
 
@@ -78,6 +87,7 @@ public class ModelCircuitBreaker {
         int failures = state.failures.incrementAndGet();
         if (failures >= failureThreshold && state.openUntilMs == 0) {
             state.openUntilMs = System.currentTimeMillis() + cooldownSeconds * 1000;
+            state.probing.set(false);
             log.warn("模型熔断开启: modelId={}, 连续失败 {} 次, 冷却 {} 秒",
                     modelId, failures, cooldownSeconds);
         }
@@ -86,5 +96,7 @@ public class ModelCircuitBreaker {
     private static final class ModelState {
         final AtomicInteger failures = new AtomicInteger(0);
         volatile long openUntilMs = 0;
+        /** 半开态探测占位：true 表示已有探测请求在途 */
+        final AtomicBoolean probing = new AtomicBoolean(false);
     }
 }
