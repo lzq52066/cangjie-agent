@@ -5,7 +5,6 @@ import cn.cangjiecloud.application.service.IApplicationService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -32,9 +31,8 @@ public class OpenApiAuthInterceptor implements HandlerInterceptor {
 
     private final IApplicationService applicationService;
 
-    /** 是否允许网页匿名聊天（免 API Key），本地部署默认开启 */
-    @Value("${cangjie.openapi.web-anonymous:true}")
-    private boolean webAnonymousEnabled;
+    /** 是否允许网页匿名聊天（免 API Key）——本类由 OpenApiWebConfig 手动 new，故只能构造器传入 */
+    private final boolean webAnonymousEnabled;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
@@ -69,7 +67,8 @@ public class OpenApiAuthInterceptor implements HandlerInterceptor {
         return uri.equals("/api/open/chat")
                 || uri.startsWith("/api/open/chat/stream")
                 || uri.startsWith("/api/open/chat/config/")
-                || uri.startsWith("/api/open/chat/sessions");
+                || uri.startsWith("/api/open/chat/sessions")
+                || uri.startsWith("/api/open/embed");
     }
 
     private String resolveApiKey(HttpServletRequest request) {

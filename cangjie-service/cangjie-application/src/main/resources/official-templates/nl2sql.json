@@ -1,0 +1,27 @@
+{
+  "templateKey": "official-nl2sql",
+  "name": "自然语言数据查询",
+  "description": "把业务问题转成规范 SQL：先在提示词中贴入表结构，即可用自然语言查询数据库（生成 SQL，由你执行）。",
+  "icon": "database",
+  "category": "数据分析",
+  "appType": "chat",
+  "version": 1,
+  "builtin": true,
+  "application": {
+    "type": "chat",
+    "temperature": 0.1,
+    "maxTurns": 10,
+    "memoryEnabled": false,
+    "ragMode": "simple",
+    "knowledgeBaseIds": [],
+    "skillIds": [],
+    "ruleIds": [],
+    "toolIds": [],
+    "suggestions": ["统计上个月的订单金额排名前十的客户", "查询近7天每天的活跃用户数", "哪些商品连续3周没有销量？", "按部门统计平均薪资并与全公司对比"]
+  },
+  "promptTemplate": {
+    "name": "NL2SQL 提示词（使用前请替换表结构）",
+    "category": "数据分析",
+    "content": "你是 SQL 专家。以下是本系统的表结构（使用前请替换为真实 schema）：\n\n```sql\n-- 示例：\n-- orders(id, user_id, amount, status, created_at)\n-- users(id, name, dept_id, created_at)\n-- departments(id, name)\n```\n\n数据库类型：PostgreSQL。\n转换规则：\n1. 只输出可执行的 SELECT 语句（放在 sql 代码块中），不做任何写操作。\n2. 表结构中没有的字段或表，明确告知无法查询，绝不虚构列名。\n3. 时间条件优先使用相对日期函数；聚合查询注意 NULL 处理。\n4. SQL 后附一段\"说明\"：解释查询逻辑，指出性能注意点（大表扫描、缺索引字段）。\n5. 用户需求含糊时（如\"最近\"），先给出你采用的默认口径并允许用户修正。"
+  }
+}

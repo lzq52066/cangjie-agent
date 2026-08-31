@@ -359,6 +359,52 @@ docker compose up -d
 
 ---
 
+## 🔌 企业快速接入
+
+平台提供三种接入方式，覆盖从"零代码"到"深度集成"：
+
+**方式一：一行挂件（零代码，适合官网客服）**
+
+把一行代码粘贴到企业网站 `</body>` 前即可出现浮动聊天窗口：
+
+```html
+<script src="http://你的平台地址/widget/cangjie-widget.js"
+        data-app-id="应用ID"
+        data-title="在线客服"
+        data-color="#4f7cff"></script>
+```
+
+**方式二：iframe 嵌入（适合内部系统）**
+
+```html
+<iframe src="http://你的平台地址/api/open/embed/{应用ID}" width="400" height="600"></iframe>
+```
+
+嵌入页是无外部依赖的单文件系统，自带流式输出、快捷提问、会话保持。
+
+**方式三：OpenAPI（适合深度集成）**
+
+OpenAI Chat Completions 协议兼容，业务系统改一个 `base_url` 即可接入：
+
+```bash
+curl http://平台地址/api/open/chat/completions \
+  -H "Authorization: Bearer <应用apikey>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"cangjie","messages":[{"role":"user","content":"你好"}],"stream":true}'
+```
+
+> 嵌入页与匿名聊天受 `cangjie.openapi.web-anonymous` 开关控制，生产环境可按安全策略关闭，仅保留 API Key 接入。
+
+### 🎁 官方模板库
+
+平台内置 8 个开箱即用模板（智能客服、企业知识库问答、营销文案、代码评审、会议纪要、双语翻译、NL2SQL、工作流客服示例），启动时自动导入（`cangjie.templates.import-builtin` 可关）。
+
+- **Bundle 结构**：模板 = 应用配置 + 提示词模板 + 工作流定义，一键创建时级联生成全部资源并自动绑定
+- **沉淀与流通**：任何应用可"存为模板"；模板支持导出/导入 JSON，跨环境迁移
+- 官方模板按 `templateKey` 幂等导入，版本升级自动覆盖，用户自建模板不受影响
+
+---
+
 ## 🧪 开发路线
 
 - [x] 大模型管理与调用（熔断降级 / 密钥加密）

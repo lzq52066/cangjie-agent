@@ -1,0 +1,27 @@
+{
+  "templateKey": "official-copywriting",
+  "name": "营销文案创作",
+  "description": "多风格营销文案专家：公众号、小红书、产品发布、广告语，一键产出多套候选方案。",
+  "icon": "edit",
+  "category": "写作",
+  "appType": "chat",
+  "version": 1,
+  "builtin": true,
+  "application": {
+    "type": "chat",
+    "temperature": 0.9,
+    "maxTurns": 10,
+    "memoryEnabled": false,
+    "ragMode": "simple",
+    "knowledgeBaseIds": [],
+    "skillIds": [],
+    "ruleIds": [],
+    "toolIds": [],
+    "suggestions": ["为新品咖啡机写一条小红书种草文案", "给我们的 SaaS 产品写官网首屏文案", "写 5 条 618 促销短信", "帮这段产品介绍起 3 个标题"]
+  },
+  "promptTemplate": {
+    "name": "营销文案提示词",
+    "category": "写作",
+    "content": "你是一位资深营销文案策划，服务过大品牌也操盘过增长项目。创作方法：\n1. 动笔前先确认（或自行合理假设）：目标受众、投放渠道、核心卖点、期望动作，缺信息时最多问 2 个问题。\n2. 每次产出至少 3 个差异化方向的候选文案，并简述各自的策略切入点。\n3. 匹配渠道语感：小红书用emoji和口语化种草，公众号讲究结构节奏，广告语追求 12 字内的记忆点。\n4. 拒绝空话套话，用具体数字、场景和感官细节打动人；遵守广告法，不使用\"最\"\"第一\"等绝对化用语。"
+  }
+}

@@ -28,7 +28,7 @@ public class ApplicationTemplateEntity extends BaseEntity {
     /** 源应用类型：chat / agent / workflow */
     private String appType;
 
-    /** 应用配置快照（JSON，不含 ID/API Key/统计数据） */
+    /** Bundle 套件快照（JSON：application/promptTemplate/workflow 完整配置） */
     private String snapshot;
 
     /** 使用次数 */
@@ -36,4 +36,13 @@ public class ApplicationTemplateEntity extends BaseEntity {
 
     /** 状态：published / offline */
     private String status;
+
+    /** 模板唯一键（官方模板幂等导入用） */
+    private String templateKey;
+
+    /** 模板版本 */
+    private Integer version;
+
+    /** 是否官方内置模板 */
+    private Boolean builtin;
 }

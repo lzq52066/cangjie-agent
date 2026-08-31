@@ -21,14 +21,6 @@ public interface IToolProviderService {
     List<ToolSpecification> getToolSpecifications(List<String> toolIds);
 
     /**
-     * 根据应用 ID 获取该应用关联的所有工具规格
-     *
-     * @param applicationId 应用 ID
-     * @return 工具规格列表
-     */
-    List<ToolSpecification> getToolSpecificationsByApp(String applicationId);
-
-    /**
      * 执行某个工具调用（由 LLM function calling 触发）
      *
      * @param toolName   function calling 中的 function name

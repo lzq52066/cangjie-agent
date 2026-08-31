@@ -33,10 +33,6 @@
             <artifactId>cangjie-prompt</artifactId>
         </dependency>
         <dependency>
-            <groupId>cn.cangjiecloud</groupId>
-            <artifactId>cangjie-application</artifactId>
-        </dependency>
-        <dependency>
             <groupId>org.codehaus.groovy</groupId>
             <artifactId>groovy</artifactId>
             <version>3.0.21</version>

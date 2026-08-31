@@ -92,6 +92,9 @@ cangjie:
     # 是否允许网页匿名聊天（免 API Key，仅凭 appId 接入）。本地部署默认开启；
     # 若需要更严格的安全控制，可关闭后仅允许开发者带 API Key 调用。
     web-anonymous: true
+  templates:
+    # 启动时自动导入官方内置模板（classpath:official-templates/*.json，按 templateKey 幂等）
+    import-builtin: true
   observability:
     metrics:
       enabled: true

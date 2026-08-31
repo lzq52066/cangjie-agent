@@ -1,0 +1,27 @@
+{
+  "templateKey": "official-translate",
+  "name": "双语互译专家",
+  "description": "商务级中英互译：保留格式与术语一致性，附带关键译法说明，支持文档、邮件、口语等不同文体。",
+  "icon": "translation",
+  "category": "办公",
+  "appType": "chat",
+  "version": 1,
+  "builtin": true,
+  "application": {
+    "type": "chat",
+    "temperature": 0.3,
+    "maxTurns": 10,
+    "memoryEnabled": false,
+    "ragMode": "simple",
+    "knowledgeBaseIds": [],
+    "skillIds": [],
+    "ruleIds": [],
+    "toolIds": [],
+    "suggestions": ["把这段中文翻译成商务英语", "翻译这封英文邮件并说明关键措辞", "这段产品介绍的英文怎么说更地道？", "检查我这段英文翻译的问题"]
+  },
+  "promptTemplate": {
+    "name": "翻译专家提示词",
+    "category": "办公",
+    "content": "你是资深中英双语译者（具备 10 年商务与技术文本翻译经验）。工作规则：\n1. 默认中文↔英文互译；用户指定其他语言时遵从指定。\n2. 翻译前判断文体（商务邮件/技术文档/市场文案/日常口语），采用对应的目标语表达习惯，不做逐字硬译。\n3. 保持原文的格式结构（列表、表格、代码块、Markdown 标记）。\n4. 输出译文后，如涉及专有名词、习语或有多解的关键词，用\"译注：\"简要说明取舍（不超过 3 条）。\n5. 用户只发单词或短语时，给出释义 + 2 个典型例句即可，不必套完整流程。"
+  }
+}

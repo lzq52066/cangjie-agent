@@ -1,0 +1,27 @@
+{
+  "templateKey": "official-doc-qa",
+  "name": "企业知识库问答",
+  "description": "文档问答专家：自主决定何时检索知识库，回答附带来源引用，适合内部制度、产品手册、FAQ 查询场景。",
+  "icon": "books",
+  "category": "知识管理",
+  "appType": "chat",
+  "version": 1,
+  "builtin": true,
+  "application": {
+    "type": "chat",
+    "temperature": 0.3,
+    "maxTurns": 10,
+    "memoryEnabled": false,
+    "ragMode": "agentic",
+    "knowledgeBaseIds": [],
+    "skillIds": [],
+    "ruleIds": [],
+    "toolIds": [],
+    "suggestions": ["公司报销流程是什么？", "新员工入职要办哪些手续？", "产品的核心技术参数", "最近发布了什么公告？"]
+  },
+  "promptTemplate": {
+    "name": "知识库问答提示词",
+    "category": "知识管理",
+    "content": "你是企业内部的文档问答助手。工作准则：\n1. 遇到事实性、制度性、文档相关问题时，先调用知识库检索工具获取资料，基于检索结果作答。\n2. 回答末尾用\"参考资料：\"列出依据的文档标题；检索无结果时如实说明，不要臆测。\n3. 多文档信息冲突时，同时列出各方说法并提示用户与文档负责人确认。\n4. 使用简体中文回答，条理清晰，长内容用分点或表格组织。"
+  }
+}

@@ -38,9 +38,6 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
     @Autowired(required = false)
     private SkillToolHandler skillToolHandler;
 
-    @Autowired(required = false)
-    private cn.cangjiecloud.application.service.IApplicationService applicationService;
-
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ToolEntity create(ToolEntity entity) {
@@ -237,13 +234,6 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
             return result.getOutput() != null ? result.getOutput().toString() : "";
         }
         return com.alibaba.fastjson.JSON.toJSONString(Map.of("success", false, "error", result.getError()));
-    }
-
-    /**
-     * 获取 ApplicationService（供 Provider 使用）
-     */
-    public cn.cangjiecloud.application.service.IApplicationService getApplicationService() {
-        return applicationService;
     }
 
     // ========== 内部工具方法 ==========

@@ -40,13 +40,29 @@ public class ApplicationTemplateController {
     }
 
     /**
-     * 从模板创建新应用（草稿态）
+     * 从模板创建新应用（草稿态，级联创建提示词模板与工作流）
      */
     @PostMapping("/{id}/create-app")
     public R<ApplicationEntity> createFromTemplate(@PathVariable String id,
                                                    @RequestBody(required = false) Map<String, String> body) {
         String appName = body != null ? body.get("name") : null;
         return R.data(templateService.createFromTemplate(id, appName));
+    }
+
+    /**
+     * 导入 Bundle 模板（body 为模板 JSON 原文；带 templateKey 时幂等覆盖）
+     */
+    @PostMapping("/import")
+    public R<ApplicationTemplateEntity> importBundle(@RequestBody String bundleJson) {
+        return R.data(templateService.importBundle(bundleJson, false));
+    }
+
+    /**
+     * 导出 Bundle 模板 JSON（自包含，可跨实例迁移）
+     */
+    @GetMapping("/{id}/export")
+    public R<String> exportBundle(@PathVariable String id) {
+        return R.data(templateService.exportBundle(id));
     }
 
     @DeleteMapping("/{id}")

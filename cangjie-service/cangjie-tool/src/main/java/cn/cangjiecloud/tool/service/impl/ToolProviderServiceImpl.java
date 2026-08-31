@@ -67,34 +67,6 @@ public class ToolProviderServiceImpl implements IToolProviderService {
     }
 
     @Override
-    public List<ToolSpecification> getToolSpecificationsByApp(String applicationId) {
-        // 从应用配置中解析 toolIds 并加载
-        cn.cangjiecloud.application.service.IApplicationService appService;
-        try {
-            appService = toolService.getApplicationService();
-        } catch (Exception e) {
-            log.warn("获取应用服务失败: {}", e.getMessage());
-            return Collections.emptyList();
-        }
-
-        cn.cangjiecloud.application.entity.ApplicationEntity app = appService.getById(applicationId);
-        if (app == null) {
-            return Collections.emptyList();
-        }
-
-        List<String> toolIds = parseToolIds(app.getConfig());
-        // 同时从 toolIds 字段获取（如果有）
-        if (app.getToolIds() != null) {
-            List<String> ids = parseStringList(app.getToolIds());
-            toolIds.addAll(ids);
-        }
-        // 去重
-        toolIds = toolIds.stream().distinct().toList();
-
-        return getToolSpecifications(toolIds);
-    }
-
-    @Override
     public String executeToolCall(String toolName, Map<String, Object> arguments) {
         String toolId = ToolNaming.parse(toolName);
 
@@ -131,31 +103,5 @@ public class ToolProviderServiceImpl implements IToolProviderService {
             };
         }
         return ToolConstants.ToolType.PLUGIN;
-    }
-
-    private List<String> parseStringList(String json) {
-        if (!StringUtils.hasText(json)) return new ArrayList<>();
-        try {
-            return JSON.parseArray(json).stream()
-                    .map(Object::toString)
-                    .filter(StringUtils::hasText)
-                    .toList();
-        } catch (Exception e) {
-            return new ArrayList<>();
-        }
-    }
-
-    private List<String> parseToolIds(String config) {
-        if (!StringUtils.hasText(config)) return new ArrayList<>();
-        try {
-            Map<String, Object> map = JSON.parseObject(config);
-            Object toolIds = map.get("toolIds");
-            if (toolIds instanceof List<?> list) {
-                return list.stream().map(Object::toString).toList();
-            }
-        } catch (Exception e) {
-            log.debug("解析 config 中的 toolIds 失败: {}", e.getMessage());
-        }
-        return new ArrayList<>();
     }
 }

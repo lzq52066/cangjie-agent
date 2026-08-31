@@ -1,0 +1,68 @@
+{
+  "templateKey": "official-wf-cs-demo",
+  "name": "工作流客服（检索增强示例）",
+  "description": "工作流应用示例：开始 → 知识库检索 → LLM 生成回答 → 结束。展示 RAG 管道的显式编排，创建后需绑定知识库并重新发布。",
+  "icon": "flow",
+  "category": "客服",
+  "appType": "workflow",
+  "version": 1,
+  "builtin": true,
+  "application": {
+    "type": "workflow",
+    "temperature": 0.5,
+    "maxTurns": 10,
+    "memoryEnabled": false,
+    "ragMode": "simple",
+    "knowledgeBaseIds": [],
+    "skillIds": [],
+    "ruleIds": [],
+    "toolIds": [],
+    "suggestions": ["退货政策是什么？", "如何修改账户密码？", "开通企业版需要什么条件？"]
+  },
+  "promptTemplate": {
+    "name": "工作流客服回答提示词",
+    "category": "客服",
+    "content": "你是企业客服助手。仅依据\"知识库资料\"回答用户问题；资料未覆盖时回复\"这个问题暂无资料支持，建议联系人工客服\"。回答控制在 150 字内，分点陈述。",
+    "variables": "[\"question\", \"knowledge_output\"]"
+  },
+  "workflow": {
+    "name": "客服检索问答流",
+    "description": "开始 → 知识库检索 → LLM 回答 → 结束。创建后请编辑\"知识库检索\"节点绑定知识库。",
+    "nodes": [
+      {
+        "id": "start",
+        "type": "start",
+        "name": "开始",
+        "config": {"variables": [{"name": "question", "label": "用户问题", "type": "text"}]},
+        "position": {"x": 100, "y": 200}
+      },
+      {
+        "id": "kb",
+        "type": "knowledge",
+        "name": "知识库检索",
+        "config": {"knowledgeBaseIds": [], "topK": 5},
+        "position": {"x": 380, "y": 200}
+      },
+      {
+        "id": "llm",
+        "type": "llm",
+        "name": "生成回答",
+        "config": {"systemPrompt": "你是企业客服助手。仅依据\"知识库资料\"回答用户问题；资料未覆盖时回复\"这个问题暂无资料支持，建议联系人工客服\"。回答控制在 150 字内，分点陈述。", "userPrompt": "知识库资料：{knowledge_output}\n\n用户问题：{question}"},
+        "position": {"x": 660, "y": 200}
+      },
+      {
+        "id": "end",
+        "type": "end",
+        "name": "结束",
+        "config": {"outputVariable": "llm_output"},
+        "position": {"x": 940, "y": 200}
+      }
+    ],
+    "edges": [
+      {"source": "start", "target": "kb"},
+      {"source": "kb", "target": "llm"},
+      {"source": "llm", "target": "end"}
+    ],
+    "variables": []
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "templateKey": "official-meeting-minutes",
+  "name": "会议纪要整理",
+  "description": "把杂乱的会议记录/转写文本整理成结构化纪要：结论、决议、行动项（负责人+截止时间）一目了然。",
+  "icon": "document",
+  "category": "办公",
+  "appType": "chat",
+  "version": 1,
+  "builtin": true,
+  "application": {
+    "type": "chat",
+    "temperature": 0.3,
+    "maxTurns": 10,
+    "memoryEnabled": false,
+    "ragMode": "simple",
+    "knowledgeBaseIds": [],
+    "skillIds": [],
+    "ruleIds": [],
+    "toolIds": [],
+    "suggestions": ["把下面这段会议记录整理成纪要", "帮我提炼这段讨论的决议和行动项", "从转写文本中提取待办事项", "这份纪要还缺哪些要素？"]
+  },
+  "promptTemplate": {
+    "name": "会议纪要提示词",
+    "category": "办公",
+    "content": "你是专业的会议纪要秘书。收到会议记录或转写文本后，输出如下结构的纪要（Markdown）：\n\n## 会议概要\n（主题 / 参会人 / 一句话总结，缺失信息标注\"未提及\"）\n\n## 关键结论\n（讨论达成的共识与决议，每条一行）\n\n## 行动项\n| 事项 | 负责人 | 截止时间 | 备注 |\n（没有明确负责人的写\"待指派\"）\n\n## 待定问题\n（未达成结论、需要下次跟进的话题）\n\n要求：忠于原文不添加未讨论的内容；口语表述转为书面语；数字、日期、人名必须准确；发现行动项缺少负责人或截止时间时，在\"待定问题\"中提示补齐。"
+  }
+}
