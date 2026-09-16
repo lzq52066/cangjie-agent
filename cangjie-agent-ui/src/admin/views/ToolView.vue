@@ -176,7 +176,7 @@
     <el-dialog v-model="execDialog" :title="'执行工具 - ' + execTool?.name" width="680px" destroy-on-close>
       <el-alert v-if="execParamKeys.length" type="info" :closable="false" show-icon
                 title="参数来自工具的 JSON Schema，可切换为 JSON 模式自由输入" style="margin-bottom:16px" />
-      <el-radio-group v-model="execMode" style="margin-bottom:16px">
+      <el-radio-group :model-value="execMode" style="margin-bottom:16px" @change="changeExecMode">
         <el-radio-button value="form">表单</el-radio-button>
         <el-radio-button value="json">JSON</el-radio-button>
       </el-radio-group>
@@ -449,6 +449,40 @@ function openExecute(row: any) {
   execDialog.value = true
 }
 
+// 表单/JSON 切换时双向同步
+function changeExecMode(target: string) {
+  if (target === execMode.value) return
+  if (target === 'json') {
+    // 表单 -> JSON：实时生成预览
+    execJson.value = JSON.stringify(collectFormInput(), null, 2)
+    execMode.value = 'json'
+  } else {
+    // JSON -> 表单：解析后回填，非法时阻止切换
+    try {
+      const parsed = JSON.parse(execJson.value || '{}')
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        ElMessage.error('JSON 必须是对象，例如 {"key": "value"}')
+        return
+      }
+      execForm.value = { ...parsed }
+      execMode.value = 'form'
+    } catch {
+      ElMessage.error('JSON 格式错误，无法切换到表单')
+    }
+  }
+}
+
+// 收集表单参数：必填原样带上；非必填空值跳过（避免空参数导致 400）
+function collectFormInput(): Record<string, any> {
+  const input: Record<string, any> = { ...execForm.value }
+  for (const k of Object.keys(input)) {
+    if (!execParamRequired.value.includes(k) && (input[k] === '' || input[k] == null)) {
+      delete input[k]
+    }
+  }
+  return input
+}
+
 async function runExecute() {
   let input: Record<string, any> = {}
   if (execMode.value === 'json') {
@@ -459,13 +493,7 @@ async function runExecute() {
       return
     }
   } else {
-    input = {}
-    for (const k of execParamKeys.value) {
-      const v = execForm.value[k]
-      // 非必填且值为空时跳过，避免 URL 中出现 xx= 的空参数导致 400
-      if (!execParamRequired.value.includes(k) && (v === '' || v == null)) continue
-      input[k] = v
-    }
+    input = collectFormInput()
   }
   executing.value = true
   try {
