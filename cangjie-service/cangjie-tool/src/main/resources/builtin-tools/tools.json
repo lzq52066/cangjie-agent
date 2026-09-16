@@ -1,0 +1,227 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "id": "builtin_date_add",
+      "name": "日期加减计算",
+      "description": "在指定日期上增加/减少若干天、月、年，返回计算后的日期。不传 date 时默认使用今天。用于推算截止日期、到期日、N天前后的日期等。",
+      "toolType": "CUSTOM",
+      "category": "本地计算",
+      "icon": "Calendar",
+      "scriptFile": "scripts/date_add.groovy",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "date": { "type": "string", "description": "基准日期，格式 yyyy-MM-dd，例如 2026-01-01；不传则默认今天" },
+          "days": { "type": "integer", "description": "增加的天数，可为负数，默认 0" },
+          "months": { "type": "integer", "description": "增加的月数，可为负数，默认 0" },
+          "years": { "type": "integer", "description": "增加的年数，可为负数，默认 0" },
+          "format": { "type": "string", "description": "日期格式，默认 yyyy-MM-dd" }
+        },
+        "required": []
+      }
+    },
+    {
+      "id": "builtin_date_format",
+      "name": "日期格式化",
+      "description": "把日期字符串从一种格式转换为另一种格式。例如把 2026-01-02 转换为 2026/01/02，或把 yyyy/MM/dd 转为 yyyy-MM-dd。",
+      "toolType": "CUSTOM",
+      "category": "本地计算",
+      "icon": "Calendar",
+      "scriptFile": "scripts/date_format.groovy",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "date": { "type": "string", "description": "待转换的日期字符串，例如 2026-01-02" },
+          "inputFormat": { "type": "string", "description": "输入日期格式，默认 yyyy-MM-dd" },
+          "outputFormat": { "type": "string", "description": "输出日期格式，默认 yyyy-MM-dd，例如 yyyy/MM/dd 或 yyyy年MM月dd日" }
+        },
+        "required": ["date"]
+      }
+    },
+    {
+      "id": "builtin_regex_extract",
+      "name": "正则表达式提取",
+      "description": "用正则表达式从文本中提取内容。默认返回第一个匹配，设置 all=true 返回全部匹配。可通过 group 指定捕获组（0 为整段匹配）。用于抽取手机号、订单号、邮箱等。",
+      "toolType": "CUSTOM",
+      "category": "本地计算",
+      "icon": "Search",
+      "scriptFile": "scripts/regex_extract.groovy",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "待处理的原始文本" },
+          "pattern": { "type": "string", "description": "正则表达式，例如 \\d{11} 或 A(\\d+)" },
+          "group": { "type": "integer", "description": "捕获组序号，0 表示整段匹配，默认 0" },
+          "all": { "type": "boolean", "description": "是否返回全部匹配，true 返回数组，false 只返回第一个，默认 false" }
+        },
+        "required": ["text", "pattern"]
+      }
+    },
+    {
+      "id": "builtin_text_transform",
+      "name": "文本转换",
+      "description": "对文本做常用转换：upper 大写、lower 小写、trim 去首尾空格、reverse 反转、capitalize 首字母大写、underscore 转下划线命名、camel 转驼峰命名。",
+      "toolType": "CUSTOM",
+      "category": "本地计算",
+      "icon": "EditPen",
+      "scriptFile": "scripts/text_transform.groovy",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "待转换的文本" },
+          "operation": {
+            "type": "string",
+            "description": "转换操作",
+            "enum": ["upper", "lower", "trim", "reverse", "capitalize", "underscore", "camel"]
+          }
+        },
+        "required": ["text", "operation"]
+      }
+    },
+    {
+      "id": "builtin_hash",
+      "name": "文本哈希",
+      "description": "计算文本的 MD5、SHA-1 或 SHA-256 哈希值（十六进制小写）。纯本地计算，不发送到外部。用于校验、指纹、签名场景。",
+      "toolType": "PLUGIN",
+      "category": "编码加密",
+      "icon": "Lock",
+      "implementation": "cn.cangjiecloud.tool.plugin.builtin.BuiltinToolsPlugin",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "待计算哈希的原文" },
+          "algorithm": { "type": "string", "description": "哈希算法：md5 / sha1 / sha256，默认 md5", "enum": ["md5", "sha1", "sha256"] }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "id": "builtin_uuid",
+      "name": "UUID 生成",
+      "description": "生成随机 UUID（GUID）。可指定数量（1~100）、是否大写、是否去掉连字符。用于生成唯一 ID、请求流水号等。纯本地生成。",
+      "toolType": "PLUGIN",
+      "category": "编码加密",
+      "icon": "Key",
+      "implementation": "cn.cangjiecloud.tool.plugin.builtin.BuiltinToolsPlugin",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "count": { "type": "integer", "description": "生成数量，1~100，默认 1" },
+          "uppercase": { "type": "boolean", "description": "是否输出大写，默认 false" },
+          "hyphen": { "type": "boolean", "description": "是否保留连字符，默认 true；设为 false 返回 32 位无横线 UUID" }
+        },
+        "required": []
+      }
+    },
+    {
+      "id": "builtin_base64",
+      "name": "Base64 编解码",
+      "description": "对文本进行 Base64 编码或解码。mode=encode 编码，mode=decode 解码。纯本地计算。",
+      "toolType": "PLUGIN",
+      "category": "编码加密",
+      "icon": "Lock",
+      "implementation": "cn.cangjiecloud.tool.plugin.builtin.BuiltinToolsPlugin",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "待编码或解码的文本" },
+          "mode": { "type": "string", "description": "操作：encode 编码 / decode 解码，默认 encode", "enum": ["encode", "decode"] }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "id": "builtin_urlcode",
+      "name": "URL 编解码",
+      "description": "对文本进行 URL 百分号编码或解码。mode=encode 编码（用于拼接 URL 参数），mode=decode 解码。纯本地计算。",
+      "toolType": "PLUGIN",
+      "category": "编码加密",
+      "icon": "Link",
+      "implementation": "cn.cangjiecloud.tool.plugin.builtin.BuiltinToolsPlugin",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "待编码或解码的文本" },
+          "mode": { "type": "string", "description": "操作：encode 编码 / decode 解码，默认 encode", "enum": ["encode", "decode"] }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "id": "builtin_json_extract",
+      "name": "JSON 字段提取",
+      "description": "从 JSON 字符串中按路径提取字段值。路径支持点路径 data.items.0.name，也支持标准 JSONPath $.data.items[0].name。用于从接口返回中取需要的字段。",
+      "toolType": "PLUGIN",
+      "category": "本地计算",
+      "icon": "Document",
+      "implementation": "cn.cangjiecloud.tool.plugin.builtin.BuiltinToolsPlugin",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "json": { "type": "string", "description": "JSON 字符串" },
+          "path": { "type": "string", "description": "字段路径，如 data.items.0.name 或 $.data.items[0].name" }
+        },
+        "required": ["json", "path"]
+      }
+    },
+    {
+      "id": "builtin_weather",
+      "name": "天气查询",
+      "description": "查询指定地点的当前天气，返回温度、体感温度、风向风力、湿度和中文天气概况。地点可用城市拼音或经纬度（如 Beijing、Shanghai、39.9:116.4）。依赖外部公开服务 wttr.in，需要服务器可访问外网。",
+      "toolType": "HTTP",
+      "category": "公开API",
+      "icon": "Sunny",
+      "config": {
+        "method": "GET",
+        "url": "https://wttr.in/{{location}}?format=j1&lang=zh"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "location": { "type": "string", "description": "地点，城市拼音（Beijing）或 纬度:经度（39.9:116.4）" }
+        },
+        "required": ["location"]
+      }
+    },
+    {
+      "id": "builtin_ip_info",
+      "name": "IP 归属地查询",
+      "description": "查询 IPv4 地址的归属地、国家/地区、省份、城市和运营商。不传 ip 时查询调用方出口 IP。使用公开免密钥接口 ip-api.com，需要服务器可访问外网。",
+      "toolType": "HTTP",
+      "category": "公开API",
+      "icon": "Location",
+      "config": {
+        "method": "GET",
+        "url": "http://ip-api.com/json/{{ip}}?lang=zh-CN"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "ip": { "type": "string", "description": "待查询的 IPv4 地址；留空则查询当前出口 IP" }
+        },
+        "required": []
+      }
+    },
+    {
+      "id": "builtin_exchange_rate",
+      "name": "汇率查询",
+      "description": "查询两种货币之间的最新汇率，并可按汇率换算指定金额。base 为基准货币、target 为目标货币（如 USD、CNY、EUR、JPY）。使用公开免密钥接口 open.er-api.com，需要服务器可访问外网。",
+      "toolType": "HTTP",
+      "category": "公开API",
+      "icon": "Coin",
+      "config": {
+        "method": "GET",
+        "url": "https://open.er-api.com/v6/latest/{{base}}"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "base": { "type": "string", "description": "基准货币代码，如 USD、CNY、EUR" },
+          "target": { "type": "string", "description": "目标货币代码，如 CNY、USD、JPY（仅用于提示，返回 rates 中包含全部币种汇率）" }
+        },
+        "required": ["base"]
+      }
+    }
+  ]
+}
