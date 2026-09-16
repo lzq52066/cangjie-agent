@@ -16,11 +16,8 @@ public class ModelEntity extends BaseEntity {
     /** 模型类型：openai / deepseek / qwen / zhipu / wenxin / ollama / custom */
     private String modelType;
 
-    /** API Key */
-    private String apiKey;
-
-    /** API Base URL */
-    private String baseUrl;
+    /** 关联厂商 ID，API Key 与 Base URL 全部来自厂商 */
+    private String providerId;
 
     /** 模型标识（如 gpt-4o、qwen-max、glm-4） */
     private String modelName;

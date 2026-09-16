@@ -3,13 +3,15 @@ package cn.cangjiecloud.model.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
-import cn.cangjiecloud.common.util.AesUtil;
 import cn.cangjiecloud.core.model.*;
 import cn.cangjiecloud.model.api.dto.ModelCreateDTO;
 import cn.cangjiecloud.model.api.dto.ModelUpdateDTO;
 import cn.cangjiecloud.model.entity.ModelEntity;
+import cn.cangjiecloud.model.entity.ModelProviderEntity;
 import cn.cangjiecloud.model.mapper.ModelMapper;
+import cn.cangjiecloud.model.mapper.ModelProviderMapper;
 import cn.cangjiecloud.model.provider.OpenAICompatibleClient;
+import cn.cangjiecloud.model.security.ApiKeyCipher;
 import cn.cangjiecloud.model.service.IModelService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,10 +48,6 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
     @Value("${cangjie.model.fallback-model-id:}")
     private String fallbackModelId;
 
-    /** 模型 API Key 加密密钥（生产环境务必修改） */
-    @Value("${cangjie.security.model-key-secret:cangjie-model-key-change-me-pls}")
-    private String keySecret;
-
     @Autowired
     @Qualifier("llmStreamExecutor")
     private AsyncTaskExecutor streamExecutor;
@@ -57,59 +55,58 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
     @Autowired
     private cn.cangjiecloud.model.circuitbreaker.ModelCircuitBreaker circuitBreaker;
 
+    @Autowired
+    private ApiKeyCipher apiKeyCipher;
+
+    @Autowired
+    private ModelProviderMapper modelProviderMapper;
+
     private OpenAICompatibleClient newClient(ModelEntity entity) {
-        // 解密 API Key 后构建客户端，数据库始终存储密文
-        ModelEntity copy = new ModelEntity();
-        org.springframework.beans.BeanUtils.copyProperties(entity, copy);
-        copy.setApiKey(decryptApiKey(entity.getApiKey()));
-        return new OpenAICompatibleClient(copy, Duration.ofSeconds(timeoutSeconds),
+        // 模型不持有凭证，API Key / Base URL 一律取自关联厂商（数据库中为密文）
+        ModelProviderEntity provider = requireProvider(entity.getProviderId());
+        assertProviderReady(provider);
+        return new OpenAICompatibleClient(entity, apiKeyCipher.decrypt(provider.getApiKey()),
+                provider.getBaseUrl(), Duration.ofSeconds(timeoutSeconds),
                 streamExecutor, circuitBreaker);
     }
 
-    private String encryptApiKey(String apiKey) {
-        if (!StringUtils.hasText(apiKey)) {
-            return apiKey;
+    /**
+     * 加载厂商配置，未选择或厂商不存在时抛出友好异常
+     */
+    private ModelProviderEntity requireProvider(String providerId) {
+        if (!StringUtils.hasText(providerId)) {
+            throw new ApiException("请选择厂商");
         }
-        return AesUtil.encrypt(apiKey, keySecret);
+        ModelProviderEntity provider = modelProviderMapper.selectById(providerId);
+        if (provider == null) {
+            throw new ApiException("关联厂商不存在或已删除: " + providerId);
+        }
+        return provider;
     }
 
     /**
-     * 解密 API Key；兼容存量明文数据（解密失败原样返回）
+     * 校验厂商凭证齐备，避免创建出无法调用的模型
      */
-    private String decryptApiKey(String stored) {
-        if (!StringUtils.hasText(stored)) {
-            return stored;
+    private void assertProviderReady(ModelProviderEntity provider) {
+        if (!StringUtils.hasText(provider.getBaseUrl())) {
+            throw new ApiException("厂商「" + provider.getName() + "」未配置 Base URL，请先在厂商管理中维护");
         }
-        try {
-            return AesUtil.decrypt(stored, keySecret);
-        } catch (Exception e) {
-            log.debug("API Key 非密文格式，按明文处理（存量数据兼容）");
-            return stored;
+        if (!StringUtils.hasText(provider.getApiKey())) {
+            throw new ApiException("厂商「" + provider.getName() + "」未配置 API Key，请先在厂商管理中维护");
         }
-    }
-
-    @Override
-    public String maskApiKey(String stored) {
-        String plain = decryptApiKey(stored);
-        if (!StringUtils.hasText(plain)) {
-            return plain;
-        }
-        if (plain.length() <= 8) {
-            return "****";
-        }
-        return "****" + plain.substring(plain.length() - 4);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ModelEntity create(ModelCreateDTO dto) {
-        ModelType type = ModelType.of(dto.getModelType());
+        // 凭证统一由厂商维护：模型不存储 API Key / Base URL，运行时全部继承厂商配置
+        ModelProviderEntity provider = requireProvider(dto.getProviderId());
+        assertProviderReady(provider);
 
         ModelEntity entity = new ModelEntity();
         entity.setName(dto.getName());
-        entity.setModelType(type.getCode());
-        entity.setApiKey(encryptApiKey(dto.getApiKey()));
-        entity.setBaseUrl(StringUtils.hasText(dto.getBaseUrl()) ? dto.getBaseUrl() : OpenAICompatibleClient.defaultBaseUrl(type));
+        entity.setModelType(provider.getCode());
+        entity.setProviderId(provider.getId());
         entity.setModelName(dto.getModelName());
         entity.setTemperature(dto.getTemperature() != null ? dto.getTemperature() : 0.7);
         entity.setMaxTokens(dto.getMaxTokens() != null ? dto.getMaxTokens() : 4096);
@@ -126,7 +123,6 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
             clearOtherDefaults(entity.getId());
         }
         log.info("模型已创建: {} ({})", entity.getName(), entity.getModelType());
-        entity.setApiKey(maskApiKey(entity.getApiKey()));
         return entity;
     }
 
@@ -138,11 +134,14 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
             throw new ApiException("模型不存在");
         }
         if (StringUtils.hasText(dto.getName())) entity.setName(dto.getName());
-        // 含掩码符的 apiKey 为前端回传的脱敏值，跳过更新避免覆盖真实密钥
-        if (StringUtils.hasText(dto.getApiKey()) && !dto.getApiKey().contains("*")) {
-            entity.setApiKey(encryptApiKey(dto.getApiKey()));
+        // providerId 为空表示不修改关联
+        if (StringUtils.hasText(dto.getProviderId())) {
+            ModelProviderEntity provider = requireProvider(dto.getProviderId());
+            assertProviderReady(provider);
+            entity.setProviderId(provider.getId());
+            // 关联厂商后类型以厂商标识为准
+            entity.setModelType(provider.getCode());
         }
-        if (StringUtils.hasText(dto.getBaseUrl())) entity.setBaseUrl(dto.getBaseUrl());
         if (StringUtils.hasText(dto.getModelName())) entity.setModelName(dto.getModelName());
         if (dto.getTemperature() != null) entity.setTemperature(dto.getTemperature());
         if (dto.getMaxTokens() != null) entity.setMaxTokens(dto.getMaxTokens());
@@ -158,7 +157,6 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
         updateById(entity);
         // 配置变更后失效缓存，避免生产路径继续使用旧配置
         evictClient(id);
-        entity.setApiKey(maskApiKey(entity.getApiKey()));
         return entity;
     }
 
@@ -173,7 +171,7 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
     }
 
     @Override
-    public List<ModelEntity> list(String keyword, String modelType) {
+    public List<ModelEntity> list(String keyword, String modelType, String providerId) {
         LambdaQueryWrapper<ModelEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.orderByDesc(ModelEntity::getIsDefault).orderByDesc(ModelEntity::getCreateTime);
         if (StringUtils.hasText(keyword)) {
@@ -182,9 +180,10 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
         if (StringUtils.hasText(modelType)) {
             wrapper.eq(ModelEntity::getModelType, modelType);
         }
-        List<ModelEntity> models = list(wrapper);
-        models.forEach(m -> m.setApiKey(maskApiKey(m.getApiKey())));
-        return models;
+        if (StringUtils.hasText(providerId)) {
+            wrapper.eq(ModelEntity::getProviderId, providerId);
+        }
+        return list(wrapper);
     }
 
     @Override
@@ -305,6 +304,23 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
         OpenAICompatibleClient removed = clientCache.remove(modelId);
         if (removed != null) {
             log.info("模型客户端缓存已失效: {}", modelId);
+        }
+    }
+
+    /**
+     * 失效所有继承该厂商凭证的模型客户端缓存（厂商凭证/地址变更时调用）
+     */
+    @Override
+    public void evictClientsOfProvider(String providerId) {
+        if (!StringUtils.hasText(providerId)) {
+            return;
+        }
+        List<ModelEntity> models = list(new LambdaQueryWrapper<ModelEntity>()
+                .select(ModelEntity::getId)
+                .eq(ModelEntity::getProviderId, providerId));
+        models.forEach(m -> evictClient(m.getId()));
+        if (!models.isEmpty()) {
+            log.info("厂商 {} 凭证变更，已失效 {} 个模型客户端缓存", providerId, models.size());
         }
     }
 

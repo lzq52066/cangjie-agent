@@ -9,15 +9,9 @@ public class ModelCreateDTO {
     @NotBlank(message = "模型名称不能为空")
     private String name;
 
-    /** 模型类型：openai / deepseek / qwen / zhipu / wenxin / ollama / custom */
-    @NotBlank(message = "模型类型不能为空")
-    private String modelType;
-
-    /** API Key */
-    private String apiKey;
-
-    /** API Base URL */
-    private String baseUrl;
+    /** 关联厂商 ID：API Key 与 Base URL 统一由厂商维护，模型不再单独存储 */
+    @NotBlank(message = "请选择厂商")
+    private String providerId;
 
     /** 模型标识（如 gpt-4o、qwen-max、glm-4） */
     @NotBlank(message = "模型标识不能为空")

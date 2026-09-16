@@ -4,7 +4,6 @@ import cn.cangjiecloud.core.model.ChatChunk;
 import cn.cangjiecloud.core.model.ChatMessage;
 import cn.cangjiecloud.core.model.ChatRequest;
 import cn.cangjiecloud.core.model.ChatResponse;
-import cn.cangjiecloud.core.model.ModelType;
 import cn.cangjiecloud.model.circuitbreaker.ModelCircuitBreaker;
 import cn.cangjiecloud.model.entity.ModelEntity;
 import dev.langchain4j.data.message.AiMessage;
@@ -45,6 +44,10 @@ public class OpenAICompatibleClient {
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(120);
 
     private final ModelEntity modelConfig;
+    /** 调用凭证：来自模型关联的厂商，与模型配置彻底分离 */
+    private final String apiKey;
+    /** 厂商 API 地址 */
+    private final String baseUrl;
     /** 单次 LLM 请求超时（同步与流式模型均生效） */
     private final Duration requestTimeout;
     /** 流式生产者任务使用的受管线程池 */
@@ -52,9 +55,12 @@ public class OpenAICompatibleClient {
     /** 模型熔断器（可为 null，表示不参与熔断统计） */
     private final ModelCircuitBreaker circuitBreaker;
 
-    public OpenAICompatibleClient(ModelEntity modelConfig, Duration requestTimeout,
+    public OpenAICompatibleClient(ModelEntity modelConfig, String apiKey, String baseUrl,
+                                  Duration requestTimeout,
                                   AsyncTaskExecutor streamExecutor, ModelCircuitBreaker circuitBreaker) {
         this.modelConfig = modelConfig;
+        this.apiKey = apiKey;
+        this.baseUrl = baseUrl;
         this.requestTimeout = requestTimeout != null ? requestTimeout : DEFAULT_REQUEST_TIMEOUT;
         this.streamExecutor = streamExecutor;
         this.circuitBreaker = circuitBreaker;
@@ -144,8 +150,8 @@ public class OpenAICompatibleClient {
         List<dev.langchain4j.data.message.ChatMessage> messages = convertMessages(request.getMessages());
 
         StreamingChatModel streamingModel = OpenAiStreamingChatModel.builder()
-                .apiKey(modelConfig.getApiKey())
-                .baseUrl(modelConfig.getBaseUrl())
+                .apiKey(apiKey)
+                .baseUrl(baseUrl)
                 .modelName(request.getModel() != null ? request.getModel() : modelConfig.getModelName())
                 .temperature(request.getTemperature())
                 .maxTokens(request.getMaxTokens() > 0 ? request.getMaxTokens() : modelConfig.getMaxTokens())
@@ -295,8 +301,8 @@ public class OpenAICompatibleClient {
 
         dev.langchain4j.model.openai.OpenAiEmbeddingModel embeddingModel =
                 dev.langchain4j.model.openai.OpenAiEmbeddingModel.builder()
-                        .apiKey(modelConfig.getApiKey())
-                        .baseUrl(modelConfig.getBaseUrl())
+                        .apiKey(apiKey)
+                        .baseUrl(baseUrl)
                         .modelName(modelConfig.getModelName())
                         .dimensions(modelConfig.getEmbeddingDimension())
                         .timeout(requestTimeout)
@@ -310,8 +316,8 @@ public class OpenAICompatibleClient {
 
     private dev.langchain4j.model.chat.ChatModel buildChatModel(ChatRequest request) {
         return OpenAiChatModel.builder()
-                .apiKey(modelConfig.getApiKey())
-                .baseUrl(modelConfig.getBaseUrl())
+                .apiKey(apiKey)
+                .baseUrl(baseUrl)
                 .modelName(request.getModel() != null ? request.getModel() : modelConfig.getModelName())
                 .temperature(request.getTemperature())
                 .maxTokens(request.getMaxTokens() > 0 ? request.getMaxTokens() : modelConfig.getMaxTokens())
@@ -395,20 +401,5 @@ public class OpenAICompatibleClient {
             builder.addBooleanProperty(name, desc);
         }
         // 其他复杂类型（array/object）暂时跳过，不影响主流场景
-    }
-
-    /**
-     * 各模型提供商默认 baseUrl
-     */
-    public static String defaultBaseUrl(ModelType type) {
-        return switch (type) {
-            case OPENAI -> "https://api.openai.com/v1";
-            case DEEPSEEK -> "https://api.deepseek.com/v1";
-            case QWEN -> "https://dashscope.aliyuncs.com/compatible-mode/v1";
-            case ZHIPU -> "https://open.bigmodel.cn/api/paas/v4";
-            case WENXIN -> "https://qianfan.baidubce.com/v2";
-            case OLLAMA -> "http://localhost:11434/v1";
-            case CUSTOM -> "";
-        };
     }
 }

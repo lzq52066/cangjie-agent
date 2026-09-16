@@ -40,17 +40,14 @@ public class ModelController {
 
     @GetMapping("/{id}")
     public R<ModelEntity> get(@PathVariable String id) {
-        ModelEntity entity = modelService.getById(id);
-        if (entity != null) {
-            entity.setApiKey(modelService.maskApiKey(entity.getApiKey()));
-        }
-        return R.data(entity);
+        return R.data(modelService.getById(id));
     }
 
     @GetMapping
     public R<List<ModelEntity>> list(@RequestParam(required = false) String keyword,
-                                     @RequestParam(required = false) String modelType) {
-        return R.data(modelService.list(keyword, modelType));
+                                     @RequestParam(required = false) String modelType,
+                                     @RequestParam(required = false) String providerId) {
+        return R.data(modelService.list(keyword, modelType, providerId));
     }
 
     @PostMapping("/test")

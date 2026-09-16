@@ -16,7 +16,10 @@ public interface IModelService extends IService<ModelEntity> {
 
     void delete(String id);
 
-    List<ModelEntity> list(String keyword, String modelType);
+    /**
+     * 模型列表（模型不持有凭证，凭证统一由厂商维护）
+     */
+    List<ModelEntity> list(String keyword, String modelType, String providerId);
 
     /**
      * 测试模型连通性
@@ -49,7 +52,7 @@ public interface IModelService extends IService<ModelEntity> {
     void evictClient(String modelId);
 
     /**
-     * API Key 脱敏（解密后掩码，用于对外展示）
+     * 失效所有关联该厂商的模型客户端缓存（厂商凭证变更时调用）
      */
-    String maskApiKey(String stored);
+    void evictClientsOfProvider(String providerId);
 }

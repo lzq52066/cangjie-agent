@@ -6,8 +6,8 @@ import lombok.Data;
 public class ModelUpdateDTO {
 
     private String name;
-    private String apiKey;
-    private String baseUrl;
+    /** 关联厂商 ID：为空表示不修改关联 */
+    private String providerId;
     private String modelName;
     private Double temperature;
     private Integer maxTokens;
