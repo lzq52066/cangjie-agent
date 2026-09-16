@@ -142,7 +142,7 @@
         <template v-else-if="configType === 'code'">
           <el-form-item label="脚本">
             <el-input v-model="configForm.script" type="textarea" :rows="6"
-                      placeholder="return { result: input.a + input.b }" />
+                      placeholder="Groovy 脚本，可通过 input.xxx 访问变量，如：&#10;return [result: (input.a ?: 0) + (input.b ?: 0)]" />
           </el-form-item>
         </template>
 

@@ -7,6 +7,7 @@ import org.codehaus.groovy.control.CompilerConfiguration;
 import org.codehaus.groovy.control.customizers.ImportCustomizer;
 import org.codehaus.groovy.control.customizers.SecureASTCustomizer;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.*;
@@ -38,8 +39,9 @@ public class GroovyScriptExecutor {
             secure.setImportsWhitelist(Collections.singletonList(
                     "java.util.Map"
             ));
-            secure.setStarImportsWhitelist(Collections.singletonList(
-                    "java.lang"
+            // 需与下方 ImportCustomizer 显式加入的星号导入保持一致，否则会被安全检查拦截
+            secure.setStarImportsWhitelist(Arrays.asList(
+                    "java.lang", "java.util", "java.math"
             ));
 
             ImportCustomizer imports = new ImportCustomizer();
