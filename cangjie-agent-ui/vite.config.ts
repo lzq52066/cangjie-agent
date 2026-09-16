@@ -31,6 +31,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     base,
+    // admin 与 chat 两个 dev server 入口依赖图不同，必须各自独立缓存，
+    // 否则会互相覆盖 node_modules/.vite/deps，导致另一方的动态导入 504/404
+    cacheDir: resolve(__dirname, 'node_modules/.vite', isAdmin ? 'admin' : 'chat'),
     plugins: [vue(), ...(isAdmin ? [] : [chatDevEntry()])],
     resolve: {
       alias: {

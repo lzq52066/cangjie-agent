@@ -5,7 +5,6 @@ import cn.cangjiecloud.tool.consts.ToolConstants;
 import cn.cangjiecloud.tool.annotation.ToolHandlerType;
 import cn.cangjiecloud.tool.api.dto.ToolExecuteResultDTO;
 import cn.cangjiecloud.tool.entity.ToolEntity;
-import cn.cangjiecloud.tool.util.ToolNaming;
 import cn.cangjiecloud.core.plugin.Plugin;
 import cn.cangjiecloud.core.plugin.PluginContext;
 import cn.cangjiecloud.core.tool.ToolSpecification;
@@ -35,7 +34,7 @@ public class PluginToolHandler extends AbsToolHandler {
     public ToolSpecification buildToolSpecification(ToolEntity entity) {
         return ToolSpecification.builder()
                 .toolId(entity.getId())
-                .name(ToolNaming.buildToolName(entity.getId()))
+                .name(specName(entity))
                 .description(entity.getDescription() != null ? entity.getDescription() : entity.getName())
                 .toolType(ToolConstants.ToolType.PLUGIN)
                 .parameters(parseParameters(entity.getParameters()))

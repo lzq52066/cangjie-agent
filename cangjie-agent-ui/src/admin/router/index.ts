@@ -1,4 +1,5 @@
 import { createRouter, createWebHashHistory, Router, RouteRecordRaw } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { useUserStore } from '../store/user'
 
 const routes: RouteRecordRaw[] = [
@@ -40,6 +41,31 @@ const router: Router = createRouter({
   history: createWebHashHistory(),
   routes
 })
+
+/**
+ * 懒加载失败兜底：dev 下依赖预构建缓存失效、或部署后旧 chunk 被清理时，
+ * 动态导入会 reject。提示并自动整页重载一次，避免用户看到空白页。
+ */
+const RELOAD_FLAG = 'cangjie-view-reload'
+
+router.onError((error, to) => {
+  const message = String((error as Error)?.message || error)
+  if (!/dynamically imported module|Importing a module script failed|Failed to fetch/i.test(message)) {
+    console.error('[router] 页面加载失败:', error)
+    ElMessage.error('页面加载失败：' + message)
+    return
+  }
+  if (sessionStorage.getItem(RELOAD_FLAG)) {
+    sessionStorage.removeItem(RELOAD_FLAG)
+    ElMessage.error('页面资源加载失败，请清理浏览器缓存后重试')
+    return
+  }
+  sessionStorage.setItem(RELOAD_FLAG, to?.fullPath || '1')
+  ElMessage.warning('页面资源已更新，正在重新加载…')
+  window.location.reload()
+})
+
+router.afterEach(() => sessionStorage.removeItem(RELOAD_FLAG))
 
 router.beforeEach(async (to, _from, next) => {
   const userStore = useUserStore()

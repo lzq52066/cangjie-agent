@@ -21,7 +21,7 @@ public interface IPluginService extends IService<PluginEntity> {
     PluginEntity reload(String pluginId);
 
     /**
-     * 扫描 Spring 容器中所有 Plugin bean
+     * 扫描 Spring 容器中所有 Plugin bean，按实现类名同步落库后返回插件列表
      */
     List<PluginEntity> scanPlugins();
 }

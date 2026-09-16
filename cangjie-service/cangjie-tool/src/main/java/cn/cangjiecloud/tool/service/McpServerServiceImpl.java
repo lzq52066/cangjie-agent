@@ -9,6 +9,7 @@ import cn.cangjiecloud.tool.entity.McpServerEntity;
 import cn.cangjiecloud.tool.entity.ToolEntity;
 import cn.cangjiecloud.tool.mapper.McpServerMapper;
 import cn.cangjiecloud.tool.mcp.McpClientManager;
+import cn.cangjiecloud.tool.util.ToolNaming;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -131,6 +132,21 @@ public class McpServerServiceImpl extends ServiceImpl<McpServerMapper, McpServer
             target.setConfig(JSON.toJSONString(Map.of("serverUrl", entity.getServerUrl())));
             target.setStatus(ToolConstants.STATUS_ACTIVE);
             target.setCategory("MCP:" + entity.getName());
+
+            // 函数名与其它工具重名时不激活，否则模型侧会出现两个同名函数
+            boolean conflict = ToolNaming.isValidFunctionName(name)
+                    && !ToolNaming.isReservedFunctionName(name)
+                    && toolService.count(new LambdaQueryWrapper<ToolEntity>()
+                            .eq(ToolEntity::getFunctionName, name)
+                            .ne(StringUtils.hasText(target.getId()), ToolEntity::getId, target.getId())) > 0;
+            if (conflict) {
+                target.setStatus(ToolConstants.STATUS_INACTIVE);
+                toolService.saveOrUpdate(target);
+                log.warn("MCP 工具函数名冲突，已跳过激活: {} (服务 {})", name, entity.getName());
+                result.add(Map.of("name", name, "isNew", isNew, "conflict", true));
+                continue;
+            }
+
             toolService.saveOrUpdate(target);
             result.add(Map.of("name", name, "isNew", isNew));
         }

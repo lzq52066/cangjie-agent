@@ -9,6 +9,7 @@ import cn.cangjiecloud.tool.entity.PluginEntity;
 import cn.cangjiecloud.tool.mapper.PluginMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Service;
@@ -16,6 +17,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -116,17 +119,53 @@ public class PluginServiceImpl extends ServiceImpl<PluginMapper, PluginEntity>
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public List<PluginEntity> scanPlugins() {
-        return pluginRegistry.list().stream()
-                .map(plugin -> {
-                    PluginEntity entity = new PluginEntity();
-                    entity.setName(plugin.getName());
-                    entity.setType(plugin.getType());
-                    entity.setDescription(plugin.getDescription());
-                    entity.setClassName(plugin.getClass().getName());
-                    entity.setLoaded(true);
-                    return entity;
-                })
-                .collect(Collectors.toList());
+        List<Plugin> discovered = pluginRegistry.list();
+
+        // 已登记的插件（按实现类全名索引），扫描结果按类名增量落库，页面刷新才能看到
+        Map<String, PluginEntity> existingByClass = list(new LambdaQueryWrapper<PluginEntity>()
+                .isNotNull(PluginEntity::getClassName)).stream()
+                .filter(e -> StringUtils.hasText(e.getClassName()))
+                .collect(Collectors.toMap(PluginEntity::getClassName, e -> e, (a, b) -> a));
+
+        for (Plugin plugin : discovered) {
+            // 取被代理前的真实类型，否则 CGLIB 增强类名会让「重载」里的 Class.forName 失败
+            String className = AopUtils.getTargetClass(plugin).getName();
+            PluginEntity entity = existingByClass.get(className);
+            boolean isNew = entity == null;
+            if (isNew) {
+                entity = new PluginEntity();
+                entity.setClassName(className);
+                entity.setStatus("active");
+            }
+            entity.setName(plugin.getName());
+            entity.setType(plugin.getType());
+            entity.setDescription(plugin.getDescription());
+            entity.setLoaded(true);
+            entity.setLoadError(null);
+            if (!StringUtils.hasText(entity.getVersion())) {
+                entity.setVersion("1.0.0");
+            }
+            saveOrUpdate(entity);
+            if (isNew) {
+                log.info("扫描发现新插件: {} ({})", entity.getName(), className);
+            }
+        }
+
+        // 注册中心里已不存在的记录标记为未加载，保留人工登记的配置
+        Set<String> discoveredClasses = discovered.stream()
+                .map(p -> AopUtils.getTargetClass(p).getName())
+                .collect(Collectors.toSet());
+        for (PluginEntity stale : existingByClass.values()) {
+            if (Boolean.TRUE.equals(stale.getLoaded()) && !discoveredClasses.contains(stale.getClassName())) {
+                stale.setLoaded(false);
+                stale.setLoadError("扫描未发现该插件，可能已被移除");
+                updateById(stale);
+            }
+        }
+
+        log.info("插件扫描完成，注册中心 {} 个插件", discovered.size());
+        return list((String) null, null);
     }
 }

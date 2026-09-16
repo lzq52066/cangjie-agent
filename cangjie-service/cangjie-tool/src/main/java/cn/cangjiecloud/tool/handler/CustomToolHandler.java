@@ -6,7 +6,6 @@ import cn.cangjiecloud.tool.annotation.ToolHandlerType;
 import cn.cangjiecloud.tool.api.dto.ToolExecuteResultDTO;
 import cn.cangjiecloud.tool.entity.ToolEntity;
 import cn.cangjiecloud.tool.executor.GroovyScriptExecutor;
-import cn.cangjiecloud.tool.util.ToolNaming;
 import cn.cangjiecloud.core.tool.ToolSpecification;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -25,7 +24,7 @@ public class CustomToolHandler extends AbsToolHandler {
     public ToolSpecification buildToolSpecification(ToolEntity entity) {
         return ToolSpecification.builder()
                 .toolId(entity.getId())
-                .name(ToolNaming.buildToolName(entity.getId()))
+                .name(specName(entity))
                 .description(entity.getDescription() != null ? entity.getDescription() : entity.getName())
                 .toolType(ToolConstants.ToolType.CUSTOM)
                 .parameters(parseParameters(entity.getParameters()))

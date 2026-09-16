@@ -6,7 +6,6 @@ import cn.cangjiecloud.tool.handler.AbsToolHandler;
 import cn.cangjiecloud.tool.handler.ToolHandlerRegistry;
 import cn.cangjiecloud.tool.service.IToolProviderService;
 import cn.cangjiecloud.tool.service.ToolServiceImpl;
-import cn.cangjiecloud.tool.util.ToolNaming;
 import cn.cangjiecloud.core.tool.ToolSpecification;
 import com.alibaba.fastjson.JSON;
 import lombok.RequiredArgsConstructor;
@@ -68,13 +67,11 @@ public class ToolProviderServiceImpl implements IToolProviderService {
 
     @Override
     public String executeToolCall(String toolName, Map<String, Object> arguments) {
-        String toolId = ToolNaming.parse(toolName);
-
-        // 先判断是否是 skill 类型的工具
-        ToolEntity entity = toolService.getById(toolId);
+        // 按 function calling 名称反查工具（自定义函数名优先，兼容历史 tool_<id>）
+        ToolEntity entity = toolService.resolveByCallName(toolName);
         if (entity == null) {
-            log.warn("工具不存在: toolName={}, toolId={}", toolName, toolId);
-            return JSON.toJSONString(Map.of("success", false, "error", "工具不存在: " + toolId));
+            log.warn("工具不存在: toolName={}", toolName);
+            return JSON.toJSONString(Map.of("success", false, "error", "工具不存在: " + toolName));
         }
 
         String toolType = resolveToolType(entity);

@@ -3,6 +3,7 @@ package cn.cangjiecloud.tool.handler;
 import cn.cangjiecloud.core.tool.ToolSpecification;
 import cn.cangjiecloud.tool.api.dto.ToolExecuteResultDTO;
 import cn.cangjiecloud.tool.entity.ToolEntity;
+import cn.cangjiecloud.tool.util.ToolNaming;
 
 import java.util.List;
 import java.util.Map;
@@ -30,4 +31,12 @@ public abstract class AbsToolHandler {
      * 执行工具
      */
     public abstract ToolExecuteResultDTO execute(ToolEntity entity, Map<String, Object> params);
+
+    /**
+     * function calling 中暴露给模型的函数名：
+     * 优先使用工具自定义的 functionName，未配置或非法时回退到 tool_&lt;id&gt;
+     */
+    protected String specName(ToolEntity entity) {
+        return ToolNaming.resolveCallName(entity.getFunctionName(), entity.getId());
+    }
 }

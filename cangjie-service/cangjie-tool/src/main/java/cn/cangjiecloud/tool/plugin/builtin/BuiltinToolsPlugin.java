@@ -1,6 +1,5 @@
 package cn.cangjiecloud.tool.plugin.builtin;
 
-import cn.cangjiecloud.core.plugin.Plugin;
 import cn.cangjiecloud.core.plugin.PluginContext;
 import com.alibaba.fastjson.JSONObject;
 import org.springframework.stereotype.Component;
@@ -25,12 +24,12 @@ import java.util.UUID;
  *     <li>builtin_uuid    —— 生成 UUID</li>
  *     <li>builtin_base64  —— Base64 编码/解码</li>
  *     <li>builtin_urlcode —— URL 编码/解码</li>
- *     <li>builtin_json    —— JSONPath 字段提取</li>
+ *     <li>builtin_json_extract —— JSONPath 字段提取</li>
  * </ul>
  * 对应 tool 表记录的 implementation 配置为本类全限定名，toolType=PLUGIN。
  */
 @Component
-public class BuiltinToolsPlugin implements Plugin {
+public class BuiltinToolsPlugin extends AbstractBuiltinPlugin {
 
     @Override
     public String getName() {
@@ -49,22 +48,20 @@ public class BuiltinToolsPlugin implements Plugin {
 
     @Override
     public Object execute(PluginContext context) {
-        Map<String, Object> params = context.getParams() != null ? context.getParams() : Map.of();
-        Object toolId = context.getMetadata() != null ? context.getMetadata().get("toolId") : null;
-        String tool = toolId != null ? toolId.toString() : "";
-        return switch (tool) {
+        Map<String, Object> params = paramsOf(context);
+        return switch (toolIdOf(context)) {
             case "builtin_hash" -> hash(params);
             case "builtin_uuid" -> generateUuid(params);
             case "builtin_base64" -> base64(params);
             case "builtin_urlcode" -> urlCode(params);
-            case "builtin_json" -> jsonExtract(params);
-            default -> error("未知的内置工具: " + tool);
+            case "builtin_json_extract" -> jsonExtract(params);
+            default -> error("未知的内置工具: " + toolIdOf(context));
         };
     }
 
     /** 文本哈希：algorithm 支持 md5 / sha1 / sha256（默认 md5） */
     private JSONObject hash(Map<String, Object> params) {
-        String text = str(params.get("text"));
+        String text = raw(params.get("text"));
         String algorithm = str(params.getOrDefault("algorithm", "md5")).toLowerCase();
         if (text.isEmpty()) {
             return error("text 不能为空");
@@ -96,11 +93,9 @@ public class BuiltinToolsPlugin implements Plugin {
 
     /** 生成 UUID：count 1~100，默认 1；uppercase 控制大小写；hyphen=false 去掉连字符 */
     private JSONObject generateUuid(Map<String, Object> params) {
-        int count = intVal(params.get("count"), 1);
-        if (count < 1) count = 1;
-        if (count > 100) count = 100;
-        boolean uppercase = boolVal(params.get("uppercase"));
-        boolean hyphen = !boolValFalse(params.get("hyphen"), false);
+        int count = clamp(intVal(params.get("count"), 1), 1, 100);
+        boolean uppercase = boolVal(params.get("uppercase"), false);
+        boolean hyphen = boolVal(params.get("hyphen"), true);
         List<String> uuids = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             String u = UUID.randomUUID().toString();
@@ -117,7 +112,7 @@ public class BuiltinToolsPlugin implements Plugin {
 
     /** Base64 编码/解码：mode=encode（默认）/ decode */
     private JSONObject base64(Map<String, Object> params) {
-        String text = str(params.get("text"));
+        String text = raw(params.get("text"));
         String mode = str(params.getOrDefault("mode", "encode")).toLowerCase();
         if (text.isEmpty()) {
             return error("text 不能为空");
@@ -140,7 +135,7 @@ public class BuiltinToolsPlugin implements Plugin {
 
     /** URL 编码/解码：mode=encode（默认）/ decode */
     private JSONObject urlCode(Map<String, Object> params) {
-        String text = str(params.get("text"));
+        String text = raw(params.get("text"));
         String mode = str(params.getOrDefault("mode", "encode")).toLowerCase();
         if (text.isEmpty()) {
             return error("text 不能为空");
@@ -160,13 +155,11 @@ public class BuiltinToolsPlugin implements Plugin {
         }
     }
 
-    // ---------------- 工具方法 ----------------
-
     /**
      * JSON 字段提取：path 支持点路径（data.items.0.name）或标准 JSONPath（$.data.items[0].name）。
      */
     private JSONObject jsonExtract(Map<String, Object> params) {
-        String jsonText = str(params.get("json"));
+        String jsonText = raw(params.get("json"));
         String path = str(params.get("path"));
         if (jsonText.isEmpty()) {
             return error("json 不能为空");
@@ -203,44 +196,5 @@ public class BuiltinToolsPlugin implements Plugin {
         } catch (Exception e) {
             return error("JSON 解析或提取失败: " + e.getMessage());
         }
-    }
-
-    private static JSONObject ok(Map<String, Object> data) {
-        JSONObject jo = new JSONObject(new LinkedHashMap<>());
-        jo.put("success", true);
-        jo.putAll(data);
-        return jo;
-    }
-
-    private static JSONObject error(String message) {
-        JSONObject jo = new JSONObject(new LinkedHashMap<>());
-        jo.put("success", false);
-        jo.put("error", message);
-        return jo;
-    }
-
-    private static String str(Object o) {
-        return o == null ? "" : o.toString();
-    }
-
-    private static int intVal(Object o, int def) {
-        if (o == null) return def;
-        try {
-            return (int) Double.parseDouble(o.toString().trim());
-        } catch (NumberFormatException e) {
-            return def;
-        }
-    }
-
-    /** 兼容 LLM 可能传入 "true"/true/1 */
-    private static boolean boolVal(Object o) {
-        if (o == null) return false;
-        String s = o.toString().trim().toLowerCase();
-        return "true".equals(s) || "1".equals(s);
-    }
-
-    private static boolean boolValFalse(Object o, boolean def) {
-        if (o == null) return def;
-        return boolVal(o);
     }
 }

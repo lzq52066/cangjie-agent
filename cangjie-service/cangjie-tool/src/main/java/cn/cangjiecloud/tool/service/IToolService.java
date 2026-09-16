@@ -44,6 +44,16 @@ public interface IToolService extends IService<ToolEntity> {
     String executeToolCall(String toolName, Map<String, Object> arguments);
 
     /**
+     * 按 function calling 中的名称反查工具实体
+     * <p>
+     * 先按自定义函数名匹配，再兼容历史的 tool_&lt;id&gt; 命名。
+     *
+     * @param callName 模型侧看到的函数名
+     * @return 工具实体，不存在时返回 null
+     */
+    ToolEntity resolveByCallName(String callName);
+
+    /**
      * 获取激活的技能规格列表（用于 LLM function calling）
      *
      * @param skillIds 技能 ID 列表

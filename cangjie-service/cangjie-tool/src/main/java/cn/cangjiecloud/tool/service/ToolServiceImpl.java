@@ -41,6 +41,7 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ToolEntity create(ToolEntity entity) {
+        validateFunctionName(entity, null);
         if (!StringUtils.hasText(entity.getStatus())) {
             entity.setStatus("active");
         }
@@ -56,6 +57,7 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
         if (existing == null) {
             throw new ApiException("工具不存在");
         }
+        validateFunctionName(entity, id);
         entity.setId(id);
         updateById(entity);
         return getById(id);
@@ -169,11 +171,29 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
     private ToolSpecification buildBasicSpec(ToolEntity entity) {
         return ToolSpecification.builder()
                 .toolId(entity.getId())
-                .name(ToolNaming.buildToolName(entity.getId()))
+                .name(ToolNaming.resolveCallName(entity.getFunctionName(), entity.getId()))
                 .description(entity.getDescription() != null ? entity.getDescription() : entity.getName())
                 .toolType(entity.getType())
                 .parameters(parseJsonMap(entity.getParameters()))
                 .build();
+    }
+
+    @Override
+    public ToolEntity resolveByCallName(String callName) {
+        String name = ToolNaming.normalizeFunctionName(callName);
+        if (name == null) {
+            return null;
+        }
+        // 1. 自定义函数名（与构建 ToolSpecification 时的命名规则一致）
+        if (!ToolNaming.isReservedFunctionName(name)) {
+            ToolEntity entity = getOne(new LambdaQueryWrapper<ToolEntity>()
+                    .eq(ToolEntity::getFunctionName, name), false);
+            if (entity != null) {
+                return entity;
+            }
+        }
+        // 2. 兼容历史 tool_<id> / skill_<id> 等带前缀的命名
+        return getById(ToolNaming.parse(name));
     }
 
     @Override
@@ -183,9 +203,9 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
             return executeSkillCall(toolName, arguments);
         }
 
-        String toolId = ToolNaming.parse(toolName);
-        ToolEntity entity = getById(toolId);
+        ToolEntity entity = resolveByCallName(toolName);
         if (entity == null) {
+            log.warn("工具不存在: toolName={}", toolName);
             return com.alibaba.fastjson.JSON.toJSONString(Map.of("success", false, "error", "工具不存在"));
         }
 
@@ -237,6 +257,30 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
     }
 
     // ========== 内部工具方法 ==========
+
+    /**
+     * 归一化并校验函数名：格式合法、不使用平台保留名、在所有工具中唯一。
+     * 允许为空（此时 function calling 回退为 tool_&lt;id&gt;）。
+     */
+    private void validateFunctionName(ToolEntity entity, String selfId) {
+        String name = ToolNaming.normalizeFunctionName(entity.getFunctionName());
+        entity.setFunctionName(name);
+        if (name == null) {
+            return;
+        }
+        if (!ToolNaming.isValidFunctionName(name)) {
+            throw new ApiException("函数名只允许字母、数字、下划线和中划线，且必须以字母开头（长度 1-64）: " + name);
+        }
+        if (ToolNaming.isReservedFunctionName(name)) {
+            throw new ApiException("函数名 " + name + " 与平台内置命名规则冲突，请换一个");
+        }
+        boolean duplicated = count(new LambdaQueryWrapper<ToolEntity>()
+                .eq(ToolEntity::getFunctionName, name)
+                .ne(selfId != null, ToolEntity::getId, selfId)) > 0;
+        if (duplicated) {
+            throw new ApiException("函数名已存在: " + name);
+        }
+    }
 
     private ToolEntity getActiveEntity(String toolId) {
         ToolEntity entity = getById(toolId);

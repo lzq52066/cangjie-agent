@@ -7,7 +7,6 @@ import cn.cangjiecloud.tool.api.dto.ToolExecuteResultDTO;
 import cn.cangjiecloud.tool.entity.ToolEntity;
 import cn.cangjiecloud.tool.executor.McpClientExecutor;
 import cn.cangjiecloud.tool.mcp.McpClientManager;
-import cn.cangjiecloud.tool.util.ToolNaming;
 import cn.cangjiecloud.core.tool.ToolSpecification;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -32,7 +31,7 @@ public class McpToolHandler extends AbsToolHandler {
     public ToolSpecification buildToolSpecification(ToolEntity entity) {
         return ToolSpecification.builder()
                 .toolId(entity.getId())
-                .name(ToolNaming.buildToolName(entity.getId()))
+                .name(specName(entity))
                 .description(entity.getDescription() != null ? entity.getDescription() : entity.getName())
                 .toolType(ToolConstants.ToolType.MCP)
                 .parameters(parseParameters(entity.getParameters()))

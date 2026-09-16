@@ -222,6 +222,173 @@
         },
         "required": ["base"]
       }
+    },
+    {
+      "id": "builtin_now",
+      "name": "获取当前时间",
+      "description": "获取服务器当前的准确日期与时间，返回日期、时间、星期、ISO 周、季度、时间戳、时区。凡是涉及“今天/现在/本周/本季度/距离某天还有多久”的问题，都必须先调用本工具拿到真实时间，不要凭记忆推测。",
+      "toolType": "PLUGIN",
+      "category": "本地计算",
+      "icon": "Clock",
+      "implementation": "cn.cangjiecloud.tool.plugin.builtin.DateTimeToolsPlugin",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "timezone": { "type": "string", "description": "IANA 时区名，如 Asia/Shanghai、UTC；不传使用服务器时区" },
+          "format": { "type": "string", "description": "datetime 字段输出格式，默认 yyyy-MM-dd HH:mm:ss" }
+        },
+        "required": []
+      }
+    },
+    {
+      "id": "builtin_timestamp_convert",
+      "name": "时间戳互转",
+      "description": "时间戳与日期时间互转。value 传 10 位/13 位数字时按时间戳解析出可读时间；传日期字符串（如 2026-01-01、2026-01-01 08:30:00、2026-01-01T08:30:00+08:00）时返回秒级与毫秒级时间戳。",
+      "toolType": "PLUGIN",
+      "category": "本地计算",
+      "icon": "Clock",
+      "implementation": "cn.cangjiecloud.tool.plugin.builtin.DateTimeToolsPlugin",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "string", "description": "时间戳（10 位秒或 13 位毫秒）或日期时间字符串" },
+          "timezone": { "type": "string", "description": "IANA 时区名，如 Asia/Shanghai；不传使用服务器时区" },
+          "format": { "type": "string", "description": "value 为日期字符串且格式非标准时可指定，如 yyyy/MM/dd HH:mm:ss" }
+        },
+        "required": ["value"]
+      }
+    },
+    {
+      "id": "builtin_date_diff",
+      "name": "日期差值计算",
+      "description": "计算两个日期间的差值，返回总天数、小时/分钟/秒、相差年月、星期、区间内工作日数量。起止日期可混用日期、日期时间、ISO 带时区、时间戳。用于计算间隔、工期、倒计时、年龄天数等。",
+      "toolType": "PLUGIN",
+      "category": "本地计算",
+      "icon": "Calendar",
+      "implementation": "cn.cangjiecloud.tool.plugin.builtin.DateTimeToolsPlugin",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "start": { "type": "string", "description": "起始日期，如 2026-01-01 或 2026-01-01 09:00:00" },
+          "end": { "type": "string", "description": "结束日期，写法同上；早于起始日时结果为负" },
+          "timezone": { "type": "string", "description": "IANA 时区名，用于解析不带时区的输入，默认服务器时区" },
+          "format": { "type": "string", "description": "输入日期格式，可省略（自动识别常见格式）" }
+        },
+        "required": ["start", "end"]
+      }
+    },
+    {
+      "id": "builtin_calculator",
+      "name": "表达式计算器",
+      "description": "精确计算数学表达式，支持 +-*/、%、括号、^幂、隐式乘法、常量 pi/e 以及 abs/sqrt/cbrt/round/floor/ceil/sin/cos/tan/asin/acos/atan/ln/log/log2/exp/pow/min/max/sum/avg 函数。凡是多位数运算、百分比、复利、开方、求和求平均等场景必须调用本工具，禁止自行心算。",
+      "toolType": "PLUGIN",
+      "category": "本地计算",
+      "icon": "Calculator",
+      "implementation": "cn.cangjiecloud.tool.plugin.builtin.CalculatorPlugin",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "expression": { "type": "string", "description": "数学表达式，如 (3+4)*2^3、sqrt(2)*100、avg(1,2,3)、12345.67*0.13" },
+          "precision": { "type": "integer", "description": "结果保留小数位，0~12，默认 10（自动去除无意义尾零）" }
+        },
+        "required": ["expression"]
+      }
+    },
+    {
+      "id": "builtin_unit_convert",
+      "name": "单位换算",
+      "description": "常用计量单位换算，覆盖长度、重量、面积、体积、时间、速度、存储、网速与温度。from/to 支持中文与英文缩写（如 千克/kg、英里/mi、GB/g、小时/h）。category 可留空自动识别，存在歧义时（如 mi 既是英里又是分钟）需显式指定。",
+      "toolType": "PLUGIN",
+      "category": "本地计算",
+      "icon": "Switch",
+      "implementation": "cn.cangjiecloud.tool.plugin.builtin.CalculatorPlugin",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "string", "description": "待换算的数值，如 100、3.5" },
+          "from": { "type": "string", "description": "源单位，如 km、千克、mph、GB" },
+          "to": { "type": "string", "description": "目标单位，如 m、克、m/s、MB" },
+          "category": { "type": "string", "description": "单位类别，可选 length/weight/area/volume/time/speed/storage/data_rate/temperature，歧义时必填" },
+          "precision": { "type": "integer", "description": "结果保留小数位，0~12，默认 10" }
+        },
+        "required": ["value", "from", "to"]
+      }
+    },
+    {
+      "id": "builtin_text_stats",
+      "name": "文本字数统计",
+      "description": "统计文本的字符数、不含空格字符数、中文字数、英文单词数、字母、数字、标点、空白、行数、UTF-8 字节数，并按中英文混合规则给出总词数。传入 maxChars 时额外判断是否超限。需要精确字数或校验长度限制时必须调用，不要自行估算。",
+      "toolType": "PLUGIN",
+      "category": "本地计算",
+      "icon": "EditPen",
+      "implementation": "cn.cangjiecloud.tool.plugin.builtin.TextToolsPlugin",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "待统计的文本" },
+          "maxChars": { "type": "integer", "description": "字数上限，大于 0 时返回是否超限及超出数量，默认 0 表示不校验" }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "id": "builtin_random",
+      "name": "随机数与密码生成",
+      "description": "生成真随机内容（服务端 SecureRandom）：type=int 随机整数、type=decimal 随机小数、type=string 随机字符串、type=password 随机口令（含强度评估）。支持 count 批量、min/max 范围、length 长度、noAmbiguous 排除易混淆字符。需要随机数时必须调用本工具，不要自行编造。",
+      "toolType": "PLUGIN",
+      "category": "本地计算",
+      "icon": "Key",
+      "implementation": "cn.cangjiecloud.tool.plugin.builtin.TextToolsPlugin",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "description": "生成类型：int / decimal / string / password，默认 int", "enum": ["int", "decimal", "string", "password"] },
+          "count": { "type": "integer", "description": "生成数量，1~200，默认 1" },
+          "min": { "type": "number", "description": "最小值，整数默认 0、小数默认 0" },
+          "max": { "type": "number", "description": "最大值，整数默认 100、小数默认 1（整数为闭区间）" },
+          "length": { "type": "integer", "description": "字符串/口令长度，默认 16" },
+          "lowercase": { "type": "boolean", "description": "是否包含小写字母，默认 true" },
+          "uppercase": { "type": "boolean", "description": "是否包含大写字母，默认 true" },
+          "digits": { "type": "boolean", "description": "是否包含数字，默认 true" },
+          "symbols": { "type": "boolean", "description": "是否包含符号（仅 password 类型），默认 true" },
+          "noAmbiguous": { "type": "boolean", "description": "是否排除易混淆字符 l/o/I/O/0/1，默认 false" }
+        },
+        "required": []
+      }
+    },
+    {
+      "id": "builtin_url_parse",
+      "name": "URL 解析",
+      "description": "拆解 URL，返回协议、主机、端口、路径、锚点、原始查询串以及解析后的查询参数表（同名参数合并为数组）。可自动补全缺失的 https 前缀，容忍尖括号/引号包裹。分析接口地址、回调地址、带参链接时调用。",
+      "toolType": "PLUGIN",
+      "category": "本地计算",
+      "icon": "Link",
+      "implementation": "cn.cangjiecloud.tool.plugin.builtin.ParserToolsPlugin",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "待解析的 URL，如 https://a.com/p?x=1&y=2#top" }
+        },
+        "required": ["url"]
+      }
+    },
+    {
+      "id": "builtin_jwt_decode",
+      "name": "JWT 令牌解析",
+      "description": "解码 JWT（header.payload.signature）的头部与载荷，返回算法、类型、全部声明，并把 exp/iat/nbf 转为可读时间、判断是否已过期。注意：只解码不验签，不能用于判断令牌是否合法可信。",
+      "toolType": "PLUGIN",
+      "category": "本地计算",
+      "icon": "Search",
+      "implementation": "cn.cangjiecloud.tool.plugin.builtin.ParserToolsPlugin",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "token": { "type": "string", "description": "JWT 字符串，允许带 Bearer 前缀" },
+          "part": { "type": "string", "description": "返回内容：all 全部 / header 仅头部 / payload 仅载荷，默认 all", "enum": ["all", "header", "payload"] },
+          "timezone": { "type": "string", "description": "时间类声明的展示时区，如 Asia/Shanghai，默认服务器时区" }
+        },
+        "required": ["token"]
+      }
     }
   ]
 }

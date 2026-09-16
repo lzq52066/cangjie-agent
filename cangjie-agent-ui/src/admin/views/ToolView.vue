@@ -17,7 +17,7 @@
           </el-select>
         </div>
         <div>
-          <el-button v-if="activeTab === 'plugin'" @click="handleScan">
+          <el-button v-if="activeTab === 'plugin'" :loading="scanning" @click="handleScan">
             <el-icon><Refresh /></el-icon> 扫描插件
           </el-button>
           <el-button type="primary" @click="openCreate">
@@ -115,6 +115,7 @@
         </el-form-item>
         <el-form-item label="函数名" prop="functionName">
           <el-input v-model="toolForm.functionName" placeholder="模型 Function Calling 调用名，如 get_weather" />
+          <span class="hint-inline">该名称即模型调用时使用的函数名，需全局唯一；MCP 工具必须与远端工具名完全一致</span>
         </el-form-item>
         <el-form-item label="参数 Schema">
           <el-input v-model="toolForm.parameters" type="textarea" :rows="5"
@@ -184,7 +185,12 @@
       <el-form v-if="execMode === 'form'" label-width="140px">
         <el-empty v-if="execParamKeys.length === 0" description="该工具未声明参数，可直接执行" :image-size="60" />
         <el-form-item v-for="k in execParamKeys" :key="k" :label="k" :required="execParamRequired.includes(k)">
-          <el-input v-model="execForm[k]" :placeholder="execParamDesc[k]" />
+          <el-select v-if="execParamMeta[k]?.enum" v-model="execForm[k]" :multiple="execParamMeta[k].multiple"
+                     clearable collapse-tags :collapse-tags-tooltip="execParamMeta[k].multiple"
+                     :placeholder="execParamDesc[k]" style="width: 100%">
+            <el-option v-for="opt in execParamMeta[k].enum" :key="String(opt)" :label="String(opt)" :value="opt" />
+          </el-select>
+          <el-input v-else v-model="execForm[k]" :placeholder="execParamDesc[k]" />
         </el-form-item>
       </el-form>
       <el-input v-else v-model="execJson" type="textarea" :rows="6" placeholder='{"key": "value"}' />
@@ -275,6 +281,7 @@ const filterType = ref('')
 const saving = ref(false)
 const editing = ref(false)
 const reloadingId = ref('')
+const scanning = ref(false)
 
 const showToolDialog = ref(false)
 const toolFormRef = ref<FormInstance>()
@@ -282,7 +289,14 @@ const toolForm = reactive<Record<string, any>>({})
 const toolRules: FormRules = {
   name: [{ required: true, message: '请输入名称', trigger: 'blur' }],
   type: [{ required: true, message: '请选择类型', trigger: 'change' }],
-  functionName: [{ required: true, message: '请输入函数名', trigger: 'blur' }]
+  functionName: [
+    { required: true, message: '请输入函数名', trigger: 'blur' },
+    {
+      pattern: /^[A-Za-z][A-Za-z0-9_-]{0,63}$/,
+      message: '函数名需以字母开头，只能包含字母、数字、下划线和中划线，长度不超过 64',
+      trigger: 'blur'
+    }
+  ]
 }
 const toolDefaults = {
   id: '', name: '', type: 'HTTP', category: '', functionName: '',
@@ -408,9 +422,14 @@ async function handleReload(row: any) {
 }
 
 async function handleScan() {
-  const found = await pluginApi.scan()
-  ElMessage.success(`扫描完成，发现 ${found?.length ?? 0} 个插件`)
-  loadList()
+  scanning.value = true
+  try {
+    const found = await pluginApi.scan()
+    ElMessage.success(`扫描完成，共 ${found?.length ?? 0} 个插件`)
+    await loadList()
+  } finally {
+    scanning.value = false
+  }
 }
 
 // 工具执行
@@ -422,6 +441,8 @@ const execJson = ref('{}')
 const execParamKeys = ref<string[]>([])
 const execParamDesc = ref<Record<string, string>>({})
 const execParamRequired = ref<string[]>([])
+/** 参数控件元信息：enum 非空时渲染下拉框，multiple 表示多选（数组 + items.enum） */
+const execParamMeta = ref<Record<string, { type: string; enum?: any[]; multiple: boolean }>>({})
 const execResult = ref<any>(null)
 const executing = ref(false)
 
@@ -434,19 +455,42 @@ function openExecute(row: any) {
   execParamKeys.value = []
   execParamDesc.value = {}
   execParamRequired.value = []
+  execParamMeta.value = {}
   try {
     const schema = row.parameters ? JSON.parse(row.parameters) : null
     const props = schema?.properties || {}
     execParamKeys.value = Object.keys(props)
     execParamRequired.value = schema?.required || []
+    const meta: Record<string, { type: string; enum?: any[]; multiple: boolean }> = {}
     Object.keys(props).forEach(k => {
       execParamDesc.value[k] = props[k]?.description || props[k]?.type || ''
+      meta[k] = parseParamMeta(props[k])
+      if (meta[k].multiple) execForm.value[k] = []
     })
+    execParamMeta.value = meta
   } catch {
     // Schema 非法时退化为 JSON 模式
     execMode.value = 'json'
   }
   execDialog.value = true
+}
+
+/** 从 JSON Schema 的属性定义里推导控件类型 */
+function parseParamMeta(prop: any): { type: string; enum?: any[]; multiple: boolean } {
+  const raw = prop?.type
+  // type 可能是 ["string","null"] 这类联合写法
+  const type = Array.isArray(raw) ? (raw.find(t => t !== 'null') || 'string') : (raw || 'string')
+  if (type === 'array') {
+    const itemEnum = prop?.items?.enum
+    if (Array.isArray(itemEnum) && itemEnum.length) {
+      return { type, enum: itemEnum, multiple: true }
+    }
+    return { type, multiple: false }
+  }
+  if (Array.isArray(prop?.enum) && prop.enum.length) {
+    return { type, enum: prop.enum, multiple: false }
+  }
+  return { type, multiple: false }
 }
 
 // 表单/JSON 切换时双向同步
@@ -464,7 +508,7 @@ function changeExecMode(target: string) {
         ElMessage.error('JSON 必须是对象，例如 {"key": "value"}')
         return
       }
-      execForm.value = { ...parsed }
+      execForm.value = normalizeFormInput(parsed)
       execMode.value = 'form'
     } catch {
       ElMessage.error('JSON 格式错误，无法切换到表单')
@@ -472,11 +516,28 @@ function changeExecMode(target: string) {
   }
 }
 
+/** 把 JSON 模式的值规整成表单控件需要的形状（多选必须是数组） */
+function normalizeFormInput(parsed: Record<string, any>): Record<string, any> {
+  const form: Record<string, any> = { ...parsed }
+  for (const [k, meta] of Object.entries(execParamMeta.value)) {
+    const v = form[k]
+    if (!meta.multiple) continue
+    if (v == null || v === '') {
+      form[k] = []
+    } else if (!Array.isArray(v)) {
+      form[k] = String(v).split(',').map(s => s.trim()).filter(Boolean)
+    }
+  }
+  return form
+}
+
 // 收集表单参数：必填原样带上；非必填空值跳过（避免空参数导致 400）
 function collectFormInput(): Record<string, any> {
   const input: Record<string, any> = { ...execForm.value }
   for (const k of Object.keys(input)) {
-    if (!execParamRequired.value.includes(k) && (input[k] === '' || input[k] == null)) {
+    const v = input[k]
+    const empty = v === '' || v == null || (Array.isArray(v) && v.length === 0)
+    if (!execParamRequired.value.includes(k) && empty) {
       delete input[k]
     }
   }
