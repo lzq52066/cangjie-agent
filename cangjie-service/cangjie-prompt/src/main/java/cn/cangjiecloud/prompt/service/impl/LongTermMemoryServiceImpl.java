@@ -22,12 +22,22 @@ public class LongTermMemoryServiceImpl
 
     @Override
     public List<LongTermMemoryEntity> findActive(String userId, String applicationId, String dimension) {
-        return baseMapper.selectActiveMemories(userId, applicationId, dimension);
+        return lambdaQuery()
+                .eq(LongTermMemoryEntity::getUserId, userId)
+                .eq(LongTermMemoryEntity::getApplicationId, applicationId)
+                .eq(StringUtils.hasText(dimension), LongTermMemoryEntity::getDimension, dimension)
+                .eq(LongTermMemoryEntity::getIsActive, true)
+                .list();
     }
 
     @Override
     public List<LongTermMemoryEntity> findActiveAll(String userId, String applicationId) {
-        return baseMapper.selectAllActiveMemories(userId, applicationId);
+        return lambdaQuery()
+                .eq(LongTermMemoryEntity::getUserId, userId)
+                .eq(LongTermMemoryEntity::getApplicationId, applicationId)
+                .eq(LongTermMemoryEntity::getIsActive, true)
+                .orderByAsc(LongTermMemoryEntity::getDimension)
+                .list();
     }
 
     @Override
@@ -76,14 +86,28 @@ public class LongTermMemoryServiceImpl
 
     @Override
     public void incrementTrigger(String id) {
-        baseMapper.incrementTriggerCount(id);
+        LongTermMemoryEntity entity = getById(id);
+        if (entity == null) {
+            return;
+        }
+        int count = entity.getTriggerCount() != null ? entity.getTriggerCount() : 0;
+        lambdaUpdate()
+                .eq(LongTermMemoryEntity::getId, id)
+                .set(LongTermMemoryEntity::getTriggerCount, count + 1)
+                .set(LongTermMemoryEntity::getLastTriggeredAt, LocalDateTime.now())
+                .update();
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deactivate(String id) {
         String updateBy = resolveOperator();
-        baseMapper.deactivate(id, updateBy);
+        lambdaUpdate()
+                .eq(LongTermMemoryEntity::getId, id)
+                .set(LongTermMemoryEntity::getIsActive, false)
+                .set(LongTermMemoryEntity::getUpdateBy, updateBy)
+                .set(LongTermMemoryEntity::getUpdateTime, LocalDateTime.now())
+                .update();
         log.info("长期记忆已停用: {}", id);
     }
 
@@ -107,14 +131,24 @@ public class LongTermMemoryServiceImpl
         if (!StringUtils.hasText(sessionId)) {
             return List.of();
         }
-        return baseMapper.selectSceneMemories(sessionId);
+        return lambdaQuery()
+                .eq(LongTermMemoryEntity::getSessionId, sessionId)
+                .eq(LongTermMemoryEntity::getMemoryType, "scene")
+                .eq(LongTermMemoryEntity::getIsActive, true)
+                .orderByDesc(LongTermMemoryEntity::getLastTriggeredAt)
+                .list();
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void reactivate(String id) {
         String updateBy = resolveOperator();
-        baseMapper.reactivate(id, updateBy);
+        lambdaUpdate()
+                .eq(LongTermMemoryEntity::getId, id)
+                .set(LongTermMemoryEntity::getIsActive, true)
+                .set(LongTermMemoryEntity::getUpdateBy, updateBy)
+                .set(LongTermMemoryEntity::getUpdateTime, LocalDateTime.now())
+                .update();
         log.info("长期记忆已重新激活: {}", id);
     }
 

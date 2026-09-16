@@ -299,7 +299,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, nextTick } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Odometer } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
@@ -330,137 +330,6 @@ const stats = computed(() => [
   { key: 'trace', label: '调用追踪', value: dashboard.value.todayTraceCount ?? 0, unit: '条', color: '#7c4dff' }
 ])
 
-const metricChartData = ref<any[]>([])
-const chartRefs = ref<Record<string, any>>({})
-
-// 全局 resize 监听器 - 统一 resize 所有 chart，避免重复添加监听器
-let resizeHandler: (() => void) | null = null
-
-function initChart(group: any, index: number) {
-  const key = 'chart-' + index
-  const el = document.getElementById(key)
-  if (!el) return
-  if (chartRefs.value[key]) {
-    chartRefs.value[key].dispose()
-  }
-  const chart = echarts.init(el)
-  chartRefs.value[key] = chart
-
-  const seriesList: any[] = group.series || []
-
-  // 时间格式化：ISO 时间戳 -> 短格式 (HH:mm 或 MM-dd HH:mm)
-  function shortTime(iso: string): string {
-    const d = new Date(iso)
-    if (isNaN(d.getTime())) return iso
-    const pad = (n: number) => String(n).padStart(2, '0')
-    const hhmm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
-    // 如果跨天则显示日期+时间
-    const now = new Date()
-    const isToday = d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
-    return isToday ? hhmm : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hhmm}`
-  }
-
-  // 收集所有时间点（取所有 series 的时间点并集，排序）
-  const allTimes: string[] = [...new Set(
-    seriesList.flatMap((s: any) => (s.data || []).map((d: any) => d.time).filter(Boolean))
-  )].sort()
-
-  // 格式化的横轴标签
-  const displayTimes = allTimes.map(t => shortTime(t))
-
-  // ECharts 配色
-  const colors = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc']
-
-  // 构建 series 配置
-  const seriesConfigs = seriesList.map((s: any, si: number) => {
-    const valueMap = new Map<string, number>()
-    ;(s.data || []).forEach((d: any) => {
-      valueMap.set(d.time, Number(d.value))
-    })
-    return {
-      name: s.name,
-      type: 'line',
-      smooth: true,
-      symbol: 'circle',
-      symbolSize: 5,
-      lineStyle: { width: 2 },
-      areaStyle: {
-        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: colors[si % colors.length] + '40' },
-          { offset: 1, color: colors[si % colors.length] + '05' }
-        ])
-      },
-      emphasis: { focus: 'series' },
-      data: allTimes.map(t => valueMap.has(t) ? valueMap.get(t) : null)
-    }
-  })
-
-  const option = {
-    color: colors,
-    tooltip: {
-      trigger: 'axis',
-      backgroundColor: 'rgba(255,255,255,0.95)',
-      borderColor: '#e4e7ed',
-      borderWidth: 1,
-      textStyle: { fontSize: 12, color: '#303133' },
-      formatter: function (params: any[]) {
-        if (!params || params.length === 0) return ''
-        let html = `<div style="font-weight:600;font-size:13px;margin-bottom:6px;color:#303133">${params[0].axisValue}</div>`
-        params.forEach((p: any) => {
-          if (p.value != null) {
-            html += `<div style="display:flex;justify-content:space-between;gap:16px;padding:2px 0">
-              <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color};margin-right:6px"></span>${p.seriesName}</span>
-              <span style="font-weight:500;color:#303133">${p.value}</span>
-            </div>`
-          }
-        })
-        return html
-      }
-    },
-    legend: {
-      type: 'scroll',
-      bottom: 0,
-      icon: 'roundRect',
-      textStyle: { fontSize: 11, color: '#606266' }
-    },
-    grid: { left: 55, right: 25, top: 25, bottom: 50 },
-    xAxis: {
-      type: 'category',
-      data: displayTimes.length > 0 ? displayTimes : ['-'],
-      axisLine: { lineStyle: { color: '#dcdfe6' } },
-      axisTick: { alignWithLabel: true },
-      axisLabel: { fontSize: 10, color: '#909399', rotate: allTimes.length > 6 ? 30 : 0 },
-      splitLine: { show: false }
-    },
-    yAxis: {
-      type: 'value',
-      nameTextStyle: { fontSize: 10, color: '#909399' },
-      splitLine: { lineStyle: { color: '#f0f2f5', type: 'dashed' } },
-      axisLabel: { fontSize: 10, color: '#909399' }
-    },
-    series: seriesConfigs
-  }
-
-  chart.setOption(option)
-
-  // 注册全局 resize 监听器（只注册一次）
-  if (!resizeHandler) {
-    resizeHandler = () => {
-      Object.values(chartRefs.value).forEach((c: any) => c?.resize())
-    }
-    window.addEventListener('resize', resizeHandler)
-  }
-}
-
-function disposeCharts() {
-  Object.values(chartRefs.value).forEach((chart: any) => chart?.dispose())
-  chartRefs.value = {}
-  if (resizeHandler) {
-    window.removeEventListener('resize', resizeHandler)
-    resizeHandler = null
-  }
-}
-
 const operationLogs = ref<any[]>([])
 const logQuery = reactive({ module: '', action: '', status: '' })
 const metricQuery = reactive({ metricType: '', dateRange: null as [string, string] | null })
@@ -470,6 +339,7 @@ const llmTraces = ref<any[]>([])
 const llmTraceQuery = reactive({ traceId: '', appName: '', modelName: '', sessionId: '', promptKeyword: '', responseKeyword: '', status: '', timeRange: null as [string, string] | null })
 
 // 图表相关
+const systemMetrics = ref<any[]>([])
 const hasMetricsData = computed(() => systemMetrics.value.length > 0)
 const metricsTotal = ref(0)
 const metricsTruncated = computed(() => metricsTotal.value > systemMetrics.value.length)
@@ -740,7 +610,7 @@ function reload() {
 function onTabChange() {
   pageNum.value = 1
   total.value = 0
-  if (activeTab.value === 'metrics') loadMetrics()
+  if (activeTab.value === 'metrics') loadMetricCharts()
   else reload()
 }
 
@@ -754,7 +624,7 @@ async function handleCollect() {
   try {
     const result = await observabilityApi.collectMetrics()
     ElMessage.success(`采集完成，新增 ${result?.length ?? 0} 条指标`)
-    loadMetrics()
+    loadMetricCharts()
   } finally {
     collecting.value = false
   }
@@ -903,5 +773,15 @@ function handleResize() {
 }
 @media (max-width: 1200px) {
   .metrics-charts { grid-template-columns: 1fr; }
+}
+@media (max-width: 768px) {
+  .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 10px; }
+  .stat-value { font-size: 22px; }
+  /* 旧版 flex 图表卡的最小宽度在窄屏下去掉，改为单列不溢出 */
+  .chart-grid { flex-direction: column; gap: 12px; }
+  .chart-card { flex: 1 1 100%; min-width: 0; min-height: auto; }
+  .chart-body { height: 260px; }
+  .chart-box { height: 240px; }
+  .pager { justify-content: center; }
 }
 </style>

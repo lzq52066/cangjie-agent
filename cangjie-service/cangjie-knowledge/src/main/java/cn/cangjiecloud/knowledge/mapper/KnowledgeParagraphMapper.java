@@ -4,45 +4,26 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import cn.cangjiecloud.knowledge.entity.KnowledgeParagraphEntity;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
-import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
+import java.util.Map;
 
 @Mapper
 public interface KnowledgeParagraphMapper extends BaseMapper<KnowledgeParagraphEntity> {
 
     /**
-     * 向量相似度检索（pgvector cosine 距离）
-     * 使用 ::vector 类型转换，参数为 pgvector 的字符串表示
+     * 向量相似度检索（pgvector cosine 距离）。
+     * ::vector 类型转换与 &lt;=&gt; 运算符无法用 Wrapper 表达，SQL 见 KnowledgeParagraphMapper.xml。
      */
-    @Select("""
-            SELECT p.*, 1 - (p.embedding <=> CAST(#{queryVector} AS vector)) AS similarity
-            FROM knowledge_paragraph p
-            WHERE p.deleted = 0
-              AND p.knowledge_base_id = #{knowledgeBaseId}
-              AND p.vector_status = 'embedded'
-            ORDER BY p.embedding <=> CAST(#{queryVector} AS vector)
-            LIMIT #{topK}
-            """)
-    List<java.util.Map<String, Object>> vectorSearch(
+    List<Map<String, Object>> vectorSearch(
             @Param("queryVector") String queryVector,
             @Param("knowledgeBaseId") String knowledgeBaseId,
             @Param("topK") int topK);
 
     /**
-     * 全文检索（pgroonga）
+     * 全文检索（pgroonga）。&amp;@~ 运算符无法用 Wrapper 表达，SQL 见 KnowledgeParagraphMapper.xml。
      */
-    @Select("""
-            SELECT p.*,
-                   pgroonga_score(p.tableoid, p.ctid) AS rank
-            FROM knowledge_paragraph p
-            WHERE p.deleted = 0
-              AND p.knowledge_base_id = #{knowledgeBaseId}
-              AND p.content &@~ #{query}
-            ORDER BY rank DESC
-            LIMIT #{topK}
-            """)
-    List<java.util.Map<String, Object>> fullTextSearch(
+    List<Map<String, Object>> fullTextSearch(
             @Param("query") String query,
             @Param("knowledgeBaseId") String knowledgeBaseId,
             @Param("topK") int topK);

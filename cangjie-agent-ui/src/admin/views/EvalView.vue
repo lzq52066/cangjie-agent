@@ -2,7 +2,7 @@
   <div class="eval-view">
     <el-row :gutter="16">
       <!-- 左侧：数据集列表 -->
-      <el-col :span="8">
+      <el-col :xs="24" :sm="24" :md="8" :lg="8">
         <el-card class="dataset-card">
           <template #header>
             <div class="card-header">
@@ -38,7 +38,7 @@
       </el-col>
 
       <!-- 右侧：用例管理 + 运行 -->
-      <el-col :span="16">
+      <el-col :xs="24" :sm="24" :md="16" :lg="16" class="case-col">
         <el-card v-if="current">
           <template #header>
             <div class="card-header">
@@ -141,10 +141,10 @@
                      :status="report.status === 'failed' ? 'exception' : (report.progress >= 100 ? 'success' : '')"
                      class="report-progress" />
         <el-row :gutter="12" class="summary-row">
-          <el-col :span="6"><div class="metric-card"><div class="metric-value">{{ fmt(summary.avgRecall) }}</div><div class="metric-label">平均召回率</div></div></el-col>
-          <el-col :span="6"><div class="metric-card"><div class="metric-value">{{ fmt(summary.avgCorrectness) }}</div><div class="metric-label">平均正确性</div></div></el-col>
-          <el-col :span="6"><div class="metric-card"><div class="metric-value">{{ summary.avgLatency != null ? Math.round(summary.avgLatency) + 'ms' : '-' }}</div><div class="metric-label">平均耗时</div></div></el-col>
-          <el-col :span="6"><div class="metric-card"><div class="metric-value">{{ summary.totalTokens ?? 0 }}</div><div class="metric-label">总 Token</div></div></el-col>
+          <el-col :xs="12" :sm="6"><div class="metric-card"><div class="metric-value">{{ fmt(summary.avgRecall) }}</div><div class="metric-label">平均召回率</div></div></el-col>
+          <el-col :xs="12" :sm="6"><div class="metric-card"><div class="metric-value">{{ fmt(summary.avgCorrectness) }}</div><div class="metric-label">平均正确性</div></div></el-col>
+          <el-col :xs="12" :sm="6"><div class="metric-card"><div class="metric-value">{{ summary.avgLatency != null ? Math.round(summary.avgLatency) + 'ms' : '-' }}</div><div class="metric-label">平均耗时</div></div></el-col>
+          <el-col :xs="12" :sm="6"><div class="metric-card"><div class="metric-value">{{ summary.totalTokens ?? 0 }}</div><div class="metric-label">总 Token</div></div></el-col>
         </el-row>
         <el-table :data="resultList" size="small" stripe max-height="480">
           <el-table-column prop="question" label="问题" min-width="170" show-overflow-tooltip />
@@ -430,4 +430,12 @@ onMounted(async () => {
   .metric-label { font-size: 12px; color: #909399; margin-top: 4px; }
 }
 .report-loading { height: 200px; }
+
+@media (max-width: 992px) {
+  .case-col { margin-top: 16px; }
+}
+@media (max-width: 768px) {
+  .metric-card { margin-bottom: 12px; padding: 12px 4px; }
+  .metric-card .metric-value { font-size: 18px; }
+}
 </style>

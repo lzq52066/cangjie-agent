@@ -1,7 +1,8 @@
 <template>
   <div class="dashboard">
     <el-row :gutter="16">
-      <el-col :span="6" v-for="(c, i) in cards" :key="i">
+      <el-col v-for="(c, i) in cards" :key="i"
+              :xs="12" :sm="12" :md="6" :lg="6">
         <el-card shadow="hover" class="stat-card" :class="'c' + i">
           <div class="stat-icon"><el-icon :size="28"><component :is="c.icon" /></el-icon></div>
           <div class="stat-info">
@@ -13,13 +14,14 @@
     </el-row>
 
     <el-row :gutter="16" style="margin-top:16px">
-      <el-col :span="16">
+      <el-col :xs="24" :sm="24" :md="16" :lg="16">
         <el-card class="module-card">
           <template #header>
             <div class="card-header"><span>核心能力模块</span><el-tag type="success" effect="light">v1.0.0 M1</el-tag></div>
           </template>
           <el-row :gutter="12">
-            <el-col :span="8" v-for="m in modules" :key="m.title">
+            <el-col v-for="m in modules" :key="m.title"
+                    :xs="12" :sm="8" :md="8" :lg="8">
               <el-card class="module-item" shadow="never">
                 <div class="m-icon" :style="{ background: m.bg }"><el-icon :size="22"><component :is="m.icon" /></el-icon></div>
                 <div class="m-title">{{ m.title }}</div>
@@ -29,7 +31,7 @@
           </el-row>
         </el-card>
       </el-col>
-      <el-col :span="8">
+      <el-col :xs="24" :sm="24" :md="8" :lg="8" style="margin-top:16px">
         <el-card class="notice-card">
           <template #header>
             <div class="card-header"><span>系统信息</span></div>
@@ -125,4 +127,11 @@ onMounted(async () => {
 .m-title { font-weight: 600; color: #1f2d3d; margin-bottom: 6px; }
 .m-desc { color: #909399; font-size: 12px; line-height: 1.6; }
 .notice-card :deep(.el-descriptions__label) { width: 90px; background: #fafafa; }
+
+@media (max-width: 768px) {
+  .stat-card { margin-bottom: 12px; }
+  .module-item { margin-bottom: 12px !important; }
+  .stat-icon { width: 44px; height: 44px; border-radius: 11px; }
+  .stat-value { font-size: 22px; }
+}
 </style>

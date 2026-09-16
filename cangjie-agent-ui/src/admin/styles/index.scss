@@ -6,3 +6,122 @@
 }
 body { font-size: 14px; }
 .el-card { border-radius: 12px; }
+
+/* ============ 全局响应式适配 ============ */
+
+/* 卡片头部工具条：窄屏自动换行，避免搜索框/按钮挤压重叠 */
+.el-card__header .card-header,
+.el-card__header .toolbar {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.el-card__header .header-left,
+.toolbar-left {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.toolbar { flex-wrap: wrap; row-gap: 10px; }
+
+/* 搜索/筛选输入框在窄屏下自适应宽度，不再固定宽度溢出 */
+@media (max-width: 768px) {
+  .card-header .el-input,
+  .card-header .el-select,
+  .toolbar .el-input,
+  .toolbar .el-select,
+  .header-left .el-input,
+  .header-left .el-select {
+    width: 100% !important;
+  }
+  .card-header,
+  .toolbar {
+    align-items: stretch !important;
+  }
+  .header-left,
+  .toolbar-left {
+    width: 100%;
+  }
+}
+
+/* 描述列表：窄屏强制单列 */
+@media (max-width: 768px) {
+  .el-descriptions {
+    --el-descriptions-table-border: 1px solid var(--el-border-color-lighter);
+  }
+  .el-descriptions__body .el-descriptions__table {
+    table-layout: fixed;
+  }
+  .el-descriptions__label,
+  .el-descriptions__content {
+    word-break: break-word;
+  }
+}
+
+/* 弹窗/抽屉：小屏接近全屏，避免内容贴边 */
+@media (max-width: 768px) {
+  .el-dialog {
+    width: 92vw !important;
+    margin: 5vh auto !important;
+  }
+}
+@media (min-width: 769px) and (max-width: 1200px) {
+  .el-dialog {
+    width: 72vw !important;
+  }
+}
+
+/* 表单：栅格表单项在窄屏自动占满整行 */
+@media (max-width: 768px) {
+  .el-form--inline .el-form-item {
+    margin-right: 0;
+    width: 100%;
+  }
+}
+
+/* 分页：窄屏靠右改为两端对齐并允许换行 */
+@media (max-width: 640px) {
+  .el-pagination {
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 8px;
+  }
+  .el-pagination .el-pagination__jump,
+  .el-pagination .el-pagination__total {
+    display: none;
+  }
+}
+
+/* 表格操作列按钮允许换行，避免窄屏按钮被裁掉 */
+.el-table .cell {
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* 消息框窄屏留边距 */
+@media (max-width: 640px) {
+  .el-message-box { width: 86vw !important; }
+}
+
+/* 侧边栏折叠后子菜单弹出层：沿用深色主题（弹出层 teleport 到 body，需全局样式） */
+.el-menu--vertical.el-menu--popup-container,
+.el-menu--vertical.el-menu--popup-container .el-menu--popup {
+  background: #1a252f !important;
+}
+.el-menu--vertical.el-menu--popup-container {
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+}
+.el-menu--vertical .el-menu-item,
+.el-menu--vertical .el-sub-menu__title {
+  color: #e4e7ed;
+  background: transparent;
+}
+.el-menu--vertical .el-menu-item:hover,
+.el-menu--vertical .el-sub-menu__title:hover {
+  background: rgba(255,255,255,0.08);
+  color: #e4e7ed;
+}
+.el-menu--vertical .el-menu-item.is-active {
+  background: rgba(103,194,58,0.15);
+  color: #67c23a;
+}
+

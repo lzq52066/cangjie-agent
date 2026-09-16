@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.cangjiecloud.observability.mapper.ObservabilityStatsMapper">
+
+    <!-- 指定时间之后的用户消息数（今日对话数） -->
+    <select id="countUserMessagesSince" resultType="java.lang.Long">
+        SELECT COUNT(*)
+        FROM chat_message
+        WHERE role = 'user'
+          AND deleted = 0
+          AND create_time &gt;= #{start}
+    </select>
+
+    <!-- 指定时间之后的 AI 回复数（今日模型调用数） -->
+    <select id="countAssistantMessagesSince" resultType="java.lang.Long">
+        SELECT COUNT(*)
+        FROM chat_message
+        WHERE role = 'assistant'
+          AND deleted = 0
+          AND create_time &gt;= #{start}
+    </select>
+
+    <!-- 操作平均耗时（毫秒） -->
+    <select id="avgOperationDuration" resultType="java.lang.Double">
+        SELECT COALESCE(AVG(duration), 0)::float8
+        FROM operation_log
+        WHERE deleted = 0
+    </select>
+
+</mapper>

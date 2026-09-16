@@ -1,38 +1,41 @@
 package cn.cangjiecloud.api.config;
 
-import cn.cangjiecloud.application.entity.ApplicationEntity;
-import cn.cangjiecloud.application.service.IApplicationService;
+import cn.cangjiecloud.application.auth.ApiAuthResult;
+import cn.cangjiecloud.application.auth.OpenApiAuthenticator;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 /**
  * 对外接口统一鉴权拦截器
  * <p>
- * 拦截 /api/open/** 请求，从 Authorization: Bearer &lt;apikey&gt; 头中提取 API Key，
- * 调用 {@link IApplicationService#getByApikey} 校验。校验通过后将应用放入 request attribute，
- * 供下游 Controller 直接使用。
+ * 拦截 /api/open/** 请求，复用 {@link OpenApiAuthenticator} 做统一鉴权（应用 API Key 或企业 OIDC JWT）。
+ * 校验通过后将应用实体与（JWT 场景下的）企业用户标识放入 request attribute，供下游 Controller 使用。
  * </p>
  * <p>
  * 网页匿名聊天路径（/api/open/chat*）在 cangjie.openapi.web-anonymous=true 时免 Key 放行，
  * 应用的校验由 {@code OpenWebChatController} 内部完成（GET 走路径参数、POST 走请求体）。
  * </p>
  */
+@Component
 @RequiredArgsConstructor
 public class OpenApiAuthInterceptor implements HandlerInterceptor {
 
     /** request attribute：校验通过后的应用实体 */
     public static final String APPLICATION_ATTR = "openApiApplication";
 
-    private static final String AUTH_HEADER = "Authorization";
-    private static final String BEARER_PREFIX = "Bearer ";
+    /** request attribute：企业 OIDC JWT 验签下的企业用户标识（subject），apikey 场景为 null */
+    public static final String PRINCIPAL_ATTR = "openApiPrincipal";
 
-    private final IApplicationService applicationService;
+    private final OpenApiAuthenticator authenticator;
 
-    /** 是否允许网页匿名聊天（免 API Key）——本类由 OpenApiWebConfig 手动 new，故只能构造器传入 */
-    private final boolean webAnonymousEnabled;
+    /** 是否允许网页匿名聊天（免 Key） */
+    @Value("${cangjie.openapi.web-anonymous:true}")
+    private boolean webAnonymousEnabled;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
@@ -42,23 +45,24 @@ public class OpenApiAuthInterceptor implements HandlerInterceptor {
             return true;
         }
 
-        String apikey = resolveApiKey(request);
-        if (!StringUtils.hasText(apikey)) {
-            writeUnauthorized(response, "缺少 API Key，请在 Authorization: Bearer <apikey> 头中提供");
+        String token = authenticator.resolveToken(request);
+        if (!StringUtils.hasText(token)) {
+            writeUnauthorized(response, "缺少凭证，请在 Authorization: Bearer <token> 或 X-API-Key 头中提供");
             return false;
         }
-        ApplicationEntity application = applicationService.getByApikey(apikey);
-        if (application == null) {
-            writeUnauthorized(response, "API Key 无效或应用未发布");
+        ApiAuthResult result = authenticator.authenticate(token);
+        if (result == null) {
+            writeUnauthorized(response, "凭证无效或应用未发布");
             return false;
         }
-        request.setAttribute(APPLICATION_ATTR, application);
+        request.setAttribute(APPLICATION_ATTR, result.getApplication());
+        request.setAttribute(PRINCIPAL_ATTR, result.getPrincipalId());
         return true;
     }
 
     /**
      * 判断是否为网页匿名聊天路径。
-     * 注意：/api/open/chat/completions 是开发者接口，必须走 API Key，不放行。
+     * 注意：/api/open/chat/completions 是开发者接口，必须走凭证，不放行。
      */
     private boolean isWebAnonymousPath(String uri) {
         if (!StringUtils.hasText(uri)) {
@@ -69,16 +73,6 @@ public class OpenApiAuthInterceptor implements HandlerInterceptor {
                 || uri.startsWith("/api/open/chat/config/")
                 || uri.startsWith("/api/open/chat/sessions")
                 || uri.startsWith("/api/open/embed");
-    }
-
-    private String resolveApiKey(HttpServletRequest request) {
-        String auth = request.getHeader(AUTH_HEADER);
-        if (StringUtils.hasText(auth) && auth.startsWith(BEARER_PREFIX)) {
-            return auth.substring(BEARER_PREFIX.length()).trim();
-        }
-        // 兼容 X-API-Key 头
-        String xApiKey = request.getHeader("X-API-Key");
-        return StringUtils.hasText(xApiKey) ? xApiKey.trim() : null;
     }
 
     private void writeUnauthorized(HttpServletResponse response, String message) throws Exception {

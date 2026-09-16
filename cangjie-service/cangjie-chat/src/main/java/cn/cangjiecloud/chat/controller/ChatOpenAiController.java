@@ -4,8 +4,9 @@ import cn.cangjiecloud.application.api.dto.ChatOpenAiRequest;
 import cn.cangjiecloud.application.api.dto.ChatOpenAiResponse;
 import cn.cangjiecloud.application.api.dto.ChatRequestDTO;
 import cn.cangjiecloud.application.api.dto.ChatResponseDTO;
+import cn.cangjiecloud.application.auth.ApiAuthResult;
+import cn.cangjiecloud.application.auth.OpenApiAuthenticator;
 import cn.cangjiecloud.application.entity.ApplicationEntity;
-import cn.cangjiecloud.application.service.IApplicationService;
 import cn.cangjiecloud.chat.service.IChatService;
 import cn.cangjiecloud.common.context.UserContext;
 import cn.cangjiecloud.common.exception.ApiException;
@@ -40,15 +41,12 @@ import java.util.concurrent.Executor;
 public class ChatOpenAiController {
 
     private final IChatService chatService;
-    private final IApplicationService applicationService;
+    private final OpenApiAuthenticator authenticator;
     private final Executor chatExecutor;
 
     /** SSE 流式连接超时（秒） */
     @Value("${cangjie.chat.sse-timeout-seconds:600}")
     private long sseTimeoutSeconds;
-
-    private static final String AUTH_HEADER = "Authorization";
-    private static final String BEARER_PREFIX = "Bearer ";
 
     @PostMapping("/chat/completions")
     public Object chatCompletions(@Valid @RequestBody ChatOpenAiRequest request,
@@ -73,22 +71,14 @@ public class ChatOpenAiController {
     }
 
     /**
-     * 从 Authorization: Bearer <apikey> 头中提取 API Key 并查找应用
+     * 统一鉴权：支持应用 API Key（企业后端到后端）与企业 OIDC JWT（企业用户直连）。
      */
     private ApplicationEntity authenticate(HttpServletRequest request) {
-        String authHeader = request.getHeader(AUTH_HEADER);
-        if (!StringUtils.hasText(authHeader) || !authHeader.startsWith(BEARER_PREFIX)) {
-            throw new ApiException("缺少 Authorization 头，请使用 Bearer <API-Key> 格式");
+        ApiAuthResult result = authenticator.authenticate(authenticator.resolveToken(request));
+        if (result == null) {
+            throw new ApiException("凭证无效或应用未发布");
         }
-        String apikey = authHeader.substring(BEARER_PREFIX.length()).trim();
-        if (!StringUtils.hasText(apikey)) {
-            throw new ApiException("API Key 不能为空");
-        }
-        ApplicationEntity application = applicationService.getByApikey(apikey);
-        if (application == null) {
-            throw new ApiException("API Key 无效或应用未发布");
-        }
-        return application;
+        return result.getApplication();
     }
 
     /**

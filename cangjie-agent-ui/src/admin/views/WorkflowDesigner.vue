@@ -48,7 +48,6 @@
           @connect-start="onConnectStart"
           @connect="onConnect"
           @connect-end="onConnectEnd"
-          @edge-click="onEdgeClick"
           @edge-double-click="onEdgeDblClick"
           @edge-update="onEdgeUpdate"
           @pane-click="onPaneClick"
@@ -211,8 +210,9 @@
           <el-input :model-value="edgeTargetName" disabled />
         </el-form-item>
         <el-form-item label="条件标签">
-          <el-input v-model="edgeCondition" placeholder="可选，condition 节点按此标签选择分支" />
+          <el-input v-model="edgeForm.condition" placeholder="如：success，供条件节点匹配" />
         </el-form-item>
+        <el-alert type="info" :closable="false" show-icon title="修改源/目标节点后，连线将自动更新连接关系" style="margin-bottom: 12px;" />
       </el-form>
       <template #footer>
         <el-button @click="edgeDrawer = false">取消</el-button>
@@ -692,24 +692,12 @@ const edgeTargetName = computed(() => {
   return targetNode?.data?.name || edge.target
 })
 
-function onEdgeClick(payload: any) {
-  const eid = payload?.edge?.id ?? payload?.id
-  if (!eid) return
-  const wasSelected = selectedEdgeId.value === eid
-  const edge = edges.value.find(e => e.id === eid)
-  if (wasSelected) {
-    // 再次点击已选中的线 → 取消选中
-    selectedEdgeId.value = null
-    if (edge) store.value?.removeSelectedEdges([edge as Edge])
-  } else {
-    selectedEdgeId.value = eid
-    if (edge) store.value?.addSelectedEdges([edge as Edge])
-  }
-}
-
 function onEdgeDblClick(payload: any) {
   const edge = payload?.edge ?? payload
   if (!edge?.id) return
+  // 选中该边（便于 Delete 删除），并打开连线条件编辑抽屉
+  selectedEdgeId.value = edge.id
+  store.value?.addSelectedEdges([edges.value.find(e => e.id === edge.id) as Edge].filter(Boolean))
   edgeEditId.value = edge.id
   edgeCondition.value = (edge.data as any)?.condition || ''
   edgeDrawer.value = true
@@ -822,6 +810,14 @@ function saveEdgeCondition() {
   edgeDrawer.value = false
 }
 
+function removeEdge() {
+  const idx = edges.value.findIndex(e => e.id === edgeForm.id)
+  if (idx >= 0) {
+    edges.value.splice(idx, 1)
+  }
+  edgeDrawer.value = false
+}
+
 // ============ 初始化 ============
 
 function goBack() {
@@ -912,9 +908,26 @@ onUnmounted(() => {
     }
   }
 
-  .canvas-wrap { flex: 1; position: relative; }
+  .canvas-wrap { flex: 1; position: relative; min-width: 0; }
 
   .field-tip { font-size: 12px; color: #909399; line-height: 1.5; margin-top: 4px; }
+}
+
+@media (max-width: 900px) {
+  .designer {
+    .designer-header {
+      height: auto; flex-wrap: wrap; gap: 8px; padding: 8px 12px;
+    }
+    .palette { width: 168px; padding: 8px; }
+    .palette-item .palette-desc { display: none; }
+  }
+}
+@media (max-width: 600px) {
+  .designer {
+    .palette { width: 132px; }
+    .wf-name { font-size: 13px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .header-right .el-button { padding: 8px; }
+  }
 }
 
 :deep(.vue-flow__edge-textbg) { fill: #fff; }

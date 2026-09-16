@@ -1,9 +1,9 @@
 <template>
   <el-container class="main-layout">
-    <el-aside width="220px" class="sidebar">
+    <el-aside :width="collapsed ? '64px' : '220px'" class="sidebar">
       <div class="brand">
         <div class="logo-icon">C</div>
-        <div class="brand-text">
+        <div v-show="!collapsed" class="brand-text">
           <div class="brand-name">CangJie Agent</div>
           <div class="brand-slogan">agent.cangjiecloud.cn</div>
         </div>
@@ -11,7 +11,8 @@
       <el-menu
         :key="openKey"
         :default-active="activeMenu"
-        :default-openeds="openMenus"
+        :default-openeds="collapsed ? [] : openMenus"
+        :collapse="collapsed"
         class="menu"
         router
         background-color="transparent"
@@ -24,7 +25,12 @@
 
     <el-container>
       <el-header class="header">
-        <div class="header-left"></div>
+        <div class="header-left">
+          <el-icon class="collapse-btn" @click="collapsed = !collapsed">
+            <Fold v-if="!collapsed" />
+            <Expand v-else />
+          </el-icon>
+        </div>
         <div class="header-right">
           <el-dropdown @command="handleCmd">
             <span class="user-info">
@@ -54,17 +60,41 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@admin/store/user'
 import type { MenuNode } from '@shared/types'
 import { ElMessageBox } from 'element-plus'
-import { ArrowDown, UserFilled } from '@element-plus/icons-vue'
+import { ArrowDown, Fold, Expand } from '@element-plus/icons-vue'
 import MenuTreeNode from './MenuTreeNode.vue'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+
+// 侧边栏折叠：窄屏自动收起，支持手动切换
+const collapsed = ref(false)
+const autoCollapsed = ref(false)
+function applyViewport() {
+  const narrow = window.innerWidth < 992
+  if (narrow && !autoCollapsed.value) {
+    autoCollapsed.value = true
+    collapsed.value = true
+  } else if (!narrow && autoCollapsed.value) {
+    autoCollapsed.value = false
+    collapsed.value = false
+  }
+}
+onMounted(() => {
+  applyViewport()
+  window.addEventListener('resize', applyViewport)
+})
+onBeforeUnmount(() => window.removeEventListener('resize', applyViewport))
+// 手动展开后取消自动收起约束
+watch(collapsed, v => {
+  if (!v && window.innerWidth >= 992) autoCollapsed.value = false
+})
+
 const activeMenu = computed(() => {
   if (route.path.startsWith('/system/role')) return '/system/role'
   if (route.path.startsWith('/system/menu')) return '/system/menu'
@@ -146,6 +176,8 @@ async function handleCmd(cmd: string) {
   color: #e4e7ed;
   display: flex;
   flex-direction: column;
+  transition: width .25s ease;
+  overflow: hidden;
 }
 .brand {
   padding: 20px 16px;
@@ -153,7 +185,10 @@ async function handleCmd(cmd: string) {
   align-items: center;
   gap: 12px;
   border-bottom: 1px solid rgba(255,255,255,0.08);
+  min-height: 61px;
+  box-sizing: border-box;
 }
+.brand-text { white-space: nowrap; overflow: hidden; }
 .logo-icon {
   width: 40px; height: 40px; border-radius: 10px;
   background: linear-gradient(135deg, #67c23a, #409eff);
@@ -162,11 +197,13 @@ async function handleCmd(cmd: string) {
 }
 .brand-name { font-size: 15px; font-weight: 600; color: #fff; }
 .brand-slogan { font-size: 11px; color: #909399; margin-top: 2px; }
-.menu { flex: 1; border: none; padding-top: 12px; }
+.menu { flex: 1; border: none; padding-top: 12px; width: 100%; }
+:deep(.el-menu--collapse) { width: 64px; }
 :deep(.el-menu-item) {
   height: 48px; line-height: 48px;
   margin: 4px 8px; border-radius: 8px;
 }
+:deep(.el-menu--collapse .el-menu-item) { margin: 4px auto; justify-content: center; }
 :deep(.el-menu-item:hover) { background: rgba(255,255,255,0.08); }
 :deep(.el-menu-item.is-active) { background: rgba(103,194,58,0.15); }
 .header {
@@ -178,6 +215,12 @@ async function handleCmd(cmd: string) {
   padding: 0 24px;
   height: 60px;
 }
+.collapse-btn {
+  font-size: 20px;
+  color: #606266;
+  cursor: pointer;
+}
+.collapse-btn:hover { color: var(--cj-primary, #67c23a); }
 .user-info {
   display: flex;
   align-items: center;
@@ -188,4 +231,11 @@ async function handleCmd(cmd: string) {
 .main-content { padding: 20px; background: #f5f7fa; }
 .fade-enter-active, .fade-leave-active { transition: opacity .2s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+@media (max-width: 768px) {
+  .header { padding: 0 14px; }
+  .main-content { padding: 12px; }
+  .username { display: none; }
+  .brand { padding: 20px 0; justify-content: center; }
+}
 </style>

@@ -20,6 +20,7 @@ spring:
           max-idle: 8
           min-idle: 4
   flyway:
+    # 数据库初始化已合并为单个脚本 db/migration/V1__init.sql
     enabled: true
     baseline-on-migrate: true
     validate-on-migrate: false

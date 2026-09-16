@@ -20,6 +20,7 @@ spring:
   cache:
     type: caffeine
   flyway:
+    # 数据库初始化已合并为单个脚本 db/migration/V1__init.sql，Flyway 按版本一次性执行
     enabled: true
     baseline-on-migrate: true
     validate-on-migrate: false
@@ -32,6 +33,18 @@ cangjie:
   security:
     # 模型 API Key 加密密钥（AES），生产环境务必通过环境变量修改
     model-key-secret: ${CANGJIE_MODEL_KEY_SECRET:cangjie-model-key-change-me-pls}
+  auth:
+    oidc:
+      # 企业 OIDC 单点登录验签（默认关闭，仅应用 API Key 鉴权）。开启后企业用户浏览器直连可携带 IdP 签发的 JWT。
+      enabled: false
+      # 令牌签发方 iss（示例：https://idp.example.com）
+      issuer:
+      # JWKS 公钥地址（用于验签）
+      jwks-uri:
+      # 校验 aud（可选，留空跳过 aud 校验）
+      audience:
+      # 企业用户默认映射到的已发布应用 ID
+      app-id:
   ratelimit:
     # 对话接口限流开关（按应用维度）
     enabled: true
@@ -134,7 +147,7 @@ mybatis-plus:
       logic-delete-field: deleted
       logic-delete-value: 1
       logic-not-delete-value: 0
-  mapper-locations: classpath:mapper/**/*.xml,mapper/*.xml
+  mapper-locations: classpath*:mapper/**/*.xml,classpath*:mapper/*.xml
   type-aliases-package: cn.cangjiecloud.**.entity
   type-handlers-package: cn.cangjiecloud.common.mp.typehandler
 

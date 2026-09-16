@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.cangjiecloud.knowledge.mapper.KnowledgeVectorMapper">
+
+    <!-- 单条向量回写 -->
+    <update id="updateEmbedding">
+        UPDATE knowledge_paragraph
+        SET embedding = #{vector}::vector,
+            vector_status = 'embedded'
+        WHERE id = #{id}
+    </update>
+
+    <!-- 批量向量回写：UPDATE ... FROM (VALUES ...) 单语句整批，一次网络往返 -->
+    <update id="updateEmbeddingBatch">
+        UPDATE knowledge_paragraph AS t
+        SET embedding = v.vec::vector,
+            vector_status = 'embedded'
+        FROM (VALUES
+            <foreach collection="items" item="it" separator=",">
+                (#{it.id}, #{it.vector}::vector)
+            </foreach>
+        ) AS v(id, vec)
+        WHERE t.id = v.id
+    </update>
+
+    <!-- 向量相似度检索（余弦距离） -->
+    <select id="searchByVector" resultType="java.util.Map">
+        SELECT id, document_id, knowledge_base_id, content, title,
+               1 - (embedding &lt;=&gt; #{vector}::vector) AS similarity
+        FROM knowledge_paragraph
+        WHERE deleted = 0
+          AND knowledge_base_id = #{kbId}
+          AND vector_status = 'embedded'
+        ORDER BY embedding &lt;=&gt; #{vector}::vector
+        LIMIT #{topK}
+    </select>
+
+    <!-- 全文检索（pgroonga） -->
+    <select id="searchByFullText" resultType="java.util.Map">
+        SELECT id, document_id, knowledge_base_id, content, title,
+               pgroonga_score(tableoid, ctid) AS rank
+        FROM knowledge_paragraph
+        WHERE deleted = 0
+          AND knowledge_base_id = #{kbId}
+          AND content &amp;@~ #{query}
+        ORDER BY rank DESC
+        LIMIT #{topK}
+    </select>
+
+    <!-- 清空知识库下所有向量 -->
+    <update id="clearEmbeddingByKb">
+        UPDATE knowledge_paragraph
+        SET embedding = NULL,
+            vector_status = 'pending'
+        WHERE knowledge_base_id = #{kbId}
+    </update>
+
+    <!-- 清空指定文档所有向量 -->
+    <update id="clearEmbeddingByDocument">
+        UPDATE knowledge_paragraph
+        SET embedding = NULL,
+            vector_status = 'pending'
+        WHERE document_id = #{documentId}
+    </update>
+
+    <!-- 写入文档级摘要与摘要向量 -->
+    <update id="updateDocumentSummary">
+        UPDATE knowledge_document
+        SET summary = #{summary},
+            summary_embedding = #{vector}::vector
+        WHERE id = #{id}
+    </update>
+
+    <!-- two-stage 第一阶段：按摘要向量筛选候选文档 ID -->
+    <select id="searchSummaryDocIds" resultType="java.lang.String">
+        SELECT id
+        FROM knowledge_document
+        WHERE deleted = 0
+          AND knowledge_base_id = #{kbId}
+          AND summary_embedding IS NOT NULL
+        ORDER BY summary_embedding &lt;=&gt; #{vector}::vector
+        LIMIT #{topK}
+    </select>
+
+    <!-- two-stage 第二阶段：限定文档集合内的段落向量检索 -->
+    <select id="searchByDocumentIds" resultType="java.util.Map">
+        SELECT id, document_id, knowledge_base_id, content, title,
+               1 - (embedding &lt;=&gt; #{vector}::vector) AS similarity
+        FROM knowledge_paragraph
+        WHERE deleted = 0
+          AND vector_status = 'embedded'
+          AND document_id IN
+        <foreach collection="docIds" item="d" open="(" separator="," close=")">
+            #{d}
+        </foreach>
+        ORDER BY embedding &lt;=&gt; #{vector}::vector
+        LIMIT #{topK}
+    </select>
+
+    <!-- 按段落 ID 集合取回段落（问题路召回） -->
+    <select id="selectByParagraphIds" resultType="java.util.Map">
+        SELECT id, document_id, knowledge_base_id, content, title
+        FROM knowledge_paragraph
+        WHERE deleted = 0
+          AND id IN
+        <foreach collection="ids" item="d" open="(" separator="," close=")">
+            #{d}
+        </foreach>
+        LIMIT #{limit}
+    </select>
+
+</mapper>

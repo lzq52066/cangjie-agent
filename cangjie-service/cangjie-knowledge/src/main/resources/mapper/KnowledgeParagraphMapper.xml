@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.cangjiecloud.knowledge.mapper.KnowledgeParagraphMapper">
+
+    <!-- 向量相似度检索（pgvector cosine 距离），参数为 pgvector 的字符串表示 -->
+    <select id="vectorSearch" resultType="java.util.Map">
+        SELECT p.*,
+               1 - (p.embedding &lt;=&gt; CAST(#{queryVector} AS vector)) AS similarity
+        FROM knowledge_paragraph p
+        WHERE p.deleted = 0
+          AND p.knowledge_base_id = #{knowledgeBaseId}
+          AND p.vector_status = 'embedded'
+        ORDER BY p.embedding &lt;=&gt; CAST(#{queryVector} AS vector)
+        LIMIT #{topK}
+    </select>
+
+    <!-- 全文检索（pgroonga） -->
+    <select id="fullTextSearch" resultType="java.util.Map">
+        SELECT p.*,
+               pgroonga_score(p.tableoid, p.ctid) AS rank
+        FROM knowledge_paragraph p
+        WHERE p.deleted = 0
+          AND p.knowledge_base_id = #{knowledgeBaseId}
+          AND p.content &amp;@~ #{query}
+        ORDER BY rank DESC
+        LIMIT #{topK}
+    </select>
+
+</mapper>
