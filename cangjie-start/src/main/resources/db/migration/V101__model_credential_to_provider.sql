@@ -1,5 +1,5 @@
 -- ----------------------------
--- CangJie Agent V3: 模型与厂商彻底分离
+-- CangJie Agent V101: 模型与厂商彻底分离
 -- API Key / Base URL 只由厂商（model_provider）持有，
 -- model_config 不再存储任何凭证，只通过 provider_id 关联厂商。
 -- 本脚本把存量模型上的凭证归并到对应厂商，再删除模型上的凭证列。

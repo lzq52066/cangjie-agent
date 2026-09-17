@@ -1,17 +1,22 @@
 package cn.cangjiecloud.api.controller;
 
+import cn.cangjiecloud.application.api.dto.ApprovalDecisionDTO;
+import cn.cangjiecloud.application.api.dto.ApprovalResumeDTO;
 import cn.cangjiecloud.application.api.dto.ChatRequestDTO;
 import cn.cangjiecloud.application.api.dto.ChatResponseDTO;
 import cn.cangjiecloud.application.entity.ApplicationEntity;
 import cn.cangjiecloud.application.service.IApplicationService;
 import cn.cangjiecloud.chat.entity.ChatMessageEntity;
 import cn.cangjiecloud.chat.entity.ChatSessionEntity;
+import cn.cangjiecloud.chat.service.ApprovalResumeService;
 import cn.cangjiecloud.chat.service.IChatMessageService;
 import cn.cangjiecloud.chat.service.IChatService;
 import cn.cangjiecloud.chat.service.IChatSessionService;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.exception.ApiException;
+import cn.cangjiecloud.core.harness.ApprovalRequest;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -48,6 +53,7 @@ public class OpenWebChatController {
     private final IChatService chatService;
     private final IChatSessionService chatSessionService;
     private final IChatMessageService chatMessageService;
+    private final ApprovalResumeService approvalResumeService;
     private final Executor chatExecutor;
 
     /** 是否允许网页匿名聊天（与拦截器开关保持一致） */
@@ -121,6 +127,32 @@ public class OpenWebChatController {
         String userId = StringUtils.hasText(request.getUserId()) ? request.getUserId() : null;
         chatExecutor.execute(() -> chatService.chatStream(request, emitter, false, userId));
         return emitter;
+    }
+
+    /**
+     * 网页聊天：会话下待审批单（无则返回 null）
+     * <p>
+     * resumeToken 只随挂起那一次 approval_required 事件下发，刷新页面就取不到了；
+     * 聊天页加载会话时靠本接口把未过期的审批单捞回来重建卡片。
+     */
+    @GetMapping("/chat/approval/pending")
+    public R<ApprovalResumeDTO.PendingApproval> pendingApproval(@RequestParam String sessionId) {
+        ensureWebAnonymousEnabled();
+        return R.data(approvalResumeService.findPending(sessionId));
+    }
+
+    /**
+     * 网页聊天：审批决策并恢复运行
+     * <p>
+     * 免 Key 路径下没有凭证可校验，靠"恢复令牌 + 会话归属"双匹配作为授权，令牌单次生效。
+     */
+    @PostMapping("/chat/approval/{approvalId}/decide")
+    public R<ApprovalResumeDTO> decideApproval(@PathVariable String approvalId,
+                                               @Valid @RequestBody ApprovalDecisionDTO body) {
+        ensureWebAnonymousEnabled();
+        ApprovalRequest approval = approvalResumeService.requireDecidable(approvalId);
+        requirePublishedApplication(approval.getApplicationId());
+        return R.data(approvalResumeService.decide(approval, body));
     }
 
     private void ensureWebAnonymousEnabled() {

@@ -16,8 +16,7 @@ import org.springframework.util.StringUtils;
  * Harness 执行参数解析器：全局默认（{@code cangjie.harness.*}）与应用级覆盖
  * （{@code application.config} 的 {@code harness} 节点）合并。
  * <p>
- * 未配置时产出的参数与改造前完全等价：轮次取 {@code cangjie.harness.max-rounds}
- * （默认 5，与旧 {@code cangjie.chat.agent.max-rounds} 同值），总超时默认 300 秒，
+ * 应用未显式覆盖时取全局默认：轮次 5、总超时 300 秒、工具兜底超时 30 秒，
  * 温度取应用值否则 0.7。
  */
 @Slf4j
@@ -28,13 +27,6 @@ public class HarnessConfigResolver {
     private static final String CONFIG_NODE = "harness";
 
     private final HarnessProperties properties;
-
-    /**
-     * 灰度总开关
-     */
-    public boolean isEnabled() {
-        return properties.isEnabled();
-    }
 
     public boolean isSseToolEvents() {
         return properties.isSseToolEvents();
@@ -60,22 +52,12 @@ public class HarnessConfigResolver {
     }
 
     /**
-     * 循环策略
+     * 循环策略（应用未覆盖的项取全局默认 {@code cangjie.harness.*}）
      */
     public LoopPolicy loopPolicy(HarnessConfig config) {
-        return loopPolicy(config, properties.getMaxRounds(), properties.getTimeoutSeconds());
-    }
-
-    /**
-     * 循环策略（未显式配置时回落到调用方给出的现网参数，保证灰度前后完全等价）
-     *
-     * @param fallbackMaxRounds    兜底最大轮次（对应 {@code cangjie.chat.agent.max-rounds}）
-     * @param fallbackTimeoutSecs  兜底总超时秒数（对应 {@code cangjie.chat.agent.timeout-seconds}）
-     */
-    public LoopPolicy loopPolicy(HarnessConfig config, int fallbackMaxRounds, long fallbackTimeoutSecs) {
         HarnessConfig.Loop loop = config == null ? null : config.getLoop();
-        int maxRounds = pick(loop == null ? null : loop.getMaxRounds(), fallbackMaxRounds);
-        long timeout = pick(loop == null ? null : loop.getTimeoutSeconds(), fallbackTimeoutSecs);
+        int maxRounds = pick(loop == null ? null : loop.getMaxRounds(), properties.getMaxRounds());
+        long timeout = pick(loop == null ? null : loop.getTimeoutSeconds(), properties.getTimeoutSeconds());
         long toolTimeout = pick(loop == null ? null : loop.getToolTimeoutSeconds(),
                 properties.getToolTimeoutSeconds());
         boolean parallel = loop != null && Boolean.TRUE.equals(loop.getParallelTools());
@@ -88,7 +70,7 @@ public class HarnessConfigResolver {
     }
 
     /**
-     * 采样参数（温度回落链：应用值 → 0.7，与改造前一致）
+     * 采样参数（温度回落链：应用值 → 0.7）
      */
     public ModelSettings modelSettings(ApplicationEntity application) {
         return ModelSettings.builder()
@@ -98,7 +80,7 @@ public class HarnessConfigResolver {
     }
 
     /**
-     * 上下文预算（默认关闭，关闭时行为与改造前一致）
+     * 上下文预算（默认关闭，关闭时不裁剪上下文）
      */
     public ContextBudget budget(HarnessConfig config) {
         HarnessConfig.Context ctx = config == null ? null : config.getContext();

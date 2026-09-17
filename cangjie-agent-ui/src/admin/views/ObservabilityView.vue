@@ -547,6 +547,8 @@ function renderChart(key: string, data: ChartGroup) {
   chart.setOption({
     tooltip: {
       trigger: 'axis',
+      // 挂到 body 上，避免被 .chart-card 的 overflow: hidden 裁剪，浮于最上层
+      appendTo: 'body',
       formatter(params: any) {
         if (!params || params.length === 0) return ''
         // tooltip 中显示完整日期时间

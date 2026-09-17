@@ -1,5 +1,7 @@
 package cn.cangjiecloud.chat.controller;
 
+import cn.cangjiecloud.application.api.dto.ApprovalDecisionDTO;
+import cn.cangjiecloud.application.api.dto.ApprovalResumeDTO;
 import cn.cangjiecloud.application.api.dto.ChatConfigDTO;
 import cn.cangjiecloud.application.api.dto.ChatRequestDTO;
 import cn.cangjiecloud.application.api.dto.ChatResponseDTO;
@@ -7,6 +9,7 @@ import cn.cangjiecloud.application.entity.ApplicationEntity;
 import cn.cangjiecloud.application.service.IApplicationService;
 import cn.cangjiecloud.chat.entity.ChatMessageEntity;
 import cn.cangjiecloud.chat.entity.ChatSessionEntity;
+import cn.cangjiecloud.chat.service.ApprovalResumeService;
 import cn.cangjiecloud.chat.service.IChatMessageService;
 import cn.cangjiecloud.chat.service.IChatService;
 import cn.cangjiecloud.chat.service.IChatSessionService;
@@ -14,6 +17,7 @@ import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
 import cn.cangjiecloud.common.context.UserContext;
 import cn.cangjiecloud.common.exception.ApiException;
+import cn.cangjiecloud.core.harness.ApprovalRequest;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +42,7 @@ public class ChatController {
     private final IChatSessionService chatSessionService;
     private final IChatMessageService chatMessageService;
     private final IApplicationService applicationService;
+    private final ApprovalResumeService approvalResumeService;
     private final Executor chatExecutor;
 
     /** SSE 流式连接超时（秒） */
@@ -164,6 +169,21 @@ public class ChatController {
                                          HttpServletRequest httpRequest) {
         validateMessageAccess(messageId, httpRequest);
         return R.data(chatMessageService.annotate(messageId, body.get("annotation")));
+    }
+
+    /**
+     * 审批决策：落库人工结论并恢复被挂起的运行，同步返回恢复后的产出。
+     * <p>
+     * resumeToken 由 approval_required 事件下发、需原样回传；决策写入与令牌消费都是单次生效，
+     * 重复提交只有一次能恢复。若恢复过程中后续工具再次命中审批，返回值里会带上下一个新审批单。
+     */
+    @PostMapping("/approval/{approvalId}/decide")
+    public R<ApprovalResumeDTO> decideApproval(@PathVariable String approvalId,
+                                               @Valid @RequestBody ApprovalDecisionDTO body,
+                                               HttpServletRequest httpRequest) {
+        ApprovalRequest approval = approvalResumeService.requireDecidable(approvalId);
+        validateApikey(httpRequest, approval.getApplicationId());
+        return R.data(approvalResumeService.decide(approval, body));
     }
 
     /**

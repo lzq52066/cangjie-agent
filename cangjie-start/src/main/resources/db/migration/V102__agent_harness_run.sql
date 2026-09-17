@@ -1,5 +1,5 @@
 -- ----------------------------
--- CangJie Agent V4: Agent Harness 运行留痕
+-- CangJie Agent V102: Agent Harness 运行留痕
 -- agent_run 记录一次 Agent 执行的汇总状态（含断点续跑所需的检查点），
 -- agent_run_step 记录逐步明细（llm / tool / context / hook / error）。
 -- 注意：step 只存"增量"而非全量 prompt，避免多轮上下文写放大。

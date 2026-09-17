@@ -67,11 +67,6 @@ cangjie:
   chat:
     # SSE 流式连接超时（秒）
     sse-timeout-seconds: 600
-    agent:
-      # Function Calling 最大轮次
-      max-rounds: 5
-      # Agent 循环总超时（秒），超过后终止对话并返回超时提示
-      timeout-seconds: 300
     history:
       # 历史消息 token 预算（超出从最旧消息截断，0 表示不限制）
       max-tokens: 6000
@@ -82,6 +77,34 @@ cangjie:
       summary-every: 10
       # 摘要专用模型（可选，为空用应用绑定模型）
       summary-model-id:
+  # Agent Harness 运行时（对话的唯一执行路径）全局默认参数；
+  # 应用可在 application.config 的 harness 节点按项覆盖
+  harness:
+    # Function Calling 最大轮次
+    max-rounds: 5
+    # 单次 run 总超时（秒），超过后终止对话并返回超时提示
+    timeout-seconds: 300
+    # 单次工具调用兜底超时（秒）
+    tool-timeout-seconds: 30
+    # 工具输出回填模型的最大字符数
+    max-tool-output-chars: 8000
+    # 是否启用人工审批拦截（高危工具执行前挂起 run，等待审批接口恢复）
+    approval-enabled: false
+    # 审批单默认有效期（秒）
+    approval-timeout-seconds: 1800
+    # 超时审批单的默认决策留痕（reject/approve），仅写入审批单备注，不会替用户放行工具
+    approval-timeout-default-decision: reject
+    # 审批过期扫描任务开关：逾期 pending 单置 expired，挂起的 run 置 failed
+    approval-expiry-scan-enabled: true
+    # 审批过期扫描间隔（毫秒）
+    approval-expiry-scan-interval-ms: 60000
+    # 是否向前端推送 tool_start / tool_finish 事件（OpenAI 兼容客户端不应收到非标准帧，保持关闭）
+    sse-tool-events: false
+    context:
+      # 上下文预算裁剪开关（默认关闭，关闭时不裁剪上下文）
+      budget-enabled: false
+      # 上下文 token 预算（budget-enabled=true 时生效，0 表示不限制）
+      budget-tokens: 0
   memory:
     inject:
       # 记忆注入最大条数（按强度评分取 TopN）

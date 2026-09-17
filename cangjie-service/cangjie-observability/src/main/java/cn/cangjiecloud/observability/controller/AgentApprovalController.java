@@ -13,7 +13,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Agent 审批单查询接口（决策与恢复执行由对话侧提供）
+ * Agent 审批单查询接口（管理侧只读）。
+ * <p>
+ * 决策与恢复执行在对话侧：{@code POST /api/chat/approval/{approvalId}/decide}，
+ * 由对话侧持有引擎与检查点，观测模块只负责存单与幂等改单。
  */
 @RestController
 @RequiredArgsConstructor

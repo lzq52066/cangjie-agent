@@ -44,6 +44,9 @@ public class ContextRequest {
     /** RAG 模式：generic / agentic / disabled */
     private String ragMode;
 
+    /** 链路 ID（检索等贡献者留痕用） */
+    private String traceId;
+
     private ModelSettings modelSettings;
 
     private HarnessConfig config;

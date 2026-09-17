@@ -124,6 +124,8 @@ public class SseHarnessListener implements HarnessListener {
         payload.put("reason", request.getReason());
         payload.put("riskLevel", request.getRiskLevel());
         payload.put("expireAt", request.getExpireAt());
+        // 决策接口需要一次性恢复令牌，不下发前端就无法恢复运行
+        payload.put("resumeToken", request.getResumeToken());
         send("approval_required", payload, "SSE approval_required 推送失败");
     }
 
@@ -139,7 +141,7 @@ public class SseHarnessListener implements HarnessListener {
     }
 
     /**
-     * 推送错误事件（与改造前 {@code pushStreamError} 完全一致）
+     * 推送错误事件（OpenAI 格式走 message 帧，内部格式走 error 帧）
      */
     public void pushError(String error) {
         try {

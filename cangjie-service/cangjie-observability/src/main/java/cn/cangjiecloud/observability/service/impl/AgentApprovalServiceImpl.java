@@ -36,8 +36,8 @@ public class AgentApprovalServiceImpl extends ServiceImpl<AgentApprovalMapper, A
     private static final String STATUS_REJECTED = "rejected";
     private static final String STATUS_EXPIRED = "expired";
 
-    /** 审批默认有效期（秒），应用未配置时使用 */
-    @Value("${cangjie.harness.approval.timeout-seconds:1800}")
+    /** 审批默认有效期（秒），仅当引擎未写入过期时间时兜底，与 cangjie.harness.approval-timeout-seconds 同键 */
+    @Value("${cangjie.harness.approval-timeout-seconds:1800}")
     private int defaultTimeoutSeconds;
 
     @Override
@@ -110,7 +110,7 @@ public class AgentApprovalServiceImpl extends ServiceImpl<AgentApprovalMapper, A
                     .eq(AgentApprovalEntity::getStatus, STATUS_PENDING)
                     .set(AgentApprovalEntity::getStatus, STATUS_EXPIRED)
                     .set(AgentApprovalEntity::getDecideTime, LocalDateTime.now())
-                    .set(AgentApprovalEntity::getDecideRemark, "审批超时，按默认决策 " + target + " 处理"));
+                    .set(AgentApprovalEntity::getDecideRemark, "审批超时未决策，运行已终止（默认决策留痕：" + target + "）"));
             if (flipped) {
                 runIds.add(entity.getRunId());
             }
@@ -123,6 +123,23 @@ public class AgentApprovalServiceImpl extends ServiceImpl<AgentApprovalMapper, A
         AgentApprovalEntity entity = getOne(new LambdaQueryWrapper<AgentApprovalEntity>()
                 .eq(AgentApprovalEntity::getRunId, runId)
                 .eq(AgentApprovalEntity::getStatus, STATUS_PENDING)
+                .orderByDesc(AgentApprovalEntity::getCreateTime)
+                .last("LIMIT 1"));
+        return toRequest(entity);
+    }
+
+    @Override
+    public ApprovalRequest findPendingBySession(String sessionId) {
+        if (!StringUtils.hasText(sessionId)) {
+            return null;
+        }
+        // 扫描任务按周期置 expired，两次扫描之间存在"已超时但仍 pending"的窗口，
+        // 查询时直接按 expire_time 排除，避免前端恢复出一个必然失败的卡片
+        AgentApprovalEntity entity = getOne(new LambdaQueryWrapper<AgentApprovalEntity>()
+                .eq(AgentApprovalEntity::getSessionId, sessionId)
+                .eq(AgentApprovalEntity::getStatus, STATUS_PENDING)
+                .and(w -> w.isNull(AgentApprovalEntity::getExpireTime)
+                        .or().gt(AgentApprovalEntity::getExpireTime, LocalDateTime.now()))
                 .orderByDesc(AgentApprovalEntity::getCreateTime)
                 .last("LIMIT 1"));
         return toRequest(entity);

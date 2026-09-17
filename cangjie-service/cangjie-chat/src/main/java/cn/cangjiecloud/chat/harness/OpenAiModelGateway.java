@@ -29,7 +29,7 @@ import java.util.stream.Stream;
  * <p>
  * 把"同步 {@code client.chat}"与"流式 {@code client.streamChat}"两种调用归一为一轮
  * {@link AssistantTurn}，因此 Agent 循环只有一份实现。
- * 请求参数组装严格对齐改造前的 {@code callModel/callModelStream}：不下发 model（由客户端自身的模型配置决定）、
+ * 请求参数组装约定：不下发 model（由客户端自身的模型配置决定）、
  * 无工具时 toolChoice 为 none、温度回落 0.7。
  */
 @Slf4j

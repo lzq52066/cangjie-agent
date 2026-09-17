@@ -10,20 +10,18 @@ import cn.cangjiecloud.core.harness.impl.DefaultAgentHarness;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Agent Harness 装配。
+ * Agent Harness 装配：引擎是对话的唯一执行路径。
  * <p>
- * 引擎本身是纯对象，依赖的四个 SPI 全部由 Spring 管理：模型网关与工具网关来自本模块，
+ * 引擎本身是纯对象，依赖的四个 SPI 全部由 Spring 管理：模型网关与工具网关来自本模块
+ * （模型与工具分别经 {@link ModelGateway} / {@link ToolGateway}），
  * 留痕与审批存储复用 observability 已有的 service（它们已实现对应接口）。
- * {@code cangjie.harness.enabled=false} 时不装配引擎，对话完全走既有实现，可随时回滚。
  */
 @Slf4j
 @Configuration
-@ConditionalOnProperty(prefix = "cangjie.harness", name = "enabled", havingValue = "true")
 public class HarnessAutoConfiguration {
 
     @Bean

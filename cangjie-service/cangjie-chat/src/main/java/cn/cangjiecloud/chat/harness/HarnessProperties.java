@@ -18,9 +18,6 @@ import java.util.Map;
 @ConfigurationProperties(prefix = "cangjie.harness")
 public class HarnessProperties {
 
-    /** 灰度总开关：false 时对话仍走既有实现 */
-    private boolean enabled = false;
-
     /** Function Calling 最大轮次 */
     private int maxRounds = 5;
 
@@ -39,7 +36,7 @@ public class HarnessProperties {
     /** 审批单默认有效期（秒） */
     private int approvalTimeoutSeconds = 1800;
 
-    /** 是否向前端推送 tool_start / tool_finish 事件（关闭时 SSE 输出与改造前一致） */
+    /** 是否向前端推送 tool_start / tool_finish 事件（OpenAI 兼容客户端不应收到非标准帧，默认关闭） */
     private boolean sseToolEvents = false;
 
     /** 上下文预算默认值 */

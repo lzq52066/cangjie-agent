@@ -330,8 +330,11 @@ docker compose up -d
 | `cangjie.model.breaker.*` | 开 / 5 次 / 30s | 模型熔断阈值与冷却时间 |
 | `cangjie.model.fallback-model-id` | — | 熔断时指定的降级模型 |
 | `cangjie.chat.sse-timeout-seconds` | 600 | SSE 连接超时 |
-| `cangjie.chat.agent.max-rounds` | 5 | Function Calling 最大轮次 |
-| `cangjie.chat.agent.timeout-seconds` | 300 | Agent 循环总超时 |
+| `cangjie.harness.*` | 5 / 300s / 30s | Agent 循环：最大轮次 / 总超时 / 单工具兜底超时 |
+| `cangjie.harness.max-tool-output-chars` | 8000 | 工具输出回填模型的最大字符数 |
+| `cangjie.harness.approval-*` | 关 / 1800s | 高危工具人工审批拦截与审批单有效期 |
+| `cangjie.harness.sse-tool-events` | false | 是否向前端推送 `tool_start` / `tool_finish` |
+| `cangjie.harness.context.budget-*` | 关 | 上下文 token 预算裁剪 |
 | `cangjie.chat.history.max-tokens` | 6000 | 短期记忆 token 预算 |
 | `cangjie.chat.session.summary-every` | 10 | 会话滚动摘要触发间隔（条） |
 | `cangjie.memory.inject.max-count` | 20 | 记忆注入条数上限（按评分取 TopN） |

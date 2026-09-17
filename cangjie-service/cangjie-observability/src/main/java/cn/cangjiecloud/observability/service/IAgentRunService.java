@@ -34,4 +34,12 @@ public interface IAgentRunService extends IService<AgentRunEntity>, AgentRunReco
      * 按会话查询 run 列表（时间升序，用于会话级回放）
      */
     List<AgentRunEntity> listBySession(String sessionId);
+
+    /**
+     * 放弃等待审批的 run：仅当状态为 waiting_approval 时置为 failed 并清除检查点，
+     * 供审批过期扫描任务调用。轮次/token 等统计在挂起检查点时已落库，此处不覆盖。
+     *
+     * @return 是否成功迁移（false 表示 run 已被决策恢复或不存在）
+     */
+    boolean abandonWaitingRun(String runId, String finishReason, String errorMessage);
 }

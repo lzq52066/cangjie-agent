@@ -30,6 +30,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -200,6 +201,30 @@ public class AgentRunServiceImpl extends ServiceImpl<AgentRunMapper, AgentRunEnt
         } catch (Exception ex) {
             log.warn("agent_run 结束态写入失败: {}", ex.getMessage());
         }
+    }
+
+    @Override
+    public boolean abandonWaitingRun(String runId, String finishReason, String errorMessage) {
+        if (!StringUtils.hasText(runId)) {
+            return false;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        LambdaUpdateWrapper<AgentRunEntity> wrapper = new LambdaUpdateWrapper<AgentRunEntity>()
+                .eq(AgentRunEntity::getId, runId)
+                .eq(AgentRunEntity::getStatus, RunStatus.WAITING_APPROVAL.value())
+                .set(AgentRunEntity::getStatus, RunStatus.FAILED.value())
+                .set(AgentRunEntity::getFinishReason, finishReason)
+                .set(AgentRunEntity::getErrorMessage, errorMessage)
+                .set(AgentRunEntity::getEndTime, now)
+                // 清掉检查点与令牌，run 不再可恢复
+                .set(AgentRunEntity::getContextSnapshot, null)
+                .set(AgentRunEntity::getResumeToken, null);
+        // 挂起时的统计已随检查点落库，这里只补耗时（从原始启动时刻起算）
+        AgentRunEntity run = getById(runId);
+        if (run != null && run.getStartTime() != null) {
+            wrapper.set(AgentRunEntity::getDuration, Duration.between(run.getStartTime(), now).toMillis());
+        }
+        return update(wrapper);
     }
 
     @Override

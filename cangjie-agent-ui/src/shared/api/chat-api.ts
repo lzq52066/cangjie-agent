@@ -7,6 +7,56 @@ import { request } from '@shared/api/http'
 const CHAT_BASE = '/api/chat'
 const OPEN_BASE = '/api/open'
 
+/**
+ * 审批决策请求体。
+ * resumeToken 由 approval_required 事件下发，单次生效，必须原样回传。
+ */
+export interface ApprovalDecision {
+  approved: boolean
+  resumeToken: string
+  sessionId?: string
+  remark?: string
+  decidedBy?: string
+}
+
+/** 待审批项（SSE approval_required 帧与恢复结果 pendingApproval 字段共用） */
+export interface PendingApproval {
+  approvalId: string
+  runId: string
+  toolName?: string
+  /** SSE 帧里工具名字段是 tool，恢复结果里是 toolName，两者都兼容 */
+  tool?: string
+  toolType?: string
+  arguments?: string
+  reason?: string
+  riskLevel?: string
+  expireAt: number
+  resumeToken: string
+}
+
+/** 审批决策后恢复执行的产出 */
+export interface ApprovalResumeResult {
+  runId: string
+  sessionId?: string
+  /** completed / waiting_approval / failed / cancelled */
+  status: string
+  message?: string
+  errorMessage?: string
+  finishReason?: string
+  rounds?: number
+  toolCallCount?: number
+  tokens?: number
+  promptTokens?: number
+  completionTokens?: number
+  duration?: number
+  pendingApproval?: PendingApproval
+}
+
+/**
+ * 恢复执行以同步方式跑完剩余轮次（多次模型调用 + 工具执行），远超默认 60s 超时
+ */
+const RESUME_TIMEOUT = 300000
+
 function withKey(apikey: string) {
   return { 'X-API-Key': apikey }
 }
@@ -85,6 +135,36 @@ export const chatApi = {
       method: 'DELETE',
       url: `/sessions/${sessionId}`,
       headers: withKey(apikey)
+    })
+  },
+  /** 审批决策并恢复运行（API Key 模式） */
+  decideApproval(apikey: string, approvalId: string, data: ApprovalDecision) {
+    return request<ApprovalResumeResult>({
+      baseURL: CHAT_BASE,
+      method: 'POST',
+      url: `/approval/${approvalId}/decide`,
+      headers: withKey(apikey),
+      timeout: RESUME_TIMEOUT,
+      data
+    })
+  },
+  /** 网页匿名聊天：会话下待审批单（无则 null） */
+  webPendingApproval(sessionId: string) {
+    return request<PendingApproval | null>({
+      baseURL: OPEN_BASE,
+      method: 'GET',
+      url: '/chat/approval/pending',
+      params: { sessionId }
+    })
+  },
+  /** 网页匿名聊天：审批决策并恢复运行 */
+  webDecideApproval(approvalId: string, data: ApprovalDecision) {
+    return request<ApprovalResumeResult>({
+      baseURL: OPEN_BASE,
+      method: 'POST',
+      url: `/chat/approval/${approvalId}/decide`,
+      timeout: RESUME_TIMEOUT,
+      data
     })
   },
   deleteSession(apikey: string, sessionId: string) {

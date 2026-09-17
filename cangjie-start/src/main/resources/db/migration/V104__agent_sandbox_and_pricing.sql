@@ -1,5 +1,5 @@
 -- ----------------------------
--- CangJie Agent V6: 沙箱执行档位与模型计价
+-- CangJie Agent V104: 沙箱执行档位与模型计价
 -- sandbox_profile 定义代码/脚本节点的隔离执行档位；
 -- sandbox_binding 把工具/技能/应用绑定到档位；
 -- model_pricing 用于把 token 折算成成本，支撑预算治理。

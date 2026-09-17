@@ -128,6 +128,33 @@ public class EmbedController {
               #send { background: {THEME}; border: 0; color: #fff; border-radius: 10px;
                       padding: 0 20px; font-size: 14px; cursor: pointer; }
               #send:disabled { opacity: .5; cursor: not-allowed; }
+              .apv { align-self: flex-start; width: 92%; max-width: 420px; background: #fff;
+                     border: 1px solid #f0d9a8; border-left: 3px solid #f59e0b; border-radius: 10px;
+                     padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+              .apv.dead { opacity: .65; border-left-color: #b8c1d1; }
+              .apv-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+              .apv-risk { padding: 1px 8px; border-radius: 10px; font-size: 12px; white-space: nowrap; }
+              .apv-risk.r-high { background: #fdecec; color: #c0392b; }
+              .apv-risk.r-mid { background: #fff4e0; color: #b9770e; }
+              .apv-risk.r-low { background: #eaf3ff; color: #2f6fd6; }
+              .apv-title { font-weight: 600; color: #333; }
+              .apv-count { margin-left: auto; color: #b9770e; font-size: 12px; white-space: nowrap; }
+              .apv-desc { margin-top: 8px; font-size: 13px; color: #445; }
+              .apv-tool { font-family: ui-monospace, Consolas, monospace; background: #f3f5fa;
+                          border-radius: 4px; padding: 1px 5px; }
+              .apv-reason { margin-top: 6px; font-size: 13px; color: #667; }
+              .apv-args { margin-top: 8px; border: 1px solid #eef1f7; border-radius: 8px; overflow: hidden; }
+              .apv-args b { display: block; font-size: 12px; font-weight: 500; color: #889;
+                            background: #f7f9fc; padding: 4px 8px; }
+              .apv-args pre { font-size: 12px; padding: 8px; overflow: auto; max-height: 140px;
+                              background: #fbfcfe; white-space: pre-wrap; word-break: break-word;
+                              font-family: ui-monospace, Consolas, monospace; }
+              .apv-actions { margin-top: 10px; display: flex; gap: 8px; justify-content: flex-end; }
+              .apv-btn { border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer;
+                         border: 1px solid transparent; }
+              .apv-btn.deny { background: #fff; border-color: #e3b7b7; color: #c0392b; }
+              .apv-btn.allow { background: #f59e0b; color: #fff; }
+              .apv-btn:disabled { opacity: .5; cursor: not-allowed; }
             </style>
             </head>
             <body>
@@ -156,6 +183,166 @@ public class EmbedController {
                 msgs.appendChild(div);
                 msgs.scrollTop = msgs.scrollHeight;
                 return div;
+              }
+
+              /* ===== 工具审批（人工在环）===== */
+              // 引擎遇到高风险工具时写检查点挂起 run 并推 approval_required 帧，
+              // 卡片把决策送回后由后端同步跑完剩余轮次。恢复令牌单次生效，丢了只能重开会话。
+              var activeApproval = null;
+              var approvalTimer = null;
+
+              function fmtLeft(ms) {
+                var s = Math.max(0, Math.floor(ms / 1000));
+                var m = Math.floor(s / 60);
+                return m + ':' + ('0' + (s % 60)).slice(-2);
+              }
+
+              function prettyArgs(raw) {
+                if (!raw) return '';
+                try { return JSON.stringify(JSON.parse(raw), null, 2); } catch (e) { return String(raw); }
+              }
+
+              function renderApprovalCard(a) {
+                var card = document.createElement('div');
+                card.className = 'apv';
+                var head = document.createElement('div');
+                head.className = 'apv-head';
+                var badge = document.createElement('span');
+                badge.className = 'apv-risk ' + (a.risk === 'high' ? 'r-high' : a.risk === 'medium' ? 'r-mid' : 'r-low');
+                badge.textContent = a.risk === 'high' ? '高风险' : a.risk === 'medium' ? '中风险' : '低风险';
+                var titleEl = document.createElement('span');
+                titleEl.className = 'apv-title';
+                titleEl.textContent = '需要你的确认';
+                var count = document.createElement('span');
+                count.className = 'apv-count';
+                count.textContent = a.expireAt ? '剩余 ' + fmtLeft(a.expireAt - Date.now()) : '';
+                head.appendChild(badge); head.appendChild(titleEl); head.appendChild(count);
+                card.appendChild(head);
+                var desc = document.createElement('div');
+                desc.className = 'apv-desc';
+                desc.textContent = '助手请求执行工具 ' + a.tool + (a.toolType ? '（' + a.toolType + '）' : '');
+                card.appendChild(desc);
+                if (a.reason) {
+                  var reason = document.createElement('div');
+                  reason.className = 'apv-reason';
+                  reason.textContent = a.reason;
+                  card.appendChild(reason);
+                }
+                if (a.arguments) {
+                  var args = document.createElement('div');
+                  args.className = 'apv-args';
+                  var argsLabel = document.createElement('b');
+                  argsLabel.textContent = '执行参数';
+                  var pre = document.createElement('pre');
+                  pre.textContent = prettyArgs(a.arguments);
+                  args.appendChild(argsLabel); args.appendChild(pre);
+                  card.appendChild(args);
+                }
+                var actions = document.createElement('div');
+                actions.className = 'apv-actions';
+                var deny = document.createElement('button');
+                deny.className = 'apv-btn deny';
+                deny.textContent = '拒绝';
+                deny.onclick = function () { decideApproval(a, false); };
+                var allow = document.createElement('button');
+                allow.className = 'apv-btn allow';
+                allow.textContent = '允许执行';
+                allow.onclick = function () { decideApproval(a, true); };
+                actions.appendChild(deny); actions.appendChild(allow);
+                card.appendChild(actions);
+                msgs.appendChild(card);
+                msgs.scrollTop = msgs.scrollHeight;
+                a.card = card; a.count = count; a.deny = deny; a.allow = allow;
+              }
+
+              // 收卡：禁用按钮并说明原因；只失效当前活动单，已处理成功的卡片由调用方标记
+              function retireApproval(a, note) {
+                if (!a || a.dead) return;
+                a.dead = true;
+                a.card.classList.add('dead');
+                a.deny.disabled = true;
+                a.allow.disabled = true;
+                if (note) a.count.textContent = note;
+                if (activeApproval === a) {
+                  activeApproval = null;
+                  if (approvalTimer) { clearInterval(approvalTimer); approvalTimer = null; }
+                }
+              }
+
+              function showApproval(raw) {
+                if (!raw || !raw.approvalId || !raw.resumeToken) return;
+                var a = {
+                  approvalId: raw.approvalId,
+                  tool: raw.toolName || raw.tool || '未知工具',
+                  toolType: raw.toolType || '',
+                  arguments: raw.arguments || '',
+                  reason: raw.reason || '',
+                  risk: (raw.riskLevel || 'low').toLowerCase(),
+                  expireAt: raw.expireAt || 0,
+                  resumeToken: raw.resumeToken,
+                  submitting: false, dead: false
+                };
+                // 新单到达先失效旧卡，避免误点已被消费的令牌
+                retireApproval(activeApproval, '已被新的审批请求替代');
+                activeApproval = a;
+                renderApprovalCard(a);
+                if (!approvalTimer) {
+                  approvalTimer = setInterval(function () {
+                    if (!activeApproval) return;
+                    if (!activeApproval.expireAt) return;
+                    var left = activeApproval.expireAt - Date.now();
+                    if (left <= 0) {
+                      retireApproval(activeApproval, '已超时');
+                      add('ai', '审批已超时，本次运行不再恢复，请重新发起对话').classList.add('err');
+                    } else {
+                      activeApproval.count.textContent = '剩余 ' + fmtLeft(left);
+                    }
+                  }, 1000);
+                }
+              }
+
+              async function decideApproval(a, approved) {
+                if (!a || a.dead || a.submitting || busy) return;
+                var remark = null;
+                if (!approved) {
+                  // 拒绝原因会作为 tool 消息回喂模型，写清楚它才能换路子继续
+                  var v = window.prompt('请填写拒绝原因（会回喂给模型，便于它改用其他方式完成任务）');
+                  if (v === null) return;
+                  if (!v.trim()) return;
+                  remark = v.trim();
+                }
+                a.submitting = true;
+                a.deny.disabled = true; a.allow.disabled = true;
+                a.allow.textContent = '处理中…';
+                busy = true; send.disabled = true;
+                try {
+                  var resp = await fetch('/api/open/chat/approval/' + encodeURIComponent(a.approvalId) + '/decide', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ approved: approved, resumeToken: a.resumeToken,
+                                           sessionId: sessionId, remark: remark })
+                  });
+                  var r = await resp.json();
+                  if (r.code !== 200) throw new Error(r.msg || ('HTTP ' + resp.status));
+                  var data = r.data || {};
+                  retireApproval(a, approved ? '✓ 已允许执行' : '✕ 已拒绝');
+                  var status = data.status || '';
+                  if (status === 'waiting_approval') {
+                    showApproval(data.pendingApproval);
+                  } else if (status === 'completed') {
+                    add('ai', data.message || '（本轮无文本产出）');
+                  } else {
+                    add('ai', '恢复执行未成功：' + (data.errorMessage || data.finishReason || status || '未知原因'))
+                      .classList.add('err');
+                  }
+                } catch (err) {
+                  // 令牌单次生效，失败即收卡，避免重复提交误点
+                  retireApproval(a, '处理失败');
+                  add('ai', '审批处理失败：' + err.message).classList.add('err');
+                } finally {
+                  a.submitting = false;
+                  busy = false; send.disabled = false; input.focus();
+                }
               }
 
               add('ai', '您好！我是' + document.title + '，请问有什么可以帮您？');
@@ -196,6 +383,11 @@ public class EmbedController {
                       try { payload = JSON.parse(dataLine.slice(5)); } catch (e) { continue; }
                       if (payload.sessionId) sessionId = payload.sessionId;
                       if (payload.error) { aiDiv.className = 'msg err'; aiDiv.textContent = payload.error; started = true; }
+                      if (payload.event === 'approval_required') {
+                        // 挂起时还没有输出文本则撤掉占位气泡，让审批卡片独立呈现
+                        if (!started) aiDiv.remove(); else started = true;
+                        showApproval(payload);
+                      }
                       if (payload.delta) { aiDiv.textContent = started ? aiDiv.textContent + payload.delta : payload.delta;
                                            started = true; msgs.scrollTop = msgs.scrollHeight; }
                     }

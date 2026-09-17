@@ -71,6 +71,7 @@ public class OpenApiAuthInterceptor implements HandlerInterceptor {
         return uri.equals("/api/open/chat")
                 || uri.startsWith("/api/open/chat/stream")
                 || uri.startsWith("/api/open/chat/config/")
+                || uri.startsWith("/api/open/chat/approval/")
                 || uri.startsWith("/api/open/chat/sessions")
                 || uri.startsWith("/api/open/embed");
     }

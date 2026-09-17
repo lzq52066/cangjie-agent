@@ -2,8 +2,6 @@ package cn.cangjiecloud.chat.service.impl;
 
 import cn.hutool.core.util.IdUtil;
 import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONArray;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import cn.cangjiecloud.application.api.dto.ChatRequestDTO;
 import cn.cangjiecloud.application.api.dto.ChatResponseDTO;
 import cn.cangjiecloud.application.entity.ApplicationEntity;
@@ -13,7 +11,6 @@ import cn.cangjiecloud.chat.entity.ChatSessionEntity;
 import cn.cangjiecloud.chat.harness.ChatHarnessContextFactory;
 import cn.cangjiecloud.chat.harness.HarnessConfigResolver;
 import cn.cangjiecloud.chat.harness.SseHarnessListener;
-import cn.cangjiecloud.chat.harness.ToolSpecAssembler;
 import cn.cangjiecloud.chat.service.IChatMessageService;
 import cn.cangjiecloud.core.harness.AgentHarness;
 import cn.cangjiecloud.core.harness.HarnessListener;
@@ -28,39 +25,18 @@ import cn.cangjiecloud.chat.service.IChatSessionService;
 import cn.cangjiecloud.chat.service.LongTermMemoryExtractService;
 import cn.cangjiecloud.common.context.UserContext;
 import cn.cangjiecloud.common.exception.ApiException;
-import cn.cangjiecloud.core.model.ChatChunk;
 import cn.cangjiecloud.core.model.ChatMessage;
-import cn.cangjiecloud.core.model.ChatRequest;
 import cn.cangjiecloud.core.model.ChatResponse;
+import cn.cangjiecloud.core.harness.context.ContextResult;
 import cn.cangjiecloud.core.observability.TraceCollector;
-import cn.cangjiecloud.core.rag.HybridRetriever;
-import cn.cangjiecloud.core.rag.QueryRewriterFactory;
-import cn.cangjiecloud.core.rag.RetrievalResult;
-import cn.cangjiecloud.core.tool.ToolSpecification;
-import cn.cangjiecloud.knowledge.rag.RetrievalToolService;
-import cn.cangjiecloud.model.provider.OpenAICompatibleClient;
 import cn.cangjiecloud.model.entity.ModelEntity;
 import cn.cangjiecloud.model.service.IModelService;
-import cn.cangjiecloud.prompt.entity.LongTermMemoryEntity;
-import cn.cangjiecloud.prompt.entity.PromptTemplateEntity;
-import cn.cangjiecloud.prompt.entity.RuleEntity;
-import cn.cangjiecloud.prompt.entity.SkillEntity;
-import cn.cangjiecloud.prompt.rule.RuleEvaluator;
-import cn.cangjiecloud.prompt.rule.RuleEvaluationResult;
-import cn.cangjiecloud.prompt.service.ILongTermMemoryService;
-import cn.cangjiecloud.prompt.service.IPromptTemplateService;
-import cn.cangjiecloud.prompt.service.IRuleService;
-import cn.cangjiecloud.prompt.service.ISkillService;
-import cn.cangjiecloud.prompt.service.PromptCacheService;
-import cn.cangjiecloud.tool.service.IToolService;
 import cn.cangjiecloud.workflow.entity.WorkflowEntity;
 import cn.cangjiecloud.workflow.entity.WorkflowExecutionEntity;
 import cn.cangjiecloud.workflow.service.IWorkflowService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -68,15 +44,11 @@ import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 @Slf4j
 @Service
@@ -87,65 +59,29 @@ public class ChatServiceImpl implements IChatService {
     private final IChatSessionService chatSessionService;
     private final IChatMessageService chatMessageService;
     private final IModelService modelService;
-    private final HybridRetriever hybridRetriever;
-    private final QueryRewriterFactory queryRewriterFactory;
-    private final PromptCacheService promptCacheService;
-    private final RetrievalToolService retrievalToolService;
-    private final IPromptTemplateService promptTemplateService;
-    private final ILongTermMemoryService longTermMemoryService;
     private final LongTermMemoryExtractService longTermMemoryExtractService;
     private final ILlmTraceRecorder llmTraceRecorder;
-    private final IToolService toolService;
-    private final ISkillService skillService;
-    private final IRuleService ruleService;
     private final IWorkflowService workflowService;
-    private final RuleEvaluator ruleEvaluator;
     private final cn.cangjiecloud.chat.ratelimit.ChatRateLimiter chatRateLimiter;
-    private final cn.cangjiecloud.prompt.memory.MemoryScorer memoryScorer;
 
     @Autowired(required = false)
     private TraceCollector traceCollector;
 
-    /** 查询改写开关（默认关闭，关闭时行为与改造前完全一致） */
-    @Value("${cangjie.rag.query-rewrite.enabled:false}")
-    private boolean queryRewriteEnabled;
-
-    /** 查询改写器类型（none / llm） */
-    @Value("${cangjie.rag.query-rewrite.type:none}")
-    private String queryRewriteType;
-
-    /** Agent 循环（Function Calling）最大轮次 */
-    @Value("${cangjie.chat.agent.max-rounds:5}")
-    private int agentMaxRounds;
-
-    /** Agent 循环总超时（秒），超过后终止对话并返回超时提示 */
-    @Value("${cangjie.chat.agent.timeout-seconds:300}")
-    private long agentTimeoutSeconds;
-
-    /** 记忆注入最大条数（按强度评分取 TopN） */
-    @Value("${cangjie.memory.inject.max-count:20}")
-    private int memoryInjectMaxCount;
-
-    /** 记忆注入最大字符数 */
-    @Value("${cangjie.memory.inject.max-chars:2000}")
-    private int memoryInjectMaxChars;
-
-    /** 历史消息 token 预算（超出后从最旧消息开始截断，0 表示不限制） */
-    @Value("${cangjie.chat.history.max-tokens:6000}")
-    private int historyMaxTokens;
-
     private final cn.cangjiecloud.chat.service.SessionSummaryService sessionSummaryService;
 
-    // ==================== Agent Harness 灰度 ====================
-    // 引擎 Bean 只在 cangjie.harness.enabled=true 时注册，这里用 ObjectProvider 延迟获取，
-    // 关闭时（默认）走改造前的双循环实现，保证可一键回滚。
+    // ==================== 上下文装配管线 ====================
+    // 「如何拼一份会话消息」全部收敛到 ContextPipeline：贡献者按槽位产出片段，
+    // 由 ContextBudget 统一裁剪；对话侧只消费装配结果。
 
-    private final ObjectProvider<AgentHarness> agentHarnessProvider;
+    private final cn.cangjiecloud.chat.context.ContextRequestFactory contextRequestFactory;
+    private final cn.cangjiecloud.core.harness.context.ContextPipeline contextPipeline;
+
+    // ==================== Agent Harness ====================
+    // 引擎是对话的唯一执行路径，轮次控制、总超时、工具权限与人工审批都在引擎内完成。
+
+    private final AgentHarness agentHarness;
     private final HarnessConfigResolver harnessConfigResolver;
     private final ChatHarnessContextFactory harnessContextFactory;
-    private final ToolSpecAssembler toolSpecAssembler;
-
-    private static final int DEFAULT_TOP_K = 5;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -166,25 +102,20 @@ public class ChatServiceImpl implements IChatService {
         // === 工作流路由 ===
         // 如果应用类型是 workflow，走工作流执行
         if ("workflow".equals(application.getType())) {
-            return routeToWorkflow(application, session, request, retrievalSources);
+            return routeToWorkflow(application, session, request, retrievalSources, UserContext.getUserId());
         }
 
-        // 构建上下文（历史消息 + 知识库检索 + 技能 + 规则）
-        Context context = buildContext(application, session.getSessionId(), request.getMessage(),
-                retrievalSources, traceId, request.getMessages());
-
-        // 注入长期记忆（如应用启用了记忆开关）
-        List<ChatMessage> messages = new ArrayList<>(context.messages());
-        if (Boolean.TRUE.equals(application.getMemoryEnabled())) {
-            injectLongTermMemory(request, messages);
-        }
+        // 上下文装配（须在保存当前用户消息之前：历史片段不含当前输入）
+        ContextResult context = contextPipeline.assemble(contextRequestFactory.newRequest(
+                application, session.getSessionId(), UserContext.getUserId(), request.getMessage(),
+                request.getMessages(), retrievalSources, traceId));
 
         // 保存用户消息到数据库
         ChatMessageEntity userMessage = saveUserMessage(session, application, request.getMessage());
 
         // 调用模型（同步）
         ChatResponse chatResponse = callModel(application, session.getSessionId(),
-                UserContext.getUserId(), messages, traceId);
+                UserContext.getUserId(), context, traceId);
 
         long duration = System.currentTimeMillis() - start;
 
@@ -243,7 +174,7 @@ public class ChatServiceImpl implements IChatService {
 
             // === 工作流路由 ===
             if ("workflow".equals(application.getType())) {
-                ChatResponseDTO wfResult = routeToWorkflow(application, session, request, retrievalSources);
+                ChatResponseDTO wfResult = routeToWorkflow(application, session, request, retrievalSources, userId);
                 // 以 SSE 形式推送工作流结果
                 try {
                     if (openAiFormat) {
@@ -266,15 +197,10 @@ public class ChatServiceImpl implements IChatService {
                 return;
             }
 
-            // 构建上下文（历史消息 + 技能 + 规则）
-            Context context = buildContext(application, session.getSessionId(), request.getMessage(),
-                    retrievalSources, traceId, request.getMessages());
-
-            // 注入长期记忆（如应用启用了记忆开关）
-            List<ChatMessage> messages = new ArrayList<>(context.messages());
-            if (Boolean.TRUE.equals(application.getMemoryEnabled())) {
-                injectLongTermMemory(request, messages, userId);
-            }
+            // 上下文装配（须在保存当前用户消息之前：历史片段不含当前输入）
+            ContextResult context = contextPipeline.assemble(contextRequestFactory.newRequest(
+                    application, session.getSessionId(), userId, request.getMessage(),
+                    request.getMessages(), retrievalSources, traceId));
 
             // 保存用户消息到数据库
             ChatMessageEntity userMessage = saveUserMessage(session, application, request.getMessage());
@@ -285,224 +211,9 @@ public class ChatServiceImpl implements IChatService {
             String requestId = "chatcmpl-" + traceId;
             long created = System.currentTimeMillis() / 1000;
 
-            StringBuilder fullContent = new StringBuilder();
-            // 流式调用状态收集（供 llm_trace 落库）
-            AtomicBoolean streamError = new AtomicBoolean(false);
-            AtomicReference<String> streamErrorMessage = new AtomicReference<>();
-            AtomicReference<String> streamFinishReason = new AtomicReference<>();
-            AtomicReference<Long> streamInputTokens = new AtomicReference<>();
-            AtomicReference<Long> streamOutputTokens = new AtomicReference<>();
-            AtomicReference<Long> streamTotalTokens = new AtomicReference<>();
-
-            // 构建工具列表（Function Calling），与同步路径 callModel 对齐
-            List<ToolSpecification> toolSpecs = toolSpecAssembler.assemble(application);
-            List<String> kbIdsStream = toolSpecAssembler.knowledgeBaseIds(application);
-            List<Map<String, Object>> tools = ToolSpecAssembler.toDefinitions(toolSpecs);
-
-            List<ChatMessage> conversation = new ArrayList<>(messages);
-
-            // === 灰度：交由 Agent Harness 引擎执行（关闭时保留下方改造前的双循环） ===
-            AgentHarness harness = harnessIfEnabled();
-            if (harness != null) {
-                chatStreamViaHarness(harness, application, session, userMessage, conversation, retrievalSources,
-                        emitter, openAiFormat, requestId, modelName, created, traceId, userId, chatStart,
-                        llmStart, cancelled);
-                return;
-            }
-
-            long deadline = chatStart + agentTimeoutSeconds * 1000L;
-
-            // 内部格式先发送 init 事件
-            if (!openAiFormat) {
-                try {
-                    Map<String, Object> initPayload = new HashMap<>();
-                    initPayload.put("sessionId", session.getSessionId());
-                    initPayload.put("sources", retrievalSources);
-                    emitter.send(SseEmitter.event().name("init").data(initPayload));
-                } catch (IOException ex) {
-                    log.warn("SSE init 事件推送失败: {}", ex.getMessage());
-                }
-            }
-
-            // 多轮 Function Calling 循环（带总超时与断开保护，与同步路径 callModel 对齐）
-            for (int round = 0; round < agentMaxRounds && !streamError.get() && !cancelled.get(); round++) {
-                if (System.currentTimeMillis() > deadline) {
-                    streamError.set(true);
-                    streamErrorMessage.set("对话处理超时：模型与工具调用总时长超过 " + agentTimeoutSeconds + " 秒，已终止");
-                    pushStreamError(emitter, openAiFormat, streamErrorMessage.get());
-                    break;
-                }
-                StringBuilder roundContent = new StringBuilder();
-                List<ChatResponse.ToolCall> roundToolCalls = new ArrayList<>();
-
-                try (Stream<ChatChunk> chunkStream = callModelStream(application, conversation, traceId, cancelled)) {
-                    chunkStream.forEach(chunk -> {
-                        if (cancelled.get()) {
-                            throw new IllegalStateException("SSE 连接已关闭，停止流式对话");
-                        }
-                        if (chunk.getError() != null) {
-                            streamError.set(true);
-                            streamErrorMessage.set(chunk.getError());
-                            pushStreamError(emitter, openAiFormat, chunk.getError());
-                            return;
-                        }
-                        if (chunk.getDelta() != null) {
-                            roundContent.append(chunk.getDelta());
-                            if (Boolean.TRUE.equals(chunk.isDone())) {
-                                if (chunk.getFinishReason() != null) {
-                                    streamFinishReason.set(chunk.getFinishReason());
-                                }
-                                if (chunk.getInputTokens() != null) streamInputTokens.set(chunk.getInputTokens());
-                                if (chunk.getOutputTokens() != null) streamOutputTokens.set(chunk.getOutputTokens());
-                                if (chunk.getTotalTokens() != null) streamTotalTokens.set(chunk.getTotalTokens());
-                                if (chunk.getToolCalls() != null) {
-                                    roundToolCalls.addAll(chunk.getToolCalls());
-                                }
-                                // done chunk 通常内容为空，其信息已收集，完成标记由末尾统一发送
-                                return;
-                            }
-                            // 普通内容 chunk 实时推送
-                            try {
-                                if (openAiFormat) {
-                                    emitter.send(SseEmitter.event().name("message")
-                                            .data(buildOpenAiChunk(requestId, modelName, created, chunk.getDelta(), null)));
-                                } else {
-                                    Map<String, Object> payload = new HashMap<>();
-                                    payload.put("delta", chunk.getDelta());
-                                    payload.put("done", false);
-                                    emitter.send(SseEmitter.event().name("message").data(payload));
-                                }
-                            } catch (IOException e) {
-                                log.warn("SSE 推送失败: {}", e.getMessage());
-                                throw new RuntimeException(e);
-                            }
-                        }
-                    });
-                } catch (Exception e) {
-                    log.error("流式对话异常: app={}", application.getName(), e);
-                    streamError.set(true);
-                    streamErrorMessage.set(e.getMessage());
-                    pushStreamError(emitter, openAiFormat, e.getMessage());
-                }
-
-                if (streamError.get()) {
-                    break;
-                }
-
-                // 本轮产生了工具调用：执行工具并继续下一轮
-                if (!roundToolCalls.isEmpty() && !tools.isEmpty() && !cancelled.get()) {
-                    conversation.add(ChatMessage.assistant(roundContent.toString()));
-                    for (ChatResponse.ToolCall tc : roundToolCalls) {
-                        Map<String, Object> args;
-                        try {
-                            args = com.alibaba.fastjson.JSON.parseObject(tc.getArguments());
-                        } catch (Exception e) {
-                            args = Map.of();
-                        }
-                        // Agentic RAG 检索工具路由
-                        String toolResult;
-                        if (RetrievalToolService.TOOL_NAME.equals(tc.getName())) {
-                            toolResult = retrievalToolService.execute(
-                                    (String) args.getOrDefault("query", ""), kbIdsStream);
-                        } else {
-                            toolResult = toolService.executeToolCall(tc.getName(), args);
-                        }
-                        conversation.add(ChatMessage.tool(tc.getName(), tc.getId(),
-                                "工具调用结果(" + tc.getName() + "): " + toolResult));
-                        log.info("Function Calling 执行: {} -> args={}, result={}",
-                                tc.getName(), tc.getArguments(),
-                                toolResult != null && toolResult.length() > 200
-                                        ? toolResult.substring(0, 200) + "..." : toolResult);
-                    }
-                    continue;
-                }
-
-                // 最终轮：汇总内容
-                fullContent.append(roundContent);
-                break;
-            }
-
-            if (streamError.get()) {
-                // 流式调用失败：仅记录失败 trace，不保存空消息、不更新会话统计
-                if (traceCollector != null) {
-                    recordTrace("chat", "llm_call", traceId,
-                            System.currentTimeMillis() - llmStart, "fail",
-                            "模型调用失败: " + streamErrorMessage.get());
-                }
-                llmTraceRecorder.recordFailure(ILlmTraceRecorder.LlmTraceRecord.builder()
-                        .requestId(requestId)
-                        .appId(application.getId())
-                        .appName(application.getName())
-                        .modelId(application.getModelId())
-                        .modelName(modelName)
-                        .promptContent(JSON.toJSONString(conversation))
-                        .duration(System.currentTimeMillis() - llmStart)
-                        .startTimeMs(llmStart)
-                        .build(), streamErrorMessage.get());
-            } else {
-                if (traceCollector != null) {
-                    recordTrace("chat", "llm_call", traceId,
-                            System.currentTimeMillis() - llmStart, "success",
-                            "模型: " + modelName + ", 流式推送完成");
-                }
-
-                // 持久化 AI 回复
-                long duration = System.currentTimeMillis() - chatStart;
-                long inputTokens = streamInputTokens.get() != null ? streamInputTokens.get() : 0;
-                long outputTokens = streamOutputTokens.get() != null ? streamOutputTokens.get() : 0;
-                long totalTokens = streamTotalTokens.get() != null ? streamTotalTokens.get() : 0;
-                ChatMessageEntity aiMessage = saveAiMessage(session, application,
-                        ChatResponse.builder()
-                                .content(fullContent.toString())
-                                .totalTokens((int) totalTokens)
-                                .finishReason(null)
-                                .build(),
-                        retrievalSources, duration);
-
-                // 记录 LLM 调用可观测数据
-                llmTraceRecorder.recordSuccess(ILlmTraceRecorder.LlmTraceRecord.builder()
-                        .requestId(requestId)
-                        .appId(application.getId())
-                        .appName(application.getName())
-                        .modelId(application.getModelId())
-                        .modelName(modelName)
-                        .promptContent(JSON.toJSONString(conversation))
-                        .inputTokens(inputTokens)
-                        .outputTokens(outputTokens)
-                        .totalTokens(totalTokens)
-                        .responseContent(fullContent.toString())
-                        .finishReason(streamFinishReason.get())
-                        .duration(System.currentTimeMillis() - llmStart)
-                        .startTimeMs(llmStart)
-                        .build());
-
-                updateSessionStats(session, aiMessage);
-                addApplicationTokens(application.getId(), totalTokens);
-                sessionSummaryService.maybeSummarizeAsync(session.getSessionId(), application.getModelId());
-
-                // 异步触发长期记忆提取（仅应用启用记忆开关时）
-                if (Boolean.TRUE.equals(application.getMemoryEnabled())) {
-                    longTermMemoryExtractService.extract(
-                        userId, application, session.getSessionId(), userMessage, aiMessage);
-                }
-
-                // 发送完成事件
-                try {
-                    if (openAiFormat) {
-                        emitter.send(SseEmitter.event().name("message")
-                                .data(buildOpenAiChunk(requestId, modelName, created, "", "stop")));
-                        emitter.send(SseEmitter.event().name("message").data("[DONE]"));
-                    } else {
-                        Map<String, Object> donePayload = new HashMap<>();
-                        donePayload.put("delta", "");
-                        donePayload.put("done", true);
-                        donePayload.put("finishReason", "stop");
-                        emitter.send(SseEmitter.event().name("done").data(donePayload));
-                    }
-                } catch (IOException e) {
-                    log.warn("SSE 完成事件推送失败: {}", e.getMessage());
-                }
-            }
+            chatStreamViaHarness(application, session, userMessage, context, retrievalSources,
+                    emitter, openAiFormat, requestId, modelName, created, traceId, userId, chatStart,
+                    llmStart, cancelled);
 
         } catch (Exception e) {
             log.error("流式对话初始化失败: traceId={}", traceId, e);
@@ -524,31 +235,6 @@ public class ChatServiceImpl implements IChatService {
                 id, created, model,
                 delta.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r"),
                 finishReason == null ? "null" : "\"" + finishReason + "\"");
-    }
-
-    private String buildOpenAiError(String message) {
-        String safe = message == null ? "internal_error"
-                : message.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
-        return "{\"error\":{\"message\":\"" + safe + "\",\"type\":\"internal_error\"}}";
-    }
-
-    /**
-     * 流式调用出错时推送 SSE 错误事件（按 OpenAI 格式或内部格式分别处理）
-     */
-    private void pushStreamError(SseEmitter emitter, boolean openAiFormat, String error) {
-        try {
-            if (openAiFormat) {
-                emitter.send(SseEmitter.event().name("message").data(buildOpenAiError(error)));
-            } else {
-                Map<String, Object> errorPayload = new HashMap<>();
-                errorPayload.put("delta", "");
-                errorPayload.put("done", true);
-                errorPayload.put("error", error);
-                emitter.send(SseEmitter.event().name("error").data(errorPayload));
-            }
-        } catch (IOException e) {
-            log.warn("SSE 错误推送失败: {}", e.getMessage());
-        }
     }
 
     /**
@@ -659,360 +345,24 @@ public class ChatServiceImpl implements IChatService {
         chatSessionService.updateById(session);
     }
 
-    private Context buildContext(ApplicationEntity application, String sessionId, String userMessage,
-                                 List<Map<String, Object>> retrievalSources, String traceId,
-                                 List<ChatRequestDTO.ConversationMessage> requestMessages) {
-        StringBuilder systemPrompt = new StringBuilder();
-
-        // 提示词模板（如绑定了模板，作为 system prompt 的基础）
-        if (StringUtils.hasText(application.getPromptTemplateId())) {
-            try {
-                String templateContent = promptCacheService.getContent(application.getPromptTemplateId());
-                if (StringUtils.hasText(templateContent)) {
-                    systemPrompt.append(templateContent).append("\n\n");
-                }
-            } catch (Exception e) {
-                log.warn("加载提示词模板失败: {}, {}", application.getPromptTemplateId(), e.getMessage());
-            }
-        }
-
-        // 查询改写（基于对话历史）
-        List<ChatMessage> rewriteHistory;
-        if (requestMessages != null && !requestMessages.isEmpty()) {
-            rewriteHistory = requestMessages.stream()
-                    .filter(m -> StringUtils.hasText(m.getRole()) && StringUtils.hasText(m.getContent()))
-                    .map(m -> ChatMessage.builder().role(m.getRole().toLowerCase()).content(m.getContent()).build())
-                    .toList();
-        } else {
-            rewriteHistory = loadHistoryMessages(sessionId, application.getMaxTurns(), null);
-        }
-        String retrievalQuery = queryRewriteEnabled
-                ? queryRewriterFactory.get(queryRewriteType).rewrite(userMessage, rewriteHistory)
-                : userMessage;
-
-        // 知识库检索（如绑定了知识库，自动拼接检索内容）
-        // agentic 模式下跳过预处理检索，由 LLM 自主调用检索工具
-        List<String> kbIds = parseStringList(application.getKnowledgeBaseIds());
-        boolean isAgenticRag = "agentic".equals(application.getRagMode());
-        if (!kbIds.isEmpty() && !isAgenticRag) {
-            long retrievalStart = System.currentTimeMillis();
-            try {
-                List<RetrievalResult> results = hybridRetriever.retrieve(retrievalQuery, kbIds, DEFAULT_TOP_K);
-                if (traceCollector != null) {
-                    recordTrace("retrieval", "search", traceId,
-                            System.currentTimeMillis() - retrievalStart, "success",
-                            "知识库检索: " + results.size() + " 条结果");
-                }
-                if (!results.isEmpty()) {
-                    systemPrompt.append("以下是从知识库中检索到的相关内容：\n\n");
-                    for (int i = 0; i < results.size(); i++) {
-                        RetrievalResult r = results.get(i);
-                        systemPrompt.append("【片段").append(i + 1).append("】")
-                                .append("来源：").append(getDocumentName(r)).append("\n")
-                                .append("内容：").append(r.getContent()).append("\n\n");
-
-                        Map<String, Object> source = new HashMap<>();
-                        source.put("paragraphId", r.getParagraphId());
-                        source.put("documentId", r.getDocumentId());
-                        source.put("knowledgeBaseId", r.getKnowledgeBaseId());
-                        source.put("content", r.getContent());
-                        source.put("score", r.getFinalScore());
-                        source.put("documentName", getDocumentName(r));
-                        retrievalSources.add(source);
-                    }
-                }
-            } catch (Exception e) {
-                if (traceCollector != null) {
-                    recordTrace("retrieval", "search", traceId,
-                            System.currentTimeMillis() - retrievalStart, "fail",
-                            "知识库检索失败: " + e.getMessage());
-                }
-                log.warn("知识库检索失败: {}", e.getMessage());
-            }
-        }
-
-        // 应用描述兜底（无模板、无知识库时使用）
-        if (systemPrompt.length() == 0 && StringUtils.hasText(application.getDescription())) {
-            systemPrompt.append(application.getDescription());
-        }
-
-        // === 注入技能 Skill 到 system prompt ===
-        List<String> skillIds = parseStringList(application.getSkillIds());
-        if (!skillIds.isEmpty()) {
-            try {
-                List<SkillEntity> skills = skillService.listByIds(skillIds).stream()
-                        .filter(s -> "active".equals(s.getStatus()))
-                        .toList();
-                if (!skills.isEmpty()) {
-                    systemPrompt.append("\n\n").append("【技能指令】以下是你可以使用的技能：\n\n");
-                    for (SkillEntity skill : skills) {
-                        systemPrompt.append("技能：").append(skill.getName()).append("\n");
-                        if (StringUtils.hasText(skill.getDescription())) {
-                            systemPrompt.append("描述：").append(skill.getDescription()).append("\n");
-                        }
-                        if (StringUtils.hasText(skill.getContent())) {
-                            systemPrompt.append("指令：").append(skill.getContent()).append("\n");
-                        }
-                        systemPrompt.append("\n");
-                    }
-                }
-            } catch (Exception e) {
-                log.warn("加载技能失败: {}", e.getMessage());
-            }
-        }
-
-        // === 注入规则 Rule 到 system prompt（规则引擎评估） ===
-        List<String> ruleIds = parseStringList(application.getRuleIds());
-        if (!ruleIds.isEmpty()) {
-            try {
-                List<RuleEntity> rules = ruleService.listByIds(ruleIds).stream()
-                        .filter(r -> "active".equals(r.getStatus()))
-                        .toList();
-                if (!rules.isEmpty()) {
-                    // 使用规则引擎评估匹配
-                    Map<String, Object> ruleContext = Map.of(
-                            "applicationId", application.getId(),
-                            "applicationName", application.getName()
-                    );
-                    List<RuleEvaluationResult> matchedRules = ruleEvaluator.evaluate(
-                            rules, userMessage, ruleContext);
-                    String ruleInstructions = ruleEvaluator.compileInstructions(matchedRules);
-                    if (StringUtils.hasText(ruleInstructions)) {
-                        systemPrompt.append("\n\n").append(ruleInstructions);
-                    }
-                }
-            } catch (Exception e) {
-                log.warn("规则评估失败: {}", e.getMessage());
-            }
-        }
-
-        // 构建消息列表
-        List<ChatMessage> messages = new ArrayList<>();
-        if (StringUtils.hasText(systemPrompt)) {
-            messages.add(ChatMessage.system(systemPrompt.toString().trim()));
-        }
-
-        if (requestMessages != null && !requestMessages.isEmpty()) {
-            // OpenAI 兼容：使用请求携带的完整对话上下文（含当前消息）
-            for (ChatRequestDTO.ConversationMessage m : requestMessages) {
-                if (StringUtils.hasText(m.getRole()) && StringUtils.hasText(m.getContent())) {
-                    messages.add(ChatMessage.builder().role(m.getRole().toLowerCase()).content(m.getContent()).build());
-                }
-            }
-        } else {
-            // 内部路径：加载数据库历史消息，并追加当前用户消息
-            List<ChatMessage> historyMessages = loadHistoryMessages(
-                    sessionId, application.getMaxTurns(), null);
-            messages.addAll(historyMessages);
-            messages.add(ChatMessage.user(userMessage));
-        }
-
-        return new Context(messages, retrievalSources);
-    }
-
-    private List<ChatMessage> loadHistoryMessages(String sessionId, Integer maxTurns, String excludeMessageId) {
-        if (!StringUtils.hasText(sessionId)) {
-            return new ArrayList<>();
-        }
-        int limit = maxTurns != null && maxTurns > 0 ? maxTurns * 2 : 20;
-        LambdaQueryWrapper<ChatMessageEntity> wrapper = new LambdaQueryWrapper<ChatMessageEntity>()
-                .eq(ChatMessageEntity::getSessionId, sessionId)
-                .in(ChatMessageEntity::getRole, "user", "assistant")
-                .orderByDesc(ChatMessageEntity::getCreateTime)
-                .last("LIMIT " + (limit + 1));
-        List<ChatMessageEntity> recent = chatMessageService.list(wrapper);
-        List<ChatMessage> messages = new ArrayList<>();
-        for (int i = recent.size() - 1; i >= 0; i--) {
-            ChatMessageEntity e = recent.get(i);
-            if (excludeMessageId != null && e.getId().equals(excludeMessageId)) {
-                continue;
-            }
-            messages.add(ChatMessage.builder().role(e.getRole()).content(e.getContent()).build());
-        }
-
-        // token 预算：超预算时从最旧消息开始截断（始终保留最新一条）
-        if (historyMaxTokens > 0 && messages.size() > 1) {
-            int total = messages.stream().mapToInt(m -> estimateHistoryTokens(m.getContent())).sum();
-            int dropCount = 0;
-            while (total > historyMaxTokens && dropCount < messages.size() - 1) {
-                total -= estimateHistoryTokens(messages.get(dropCount).getContent());
-                dropCount++;
-            }
-            if (dropCount > 0) {
-                log.info("历史消息按 token 预算截断: sessionId={}, 截断 {} 条", sessionId, dropCount);
-                messages = new ArrayList<>(messages.subList(dropCount, messages.size()));
-            }
-        }
-
-        // 会话摘要注入头部（会话记忆：弥补被截断的早期上下文）
-        try {
-            ChatSessionEntity session = chatSessionService.getBySessionId(sessionId);
-            if (session != null && StringUtils.hasText(session.getSummary())) {
-                messages.add(0, ChatMessage.system(
-                        "【会话摘要】以下是本会话早前内容的摘要，供你了解上下文：\n" + session.getSummary()));
-            }
-        } catch (Exception e) {
-            log.warn("会话摘要注入失败: {}", e.getMessage());
-        }
-        return messages;
-    }
-
-    private int estimateHistoryTokens(String content) {
-        return content == null ? 0 : (int) (content.length() * 0.75);
-    }
-
+    /**
+     * 同步对话：轮次控制、总超时与工具审批由 Agent Harness 引擎统一处理；超时不写 llm_trace
+     * 失败行、其余失败写失败行，两者都以 {@link ApiException} 抛出。
+     */
     private ChatResponse callModel(ApplicationEntity application, String sessionId, String userId,
-                                   List<ChatMessage> messages, String traceId) {
+                                   ContextResult context, String traceId) {
         String modelName = getModelName(application.getModelId());
         long llmStart = System.currentTimeMillis();
 
-        // === 灰度：交由 Agent Harness 引擎执行（关闭时保留下方改造前的双循环） ===
-        AgentHarness harness = harnessIfEnabled();
-        if (harness != null) {
-            return callModelViaHarness(harness, application, sessionId, userId, messages, traceId,
-                    modelName, llmStart);
-        }
-
-        OpenAICompatibleClient client = getClient(application);
-
-        // === 构建工具列表（Function Calling） ===
-        List<ToolSpecification> toolSpecs = toolSpecAssembler.assemble(application);
-        List<String> kbIds = toolSpecAssembler.knowledgeBaseIds(application);
-        List<Map<String, Object>> tools = ToolSpecAssembler.toDefinitions(toolSpecs);
-
-        // 多轮 function calling 循环（带总超时保护）
-        long deadline = System.currentTimeMillis() + agentTimeoutSeconds * 1000L;
-        ChatResponse response = null;
-        List<ChatMessage> conversation = new ArrayList<>(messages);
-
-        for (int round = 0; round < agentMaxRounds; round++) {
-            if (System.currentTimeMillis() > deadline) {
-                if (traceCollector != null) {
-                    recordTrace("chat", "llm_call", traceId,
-                            System.currentTimeMillis() - llmStart, "fail",
-                            "Agent 循环总超时（>" + agentTimeoutSeconds + "s），已终止");
-                }
-                throw new ApiException("对话处理超时：模型与工具调用总时长超过 " + agentTimeoutSeconds + " 秒，已终止");
-            }
-            ChatRequest chatRequest = ChatRequest.builder()
-                    .messages(conversation)
-                    .temperature(application.getTemperature() != null ? application.getTemperature() : 0.7)
-                    .tools(tools)
-                    .toolChoice(tools.isEmpty() ? "none" : "auto")
-                    .build();
-
-            try {
-                response = client.chat(chatRequest);
-            } catch (Exception e) {
-                if (traceCollector != null) {
-                    recordTrace("chat", "llm_call", traceId,
-                            System.currentTimeMillis() - llmStart, "fail",
-                            "模型调用失败: " + e.getMessage());
-                }
-                llmTraceRecorder.recordFailure(ILlmTraceRecorder.LlmTraceRecord.builder()
-                        .requestId("chatcmpl-" + traceId)
-                        .appId(application.getId())
-                        .appName(application.getName())
-                        .modelId(application.getModelId())
-                        .modelName(modelName)
-                        .promptContent(JSON.toJSONString(conversation))
-                        .duration(System.currentTimeMillis() - llmStart)
-                        .startTimeMs(llmStart)
-                        .build(), e.getMessage());
-                log.error("模型调用失败: app={}, model={}", application.getName(), application.getModelId(), e);
-                throw new ApiException("模型调用失败: " + e.getMessage());
-            }
-
-            // 检查是否有 tool calls
-            if (response.getToolCalls() != null && !response.getToolCalls().isEmpty() && !tools.isEmpty()) {
-                // 添加 assistant 消息（含 tool calls）
-                conversation.add(ChatMessage.assistant(response.getContent() != null ? response.getContent() : ""));
-
-                for (ChatResponse.ToolCall tc : response.getToolCalls()) {
-                    Map<String, Object> args;
-                    try {
-                        args = com.alibaba.fastjson.JSON.parseObject(tc.getArguments());
-                    } catch (Exception e) {
-                        args = Map.of();
-                    }
-                    // Agentic RAG 检索工具路由
-                    String toolResult;
-                    if (RetrievalToolService.TOOL_NAME.equals(tc.getName())) {
-                        toolResult = retrievalToolService.execute(
-                                (String) args.getOrDefault("query", ""), kbIds);
-                    } else {
-                        toolResult = toolService.executeToolCall(tc.getName(), args);
-                    }
-                    // 添加 tool 结果消息
-                    conversation.add(ChatMessage.tool(tc.getName(), tc.getId(),
-                            "工具调用结果(" + tc.getName() + "): " + toolResult));
-                    log.info("Function Calling 执行: {} -> args={}, result={}",
-                            tc.getName(), tc.getArguments(),
-                            toolResult != null && toolResult.length() > 200
-                                    ? toolResult.substring(0, 200) + "..." : toolResult);
-                }
-                // 继续下一轮
-                continue;
-            }
-
-            // 没有 tool calls，结束
-            break;
-        }
-
-        if (traceCollector != null) {
-            recordTrace("chat", "llm_call", traceId,
-                    System.currentTimeMillis() - llmStart, "success",
-                    "模型: " + modelName + ", tokens: " + (response != null ? response.getTotalTokens() : 0));
-        }
-        if (response != null) {
-            llmTraceRecorder.recordSuccess(ILlmTraceRecorder.LlmTraceRecord.builder()
-                    .requestId("chatcmpl-" + traceId)
-                    .appId(application.getId())
-                    .appName(application.getName())
-                    .modelId(application.getModelId())
-                    .modelName(modelName)
-                    .promptContent(JSON.toJSONString(conversation))
-                    .inputTokens((long) response.getPromptTokens())
-                    .outputTokens((long) response.getCompletionTokens())
-                    .totalTokens((long) response.getTotalTokens())
-                    .responseContent(response.getContent())
-                    .finishReason(response.getFinishReason())
-                    .duration(System.currentTimeMillis() - llmStart)
-                    .startTimeMs(llmStart)
-                    .build());
-        }
-        return response;
-    }
-
-    /**
-     * 灰度开关：仅在 {@code cangjie.harness.enabled=true} 且引擎 Bean 已注册时返回实例，
-     * 否则返回 null 由调用方回落改造前的实现。
-     */
-    private AgentHarness harnessIfEnabled() {
-        if (!harnessConfigResolver.isEnabled()) {
-            return null;
-        }
-        AgentHarness harness = agentHarnessProvider.getIfAvailable();
-        if (harness == null) {
-            log.warn("已开启 cangjie.harness.enabled 但未找到 AgentHarness Bean，本次对话回落旧实现");
-        }
-        return harness;
-    }
-
-    /**
-     * 同步对话的 Harness 路径：收尾语义与改造前的 {@code callModel} 一致——
-     * 超时不写 llm_trace 失败行、其余失败写失败行，两者都以 {@link ApiException} 抛出。
-     */
-    private ChatResponse callModelViaHarness(AgentHarness harness, ApplicationEntity application, String sessionId,
-                                             String userId, List<ChatMessage> messages, String traceId,
-                                             String modelName, long llmStart) {
-        HarnessRequest request = harnessContextFactory.newRequest(application, messages, false, null,
-                sessionId, userId, traceId, agentMaxRounds, agentTimeoutSeconds);
-        HarnessOutcome outcome = harness.run(request, HarnessListener.NOOP);
+        HarnessRequest request = harnessContextFactory.newRequest(application, context, false, null,
+                sessionId, userId, traceId);
+        HarnessOutcome outcome = agentHarness.run(request, HarnessListener.NOOP);
         List<ChatMessage> conversation = outcome.getConversation();
 
         if (outcome.getStatus() == RunStatus.WAITING_APPROVAL) {
-            throw new ApiException("存在待人工审批的工具调用，请通过审批接口恢复运行: runId=" + outcome.getRunId());
+            throw new ApiException("存在待人工审批的工具调用，请通过 POST /api/chat/approval/"
+                    + (outcome.getPendingApproval() == null ? "{approvalId}" : outcome.getPendingApproval().getApprovalId())
+                    + "/decide 恢复运行: runId=" + outcome.getRunId());
         }
         if (outcome.getStatus() != RunStatus.COMPLETED) {
             String error = outcome.getErrorMessage() == null ? "模型调用失败" : outcome.getErrorMessage();
@@ -1070,12 +420,11 @@ public class ChatServiceImpl implements IChatService {
     }
 
     /**
-     * 流式对话的 Harness 路径：SSE 帧由 {@link SseHarnessListener} 按改造前的格式逐帧推送，
-     * 收尾语义与改造前的 {@code chatStream} 一致——失败只记 trace 不落库，成功先落库再发终止帧，
-     * 等待审批时不发终止帧（由恢复运行接口继续产出）。
+     * 流式对话：SSE 帧由 {@link SseHarnessListener} 逐帧推送——失败只记 trace 不落库，
+     * 成功先落库再发终止帧，等待审批时不发终止帧（由恢复运行接口继续产出）。
      */
-    private void chatStreamViaHarness(AgentHarness harness, ApplicationEntity application, ChatSessionEntity session,
-                                      ChatMessageEntity userMessage, List<ChatMessage> conversation,
+    private void chatStreamViaHarness(ApplicationEntity application, ChatSessionEntity session,
+                                      ChatMessageEntity userMessage, ContextResult context,
                                       List<Map<String, Object>> retrievalSources, SseEmitter emitter,
                                       boolean openAiFormat, String requestId, String modelName, long created,
                                       String traceId, String userId, long chatStart, long llmStart,
@@ -1084,14 +433,17 @@ public class ChatServiceImpl implements IChatService {
                 session.getSessionId(), retrievalSources, harnessConfigResolver.isSseToolEvents());
         listener.sendInit();
 
-        HarnessRequest request = harnessContextFactory.newRequest(application, conversation, true, cancelled,
-                session.getSessionId(), userId, traceId, agentMaxRounds, agentTimeoutSeconds);
-        HarnessOutcome outcome = harness.run(request, listener);
+        HarnessRequest request = harnessContextFactory.newRequest(application, context, true, cancelled,
+                session.getSessionId(), userId, traceId);
+        HarnessOutcome outcome = agentHarness.run(request, listener);
 
         if (outcome.getStatus() == RunStatus.WAITING_APPROVAL) {
             log.info("流式对话挂起等待审批: runId={}, session={}, tool={}", outcome.getRunId(),
                     session.getSessionId(),
                     outcome.getPendingApproval() == null ? null : outcome.getPendingApproval().getToolName());
+            // approval_required 已推送，产出改由 decide 接口同步返回：立即结束本次流，
+            // 否则连接要挂到 SSE 超时才释放
+            emitter.complete();
             return;
         }
 
@@ -1160,32 +512,6 @@ public class ChatServiceImpl implements IChatService {
         listener.sendTerminal();
     }
 
-    private Stream<ChatChunk> callModelStream(ApplicationEntity application,
-                                               List<ChatMessage> messages,
-                                               String traceId,
-                                               AtomicBoolean cancelled) {
-        OpenAICompatibleClient client = getClient(application);
-
-        // 构建工具列表（Function Calling）
-        List<ToolSpecification> toolSpecs = toolSpecAssembler.assemble(application);
-        List<Map<String, Object>> tools = ToolSpecAssembler.toDefinitions(toolSpecs);
-
-        ChatRequest chatRequest = ChatRequest.builder()
-                .messages(messages)
-                .temperature(application.getTemperature() != null ? application.getTemperature() : 0.7)
-                .tools(tools)
-                .toolChoice(tools.isEmpty() ? "none" : "auto")
-                .build();
-        return client.streamChat(chatRequest, cancelled);
-    }
-
-    private OpenAICompatibleClient getClient(ApplicationEntity application) {
-        if (StringUtils.hasText(application.getModelId())) {
-            return modelService.getClient(application.getModelId());
-        }
-        return modelService.getDefaultClient();
-    }
-
     private String getModelName(String modelId) {
         if (!StringUtils.hasText(modelId)) {
             return "默认模型";
@@ -1201,32 +527,6 @@ public class ChatServiceImpl implements IChatService {
         return modelId;
     }
 
-    private List<String> parseStringList(String json) {
-        if (!StringUtils.hasText(json)) {
-            return new ArrayList<>();
-        }
-        try {
-            JSONArray array = JSON.parseArray(json);
-            return array.stream()
-                    .map(Object::toString)
-                    .filter(StringUtils::hasText)
-                    .collect(Collectors.toList());
-        } catch (Exception e) {
-            log.warn("解析 JSON 数组失败: {}, json={}", e.getMessage(), json);
-            return new ArrayList<>();
-        }
-    }
-
-    private String getDocumentName(RetrievalResult r) {
-        if (r.getMetadata() != null) {
-            Object name = r.getMetadata().get("title");
-            if (name != null) {
-                return name.toString();
-            }
-        }
-        return r.getDocumentId() != null ? r.getDocumentId() : "未知文档";
-    }
-
     private String generateTitle(String message) {
         if (!StringUtils.hasText(message)) {
             return "新对话";
@@ -1240,103 +540,6 @@ public class ChatServiceImpl implements IChatService {
         }
     }
 
-    /**
-     * 注入长期记忆到消息列表（在 system prompt 后追加用户画像上下文）
-     */
-    private void injectLongTermMemory(ChatRequestDTO request, List<ChatMessage> messages) {
-        injectLongTermMemory(request, messages, UserContext.getUserId());
-    }
-
-    private void injectLongTermMemory(ChatRequestDTO request, List<ChatMessage> messages, String userId) {
-        try {
-            if (!StringUtils.hasText(userId)) {
-                return;
-            }
-            String appId = request.getApplicationId();
-            if (!StringUtils.hasText(appId)) {
-                return;
-            }
-
-            StringBuilder memoryPrompt = new StringBuilder();
-
-            // 1. 用户记忆：按强度评分排序取 TopN（避免记忆膨胀稀释上下文）
-            List<LongTermMemoryEntity> userMemories = longTermMemoryService.findActiveAll(userId, appId).stream()
-                    .filter(m -> !"scene".equals(m.getMemoryType()))
-                    .sorted(java.util.Comparator.comparingDouble(memoryScorer::score).reversed())
-                    .limit(memoryInjectMaxCount)
-                    .toList();
-
-            List<String> dimensionOrder = Arrays.asList("preference", "background", "convention", "goal");
-            Map<String, String> dimLabels = Map.of(
-                    "preference", "【用户偏好】",
-                    "background", "【用户背景】",
-                    "convention", "【用户习惯】",
-                    "goal", "【用户目标】");
-
-            int charBudget = memoryInjectMaxChars;
-            for (String dim : dimensionOrder) {
-                List<LongTermMemoryEntity> memories = userMemories.stream()
-                        .filter(m -> dim.equals(m.getDimension()))
-                        .toList();
-                if (memories.isEmpty()) {
-                    continue;
-                }
-                StringBuilder block = new StringBuilder();
-                block.append(dimLabels.getOrDefault(dim, "【" + dim + "】")).append("\n");
-                boolean any = false;
-                for (LongTermMemoryEntity m : memories) {
-                    String line = "- " + m.getContent() + "\n";
-                    if (block.length() + line.length() > charBudget) {
-                        break;
-                    }
-                    block.append(line);
-                    charBudget -= line.length();
-                    any = true;
-                    longTermMemoryService.incrementTrigger(m.getId());
-                }
-                if (any) {
-                    memoryPrompt.append(block).append("\n");
-                }
-            }
-
-            // 2. 场景记忆：当前会话沉淀的事实（任务背景、约定等），与用户记忆共享同一字符预算
-            List<LongTermMemoryEntity> sceneMemories = longTermMemoryService
-                    .findSceneMemories(request.getSessionId());
-            if (!sceneMemories.isEmpty()) {
-                StringBuilder sceneBlock = new StringBuilder("【当前会话背景】\n");
-                for (LongTermMemoryEntity m : sceneMemories) {
-                    String line = "- " + m.getContent() + "\n";
-                    if (line.length() > charBudget) {
-                        break;
-                    }
-                    sceneBlock.append(line);
-                    charBudget -= line.length();
-                    longTermMemoryService.incrementTrigger(m.getId());
-                }
-                memoryPrompt.append(sceneBlock);
-            }
-
-            if (!memoryPrompt.isEmpty()) {
-                String fullMemoryContext = "以下是关于当前用户与当前会话的记忆信息，请在回答时参考：\n\n"
-                        + memoryPrompt.toString().trim();
-                // 插入到第一条消息之后（通常是 system prompt 之后）
-                if (!messages.isEmpty()) {
-                    messages.add(1, ChatMessage.system(fullMemoryContext));
-                } else {
-                    messages.add(ChatMessage.system(fullMemoryContext));
-                }
-                log.debug("已注入记忆: userId={}, appId={}, scene={} 条, user={} 条",
-                        userId, appId, sceneMemories.size(), userMemories.size());
-            }
-        } catch (Exception e) {
-            log.warn("注入长期记忆失败: {}", e.getMessage());
-        }
-    }
-
-    private record Context(List<ChatMessage> messages,
-                           List<Map<String, Object>> retrievalSources) {
-    }
-
     // ========== Tool / Workflow Integration ==========
 
     /**
@@ -1346,7 +549,8 @@ public class ChatServiceImpl implements IChatService {
      */
     private ChatResponseDTO routeToWorkflow(ApplicationEntity application, ChatSessionEntity session,
                                             ChatRequestDTO request,
-                                            List<Map<String, Object>> retrievalSources) {
+                                            List<Map<String, Object>> retrievalSources,
+                                            String userId) {
         // 查找关联工作流
         WorkflowEntity wf = workflowService.getByApplicationId(application.getId());
         if (wf == null) {
@@ -1359,7 +563,7 @@ public class ChatServiceImpl implements IChatService {
         // 构建工作流输入
         Map<String, Object> wfInputs = new HashMap<>();
         wfInputs.put("message", request.getMessage());
-        wfInputs.put("userId", UserContext.getUserId());
+        wfInputs.put("userId", userId);
         wfInputs.put("applicationId", application.getId());
         wfInputs.put("sessionId", session.getSessionId());
 

@@ -1,10 +1,12 @@
 package cn.cangjiecloud.core.harness.context;
 
+import cn.cangjiecloud.core.model.ChatMessage;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -92,13 +94,41 @@ public class ContextBudget {
                 .filter(ContextFragment::isCompressible)
                 .mapToDouble(f -> ratioOf(f.getSlot()))
                 .sum();
+        Map<ContextSlot, Integer> allowanceBySlot = new LinkedHashMap<>();
         for (ContextFragment f : fragments) {
             if (!f.isCompressible()) {
                 continue;
             }
             double share = totalRatio <= 0 ? 1d / compressibleCount : ratioOf(f.getSlot()) / totalRatio;
             int allowance = (int) Math.floor(remaining * share);
+            // 同一槽位可能有多个片段（如模板/技能/规则），额度按槽位统一下发、按片段顺序消耗
+            allowanceBySlot.merge(f.getSlot(), allowance, Integer::sum);
             f.setBudgetTokens(allowance);
+        }
+        for (ContextFragment f : fragments) {
+            if (!f.isCompressible() || f.getMessages() == null || f.getMessages().isEmpty()) {
+                continue;
+            }
+            int budget = allowanceBySlot.getOrDefault(f.getSlot(), 0);
+            if (f.getEstTokens() <= budget) {
+                continue;
+            }
+            List<ChatMessage> kept = new ArrayList<>(f.getMessages());
+            int total = f.getEstTokens();
+            int dropped = 0;
+            // 从片段头部开始丢弃：消息按时间正序，越旧的信息价值越低；始终保留最新一条
+            while (total > budget && kept.size() > 1) {
+                ChatMessage first = kept.remove(0);
+                int est = first.getContent() == null ? 0 : (int) Math.ceil(first.getContent().length() * 0.75);
+                total -= est;
+                dropped += est;
+            }
+            allowanceBySlot.put(f.getSlot(), Math.max(0, budget - total));
+            f.setMessages(kept);
+            f.setEstTokens(total);
+            f.setDroppedTokens(dropped);
+            f.setDroppedRatio(f.getEstTokens() + dropped > 0
+                    ? (double) dropped / (f.getEstTokens() + dropped) : 0d);
         }
         return fragments;
     }

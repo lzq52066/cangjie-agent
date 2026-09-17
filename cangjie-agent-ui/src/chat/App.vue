@@ -131,6 +131,52 @@
           </div>
         </div>
 
+        <!-- 审批卡片：引擎挂起等待人工放行 -->
+        <div v-if="pendingApproval" class="message-row assistant">
+          <div class="message-avatar">
+            <div class="avatar approval-avatar">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4M12 16h.01"/></svg>
+            </div>
+          </div>
+          <div class="message-content">
+            <div class="message-role">{{ title }}</div>
+            <div class="approval-card" :class="{ 'is-expired': approvalExpired }">
+              <div class="approval-head">
+                <span class="approval-risk" :class="approvalRiskClass">{{ approvalRiskText }}</span>
+                <span class="approval-title">需要你的确认</span>
+                <span class="approval-count">
+                  <template v-if="approvalExpired">已超时</template>
+                  <template v-else-if="pendingApproval.expireAt">剩余 {{ approvalCountdown }}</template>
+                </span>
+              </div>
+              <div class="approval-desc">
+                助手请求执行工具 <code class="approval-tool">{{ approvalToolName }}</code>
+                <span v-if="pendingApproval.toolType" class="approval-type">· {{ pendingApproval.toolType }}</span>
+              </div>
+              <div v-if="pendingApproval.reason" class="approval-reason">{{ pendingApproval.reason }}</div>
+              <div v-if="pendingApproval.arguments" class="approval-args">
+                <div class="approval-args-label">执行参数</div>
+                <pre class="approval-args-body">{{ prettyArgs(pendingApproval.arguments) }}</pre>
+              </div>
+              <div class="approval-actions">
+                <button
+                  class="approval-btn deny"
+                  :disabled="approvalBusy"
+                  @click="resolveApproval(false)"
+                >拒绝</button>
+                <button
+                  class="approval-btn allow"
+                  :disabled="approvalBusy"
+                  @click="resolveApproval(true)"
+                >
+                  <span v-if="approvalSubmitting" class="approval-spinner"></span>
+                  允许执行
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Typing indicator（仅流式开始前显示） -->
         <div v-if="typing && !streamingStarted" class="message-row assistant">
           <div class="message-avatar">
@@ -182,7 +228,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { chatApi } from '@shared/api/chat-api'
+import { chatApi, type ApprovalResumeResult, type PendingApproval } from '@shared/api/chat-api'
 
 interface Msg {
   role: 'user' | 'assistant'
@@ -209,6 +255,167 @@ const userId = ref('')
 const embedded = ref(false)
 const title = ref('CangJie Chat')
 const configError = ref('')
+
+/* ===== 工具审批（人工在环）===== */
+// 引擎遇到高风险工具时会写检查点挂起 run 并推 approval_required 帧，
+// 卡片把决策送回后由后端同步跑完剩余轮次；令牌只在这两处的响应里出现，丢了就只能重开会话。
+const pendingApproval = ref<PendingApproval | null>(null)
+const approvalSubmitting = ref(false)
+const approvalNow = ref(Date.now())
+let approvalTimer: ReturnType<typeof setInterval> | null = null
+
+const approvalToolName = computed(() => pendingApproval.value?.toolName || pendingApproval.value?.tool || '未知工具')
+const approvalLeftMs = computed(() => (pendingApproval.value?.expireAt ?? 0) - approvalNow.value)
+const approvalExpired = computed(
+  () => !!pendingApproval.value && pendingApproval.value.expireAt > 0 && approvalLeftMs.value <= 0
+)
+const approvalBusy = computed(() => approvalSubmitting.value || approvalExpired.value)
+const approvalRiskText = computed(() => {
+  const level = (pendingApproval.value?.riskLevel || '').toLowerCase()
+  return level === 'high' ? '高风险' : level === 'medium' ? '中风险' : '低风险'
+})
+const approvalRiskClass = computed(() => {
+  const level = (pendingApproval.value?.riskLevel || 'low').toLowerCase()
+  return level === 'high' ? 'risk-high' : level === 'medium' ? 'risk-medium' : 'risk-low'
+})
+const approvalCountdown = computed(() => {
+  const left = Math.max(0, Math.floor(approvalLeftMs.value / 1000))
+  const m = Math.floor(left / 60)
+  const s = left % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+})
+
+/** SSE 帧与恢复结果字段名不一致（tool / toolName），归一后再交给卡片 */
+function normalizeApproval(raw: any): PendingApproval | null {
+  if (!raw || !raw.approvalId || !raw.resumeToken) return null
+  return { ...raw, toolName: raw.toolName || raw.tool }
+}
+
+function setPendingApproval(raw: any) {
+  const normalized = normalizeApproval(raw)
+  if (!normalized) return
+  pendingApproval.value = normalized
+  approvalNow.value = Date.now()
+  if (!approvalTimer) {
+    approvalTimer = setInterval(() => {
+      approvalNow.value = Date.now()
+      // 超时后审批单已失效，直接收起卡片，避免出现点了才报错的死按钮
+      if (approvalExpired.value) {
+        stopApprovalCountdown()
+        pendingApproval.value = null
+        messages.value.push({ role: 'assistant', content: '审批已超时，本次运行不再恢复，请重新发起对话' })
+        scroll()
+      }
+    }, 1000)
+  }
+  scroll()
+}
+
+function clearPendingApproval() {
+  pendingApproval.value = null
+  stopApprovalCountdown()
+}
+
+function stopApprovalCountdown() {
+  if (approvalTimer) {
+    clearInterval(approvalTimer)
+    approvalTimer = null
+  }
+}
+
+/** 参数原文是 JSON 字符串，能解析就格式化缩进展示，解析不了按原样输出 */
+function prettyArgs(raw?: string): string {
+  if (!raw) return ''
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    return raw
+  }
+}
+
+/**
+ * 应用恢复执行的结果：继续挂起则换成新审批单，跑完则把回答并入消息流
+ */
+function applyResumeResult(res: ApprovalResumeResult) {
+  clearPendingApproval()
+  if (!res) {
+    messages.value.push({ role: 'assistant', content: '恢复执行失败：服务未返回结果' })
+    return
+  }
+  if (res.status === 'waiting_approval') {
+    setPendingApproval(res.pendingApproval)
+    return
+  }
+  if (res.status === 'completed') {
+    messages.value.push({
+      role: 'assistant',
+      content: res.message || '（本轮无文本产出）',
+      tokens: res.tokens,
+      duration: res.duration
+    })
+    loadSessions()
+    return
+  }
+  const reason = res.errorMessage || res.finishReason || res.status || '未知原因'
+  messages.value.push({ role: 'assistant', content: '恢复执行未成功：' + reason })
+}
+
+async function resolveApproval(approved: boolean) {
+  const target = pendingApproval.value
+  if (!target || approvalSubmitting.value) return
+  let remark = ''
+  if (!approved) {
+    // 拒绝原因会作为 tool 消息回喂模型，写清楚它才能换路子继续
+    try {
+      const { value } = await ElMessageBox.prompt('拒绝后原因会回喂给模型，便于它改用其他方式完成任务', '拒绝审批', {
+        inputPlaceholder: '例如：当前会话不需要执行该操作',
+        inputValidator: (v: string) => (v && v.trim() ? true : '请填写拒绝原因'),
+        confirmButtonText: '确认拒绝',
+        cancelButtonText: '返回'
+      })
+      remark = (value || '').trim()
+    } catch {
+      return
+    }
+  }
+  approvalSubmitting.value = true
+  typing.value = true
+  try {
+    const res = await chatApi.webDecideApproval(target.approvalId, {
+      approved,
+      resumeToken: target.resumeToken,
+      sessionId: sessionId.value || undefined,
+      remark: remark || undefined
+    })
+    applyResumeResult(res)
+  } catch (e: any) {
+    // 令牌单次生效，重复提交或已超时都不可恢复，收起卡片避免继续误点
+    clearPendingApproval()
+    messages.value.push({ role: 'assistant', content: '审批处理失败：' + (e?.message || '请稍后重试') })
+  } finally {
+    approvalSubmitting.value = false
+    typing.value = false
+    scroll()
+  }
+}
+
+/** 加载会话下未过期的待审批单（刷新页面 / 切换会话后重建卡片） */
+async function loadPendingApproval() {
+  if (!sessionId.value) {
+    clearPendingApproval()
+    return
+  }
+  try {
+    const pending = await chatApi.webPendingApproval(sessionId.value)
+    if (pending) {
+      setPendingApproval(pending)
+    } else {
+      clearPendingApproval()
+    }
+  } catch {
+    clearPendingApproval()
+  }
+}
 
 function ensureUserId() {
   if (!userId.value) {
@@ -300,6 +507,7 @@ function newChat() {
   sessionId.value = ''
   messages.value = []
   input.value = ''
+  clearPendingApproval()
 }
 
 async function send() {
@@ -325,6 +533,11 @@ async function send() {
         if (chunk?.sessionId) sessionId.value = chunk.sessionId
         if (chunk?.sources) pendingSources = chunk.sources
         continue
+      }
+      // 高风险工具挂起：本轮回答到此为止，产出改由审批决策接口同步返回
+      if (event === 'approval_required') {
+        setPendingApproval(chunk)
+        break
       }
       if (event === 'done' || event === 'error') {
         if (chunk?.error) {
@@ -413,6 +626,8 @@ async function openSession(s: any) {
   } catch {
     ElMessage.warning('加载会话消息失败')
   }
+  // 该会话可能停在待审批状态，重建卡片否则挂起的 run 无从恢复
+  loadPendingApproval()
 }
 
 onMounted(() => {
@@ -458,6 +673,7 @@ async function loadConfig() {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onWindowResize)
+  stopApprovalCountdown()
 })
 
 // 屏幕尺寸跨过阈值时自动展开/折叠对话记录（嵌入式不参与）
@@ -982,6 +1198,140 @@ function onWindowResize() {
 @keyframes typingBounce {
   0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
   40% { transform: scale(1); opacity: 1; }
+}
+
+/* ===== 审批卡片 ===== */
+.approval-avatar {
+  background: #fffbeb;
+  color: #d97706;
+  border: 1px solid #fde68a;
+}
+.approval-card {
+  max-width: 460px;
+  padding: 14px 16px;
+  background: var(--cj-surface);
+  border: 1px solid #fde68a;
+  border-left: 3px solid #f59e0b;
+  border-radius: var(--cj-radius);
+  border-top-left-radius: 4px;
+  box-shadow: var(--cj-shadow-sm);
+  &.is-expired {
+    border-left-color: var(--cj-border);
+    opacity: 0.7;
+  }
+}
+.approval-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.approval-risk {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  &.risk-low { background: var(--cj-primary-bg); color: var(--cj-primary); }
+  &.risk-medium { background: #fef3c7; color: #b45309; }
+  &.risk-high { background: #fee2e2; color: #b91c1c; }
+}
+.approval-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cj-text);
+}
+.approval-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--cj-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.approval-desc {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--cj-text-secondary);
+}
+.approval-tool {
+  padding: 1px 5px;
+  background: var(--cj-border-light);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  color: var(--cj-text);
+}
+.approval-type { color: var(--cj-text-muted); }
+.approval-reason {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--cj-text-muted);
+}
+.approval-args {
+  margin-top: 10px;
+  border: 1px solid var(--cj-border);
+  border-radius: var(--cj-radius-sm);
+  overflow: hidden;
+}
+.approval-args-label {
+  padding: 6px 10px;
+  background: var(--cj-border-light);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cj-text-secondary);
+}
+.approval-args-body {
+  margin: 0;
+  padding: 10px;
+  max-height: 160px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--cj-text);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.approval-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--cj-radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--cj-transition);
+  &:disabled { opacity: 0.55; cursor: not-allowed; }
+}
+.approval-btn.deny {
+  background: var(--cj-surface);
+  border: 1px solid var(--cj-border);
+  color: var(--cj-text-secondary);
+  &:not(:disabled):hover { border-color: #fca5a5; color: #b91c1c; }
+}
+.approval-btn.allow {
+  background: var(--cj-primary);
+  border: 1px solid var(--cj-primary);
+  color: #fff;
+  &:not(:disabled):hover { opacity: 0.9; }
+}
+.approval-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: approvalSpin 0.7s linear infinite;
+}
+@keyframes approvalSpin {
+  to { transform: rotate(360deg); }
 }
 
 /* ===== Footer ===== */

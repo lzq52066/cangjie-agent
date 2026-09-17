@@ -7,7 +7,7 @@ import cn.cangjiecloud.core.harness.HarnessConfig;
 import cn.cangjiecloud.core.harness.HarnessRequest;
 import cn.cangjiecloud.core.harness.ResumeResolver;
 import cn.cangjiecloud.core.harness.ResumeState;
-import cn.cangjiecloud.core.model.ChatMessage;
+import cn.cangjiecloud.core.harness.context.ContextResult;
 import cn.cangjiecloud.model.entity.ModelEntity;
 import cn.cangjiecloud.model.service.IModelService;
 import lombok.RequiredArgsConstructor;
@@ -15,7 +15,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -39,18 +38,15 @@ public class ChatHarnessContextFactory implements ResumeResolver {
      * 为一次新的对话执行装配输入
      *
      * @param application  应用（决定工具集、模型与采样参数）
-     * @param messages     上下文管线产出的初始消息列表
+     * @param context      上下文管线产出的装配结果（消息 + 片段留痕）
      * @param stream       是否流式
      * @param cancelFlag   取消信号（流式必填，同步可传 null）
      * @param sessionId    会话 ID
      * @param userId       用户 ID
      * @param traceId      链路 ID
-     * @param maxRounds    兜底最大轮次（现网 {@code cangjie.chat.agent.max-rounds}）
-     * @param timeoutSecs  兜底总超时秒数（现网 {@code cangjie.chat.agent.timeout-seconds}）
      */
-    public HarnessRequest newRequest(ApplicationEntity application, List<ChatMessage> messages, boolean stream,
-                                     AtomicBoolean cancelFlag, String sessionId, String userId, String traceId,
-                                     int maxRounds, long timeoutSecs) {
+    public HarnessRequest newRequest(ApplicationEntity application, ContextResult context, boolean stream,
+                                     AtomicBoolean cancelFlag, String sessionId, String userId, String traceId) {
         HarnessConfig config = configResolver.parse(application);
         return HarnessRequest.builder()
                 .traceId(traceId)
@@ -61,12 +57,13 @@ public class ChatHarnessContextFactory implements ResumeResolver {
                 .modelId(application == null ? null : application.getModelId())
                 .modelName(resolveModelName(application == null ? null : application.getModelId()))
                 .harnessType("chat")
-                .contextMessages(messages)
+                .contextMessages(context.getMessages())
+                .contextFragments(context.getFragments())
                 .stream(stream)
                 .tools(toolSpecAssembler.assemble(application))
                 .knowledgeBaseIds(toolSpecAssembler.knowledgeBaseIds(application))
                 .modelSettings(configResolver.modelSettings(application))
-                .loopPolicy(configResolver.loopPolicy(config, maxRounds, timeoutSecs))
+                .loopPolicy(configResolver.loopPolicy(config))
                 .config(config)
                 .cancelFlag(cancelFlag == null ? new AtomicBoolean() : cancelFlag)
                 .build();
