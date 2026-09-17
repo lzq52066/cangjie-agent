@@ -401,6 +401,12 @@
             <version>${lombok.version}</version>
             <scope>provided</scope>
         </dependency>
+        <!-- 所有子模块统一继承单元测试依赖（JUnit5 + Mockito + AssertJ），不加载 Spring 上下文、不连数据库 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
