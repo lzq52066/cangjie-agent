@@ -1,9 +1,8 @@
 package cn.cangjiecloud.prompt.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.prompt.entity.SkillEntity;
-
-import java.util.List;
 
 public interface ISkillService extends IService<SkillEntity> {
 
@@ -13,5 +12,5 @@ public interface ISkillService extends IService<SkillEntity> {
 
     void delete(String id);
 
-    List<SkillEntity> list(String keyword);
+    IPage<SkillEntity> pageQuery(String keyword, Integer pageNum, Integer pageSize);
 }

@@ -1,6 +1,8 @@
 package cn.cangjiecloud.model.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.core.model.*;
@@ -171,9 +173,9 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
     }
 
     @Override
-    public List<ModelEntity> list(String keyword, String modelType, String providerId) {
+    public IPage<ModelEntity> pageQuery(String keyword, String modelType, String providerId,
+                                        Integer pageNum, Integer pageSize) {
         LambdaQueryWrapper<ModelEntity> wrapper = new LambdaQueryWrapper<>();
-        wrapper.orderByDesc(ModelEntity::getIsDefault).orderByDesc(ModelEntity::getCreateTime);
         if (StringUtils.hasText(keyword)) {
             wrapper.like(ModelEntity::getName, keyword);
         }
@@ -183,7 +185,8 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
         if (StringUtils.hasText(providerId)) {
             wrapper.eq(ModelEntity::getProviderId, providerId);
         }
-        return list(wrapper);
+        wrapper.orderByDesc(ModelEntity::getIsDefault).orderByDesc(ModelEntity::getCreateTime);
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 
     @Override

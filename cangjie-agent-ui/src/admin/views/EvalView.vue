@@ -33,6 +33,9 @@
               </div>
             </div>
             <el-empty v-if="!datasets.length" description="暂无数据集，点击右上角新建" :image-size="80" />
+            <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
+                           :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
+                           :page-sizes="[10, 20, 50]" @size-change="loadDatasets" @current-change="loadDatasets" />
           </div>
         </el-card>
       </el-col>
@@ -63,6 +66,9 @@
               </template>
             </el-table-column>
           </el-table>
+          <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
+                         :total="caseTotal" v-model:current-page="casePageNum" v-model:page-size="casePageSize"
+                         :page-sizes="[10, 20, 50]" @size-change="loadCases" @current-change="loadCases" />
         </el-card>
         <el-card v-else>
           <el-empty description="请选择左侧数据集，或先新建一个数据集" :image-size="100" />
@@ -174,9 +180,15 @@ import { knowledgeApi } from '@admin/api/knowledge-api'
 const loading = ref(false)
 const datasets = ref<any[]>([])
 const current = ref<any>(null)
+const pageNum = ref(1)
+const pageSize = ref(10)
+const total = ref(0)
 
 const cases = ref<any[]>([])
 const caseLoading = ref(false)
+const casePageNum = ref(1)
+const casePageSize = ref(10)
+const caseTotal = ref(0)
 
 const knowledgeBases = ref<any[]>([])
 const models = ref<any[]>([])
@@ -189,9 +201,12 @@ const dsForm = reactive({ id: '', name: '', description: '', knowledgeBaseId: ''
 async function loadDatasets() {
   loading.value = true
   try {
-    datasets.value = await evalApi.listDatasets()
-    if (current.value) {
-      current.value = datasets.value.find(d => d.id === current.value?.id) || null
+    const page = await evalApi.listDatasets({ pageNum: pageNum.value, pageSize: pageSize.value })
+    datasets.value = page?.list || []
+    total.value = page?.total || 0
+    const matched = datasets.value.find(d => d.id === current.value?.id)
+    if (matched) {
+      current.value = matched
     }
   } finally {
     loading.value = false
@@ -200,13 +215,19 @@ async function loadDatasets() {
 
 function selectDataset(ds: any) {
   current.value = ds
-  loadCases(ds.id)
+  casePageNum.value = 1
+  loadCases()
 }
 
-async function loadCases(datasetId: string) {
+async function loadCases() {
+  if (!current.value?.id) return
   caseLoading.value = true
   try {
-    cases.value = await evalApi.listCases(datasetId)
+    const page = await evalApi.listCases(current.value.id, {
+      pageNum: casePageNum.value, pageSize: casePageSize.value
+    })
+    cases.value = page?.list || []
+    caseTotal.value = page?.total || 0
   } finally {
     caseLoading.value = false
   }
@@ -246,6 +267,9 @@ async function saveDataset() {
     ElMessage.success('创建成功')
   }
   dsDialog.value = false
+  if (!editingDs.value) {
+    pageNum.value = 1 // 列表按创建时间倒序，新建后回到首页以确保可见
+  }
   loadDatasets()
 }
 
@@ -255,6 +279,7 @@ async function deleteDataset(ds: any) {
   if (current.value?.id === ds.id) {
     current.value = null
     cases.value = []
+    caseTotal.value = 0
   }
   ElMessage.success('删除成功')
   loadDatasets()
@@ -310,14 +335,14 @@ async function saveCase() {
     ElMessage.success('添加成功')
   }
   caseDialog.value = false
-  loadCases(current.value.id)
+  loadCases()
   loadDatasets()
 }
 
 async function deleteCase(id: string) {
   await evalApi.deleteCase(id)
   ElMessage.success('删除成功')
-  if (current.value) loadCases(current.value.id)
+  if (current.value) loadCases()
   loadDatasets()
 }
 
@@ -333,7 +358,7 @@ const resultList = ref<any[]>([])
 let pollTimer: any = null
 
 function openRunDialog() {
-  if (!cases.value.length) {
+  if (!caseTotal.value) {
     ElMessage.warning('该数据集暂无用例，请先添加用例')
     return
   }
@@ -391,7 +416,7 @@ function fmt(v: any) {
 
 onMounted(async () => {
   loadDatasets()
-  const [m, k] = await Promise.allSettled([modelApi.list(), knowledgeApi.list()])
+  const [m, k] = await Promise.allSettled([modelApi.options(), knowledgeApi.options()])
   if (m.status === 'fulfilled') models.value = m.value
   if (k.status === 'fulfilled') knowledgeBases.value = k.value
 })
@@ -401,6 +426,7 @@ onMounted(async () => {
 .card-header {
   display: flex; justify-content: space-between; align-items: center;
 }
+.pager { margin-top: 16px; justify-content: flex-end; }
 .dataset-card {
   .dataset-item {
     display: flex; justify-content: space-between; align-items: center;

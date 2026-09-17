@@ -1,10 +1,13 @@
 package cn.cangjiecloud.prompt.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
 import cn.cangjiecloud.common.context.UserContext;
+import cn.cangjiecloud.common.domain.PageResult;
 import cn.cangjiecloud.common.domain.UserIdentity;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.prompt.entity.LongTermMemoryEntity;
@@ -33,14 +36,24 @@ public class MemoryController {
     private final MemoryScorer memoryScorer;
 
     /**
-     * 记忆列表（按强度评分降序），附评分信息
+     * 参与评分排序的候选集上限：评分为内存计算值无法下推 SQL，
+     * 只能先取候选集整体排序再分页，超出该窗口的记忆不参与排序。
+     */
+    private static final int SCORE_WINDOW = 1000;
+
+    /**
+     * 记忆列表（按强度评分降序），附评分信息。
+     * 排序在候选集（最多 {@value #SCORE_WINDOW} 条）上整体完成后才分页，保证跨页顺序一致。
      */
     @GetMapping
-    public R<List<Map<String, Object>>> list(@RequestParam String userId,
-                                             @RequestParam(required = false) String applicationId,
-                                             @RequestParam(required = false) String dimension,
-                                             @RequestParam(required = false) String memoryType,
-                                             @RequestParam(required = false) Boolean includeInactive) {
+    public R<PageResult<Map<String, Object>>> list(
+            @RequestParam String userId,
+            @RequestParam(required = false) String applicationId,
+            @RequestParam(required = false) String dimension,
+            @RequestParam(required = false) String memoryType,
+            @RequestParam(required = false) Boolean includeInactive,
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "10") Integer pageSize) {
         if (!StringUtils.hasText(userId)) {
             throw new ApiException("userId 不能为空");
         }
@@ -60,11 +73,18 @@ public class MemoryController {
             wrapper.eq(LongTermMemoryEntity::getIsActive, true);
         }
 
-        List<Map<String, Object>> result = longTermMemoryService.list(wrapper).stream()
+        long current = Math.max(1, pageNum == null ? 1 : pageNum);
+        long size = Math.max(1, pageSize == null ? 10 : pageSize);
+        IPage<LongTermMemoryEntity> candidates = longTermMemoryService.page(
+                new Page<>(1, SCORE_WINDOW), wrapper);
+        List<Map<String, Object>> ranked = candidates.getRecords().stream()
                 .sorted(Comparator.comparingDouble(memoryScorer::score).reversed())
                 .map(this::withScore)
                 .toList();
-        return R.data(result);
+        int from = (int) Math.min((current - 1) * size, ranked.size());
+        int to = (int) Math.min(from + size, ranked.size());
+        return R.data(new PageResult<>(ranked.subList(from, to),
+                Math.min(candidates.getTotal(), SCORE_WINDOW), current, size));
     }
 
     /**

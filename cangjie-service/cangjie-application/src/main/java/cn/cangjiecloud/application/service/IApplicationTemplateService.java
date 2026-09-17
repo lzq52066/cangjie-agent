@@ -1,10 +1,9 @@
 package cn.cangjiecloud.application.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.application.entity.ApplicationEntity;
 import cn.cangjiecloud.application.entity.ApplicationTemplateEntity;
-
-import java.util.List;
 
 /**
  * 应用模板服务：Bundle 套件模板（应用配置 + 提示词模板 + 工作流）
@@ -22,7 +21,7 @@ public interface IApplicationTemplateService extends IService<ApplicationTemplat
     ApplicationTemplateEntity saveFromApplication(String applicationId, String name,
                                                   String description, String category);
 
-    List<ApplicationTemplateEntity> listTemplates(String category);
+    IPage<ApplicationTemplateEntity> pageTemplates(String category, Integer pageNum, Integer pageSize);
 
     /**
      * 从模板创建新应用：级联创建提示词模板与工作流，并重建绑定

@@ -1,6 +1,8 @@
 package cn.cangjiecloud.tool.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.core.plugin.Plugin;
@@ -65,6 +67,19 @@ public class PluginServiceImpl extends ServiceImpl<PluginMapper, PluginEntity>
         }
         removeById(id);
         log.info("插件已删除: {} ({})", entity.getName(), id);
+    }
+
+    @Override
+    public IPage<PluginEntity> pageQuery(String keyword, String type, Integer pageNum, Integer pageSize) {
+        LambdaQueryWrapper<PluginEntity> wrapper = new LambdaQueryWrapper<>();
+        wrapper.orderByDesc(PluginEntity::getCreateTime);
+        if (StringUtils.hasText(keyword)) {
+            wrapper.like(PluginEntity::getName, keyword);
+        }
+        if (StringUtils.hasText(type)) {
+            wrapper.eq(PluginEntity::getType, type);
+        }
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 
     @Override

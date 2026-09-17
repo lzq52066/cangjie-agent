@@ -3,6 +3,7 @@ package cn.cangjiecloud.tool.controller;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.domain.PageResult;
 import cn.cangjiecloud.tool.entity.McpServerEntity;
 import cn.cangjiecloud.tool.service.IMcpServerService;
 import lombok.RequiredArgsConstructor;
@@ -23,8 +24,10 @@ public class McpServerController {
     private final IMcpServerService mcpServerService;
 
     @GetMapping
-    public R<List<McpServerEntity>> list() {
-        return R.data(mcpServerService.listServers());
+    public R<PageResult<McpServerEntity>> list(@RequestParam(required = false) String keyword,
+                                               @RequestParam(defaultValue = "1") Integer pageNum,
+                                               @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(mcpServerService.pageServers(keyword, pageNum, pageSize)));
     }
 
     @PostMapping

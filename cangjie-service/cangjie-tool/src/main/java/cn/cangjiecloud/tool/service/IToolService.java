@@ -1,6 +1,7 @@
 package cn.cangjiecloud.tool.service;
 
 import cn.cangjiecloud.core.tool.ToolSpecification;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.tool.api.dto.ToolExecuteResultDTO;
 import cn.cangjiecloud.tool.entity.ToolEntity;
@@ -16,7 +17,7 @@ public interface IToolService extends IService<ToolEntity> {
 
     void delete(String id);
 
-    List<ToolEntity> list(String keyword, String type);
+    IPage<ToolEntity> pageQuery(String keyword, String type, Integer pageNum, Integer pageSize);
 
     /**
      * 执行工具（策略分发）

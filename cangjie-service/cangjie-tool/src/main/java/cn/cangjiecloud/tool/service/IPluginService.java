@@ -1,5 +1,6 @@
 package cn.cangjiecloud.tool.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.tool.entity.PluginEntity;
 
@@ -13,6 +14,11 @@ public interface IPluginService extends IService<PluginEntity> {
 
     void delete(String id);
 
+    IPage<PluginEntity> pageQuery(String keyword, String type, Integer pageNum, Integer pageSize);
+
+    /**
+     * 全量列表（供插件扫描同步等内部逻辑复用，勿用于分页接口）
+     */
     List<PluginEntity> list(String keyword, String type);
 
     /**

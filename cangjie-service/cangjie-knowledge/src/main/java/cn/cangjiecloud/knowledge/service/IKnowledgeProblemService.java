@@ -1,5 +1,6 @@
 package cn.cangjiecloud.knowledge.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.knowledge.api.dto.ProblemCreateDTO;
 import cn.cangjiecloud.knowledge.entity.KnowledgeProblemEntity;
@@ -12,7 +13,7 @@ import java.util.Map;
  */
 public interface IKnowledgeProblemService extends IService<KnowledgeProblemEntity> {
 
-    List<KnowledgeProblemEntity> listByKnowledgeBase(String knowledgeBaseId);
+    IPage<KnowledgeProblemEntity> pageQuery(String knowledgeBaseId, Integer pageNum, Integer pageSize);
 
     /**
      * 创建问题并关联段落
@@ -29,9 +30,9 @@ public interface IKnowledgeProblemService extends IService<KnowledgeProblemEntit
     void associate(String problemId, List<String> paragraphIds);
 
     /**
-     * 查询问题的关联段落
+     * 分页查询问题的关联段落 ID
      */
-    List<String> listParagraphIds(String problemId);
+    IPage<String> pageQueryParagraphIds(String problemId, Integer pageNum, Integer pageSize);
 
     /**
      * 问题路召回：按查询文本匹配问题，返回命中的段落 ID（附问题内容）

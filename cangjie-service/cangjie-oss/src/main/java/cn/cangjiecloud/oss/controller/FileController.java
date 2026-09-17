@@ -2,10 +2,10 @@ package cn.cangjiecloud.oss.controller;
 
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.domain.PageResult;
 import cn.cangjiecloud.oss.entity.FileEntity;
 import cn.cangjiecloud.oss.service.IFileService;
 import cn.dev33.satoken.annotation.SaCheckLogin;
-import com.baomidou.mybatisplus.core.metadata.IPage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -72,10 +72,10 @@ public class FileController {
      * 文件列表
      */
     @GetMapping
-    public R<IPage<FileEntity>> list(@RequestParam(required = false) String keyword,
-                                     @RequestParam(required = false) String category,
-                                     @RequestParam(defaultValue = "1") Integer pageNum,
-                                     @RequestParam(defaultValue = "10") Integer pageSize) {
-        return R.data(fileService.pageQuery(keyword, category, pageNum, pageSize));
+    public R<PageResult<FileEntity>> list(@RequestParam(required = false) String keyword,
+                                          @RequestParam(required = false) String category,
+                                          @RequestParam(defaultValue = "1") Integer pageNum,
+                                          @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(fileService.pageQuery(keyword, category, pageNum, pageSize)));
     }
 }

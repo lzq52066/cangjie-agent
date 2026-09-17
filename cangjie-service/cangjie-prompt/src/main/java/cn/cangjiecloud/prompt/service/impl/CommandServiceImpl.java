@@ -1,6 +1,8 @@
 package cn.cangjiecloud.prompt.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.prompt.entity.CommandEntity;
@@ -10,8 +12,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
-
-import java.util.List;
 
 @Slf4j
 @Service
@@ -51,14 +51,15 @@ public class CommandServiceImpl extends ServiceImpl<CommandMapper, CommandEntity
     }
 
     @Override
-    public List<CommandEntity> list(String keyword) {
+    public IPage<CommandEntity> pageQuery(String keyword, Integer pageNum, Integer pageSize) {
         LambdaQueryWrapper<CommandEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.orderByDesc(CommandEntity::getCreateTime);
-        if (StringUtils.hasText(keyword)) {
-            wrapper.like(CommandEntity::getName, keyword)
-                    .or().like(CommandEntity::getCommand, keyword)
-                    .or().like(CommandEntity::getDescription, keyword);
-        }
-        return list(wrapper);
+        wrapper.and(StringUtils.hasText(keyword), w -> w
+                .like(CommandEntity::getName, keyword)
+                .or()
+                .like(CommandEntity::getCommand, keyword)
+                .or()
+                .like(CommandEntity::getDescription, keyword));
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 }

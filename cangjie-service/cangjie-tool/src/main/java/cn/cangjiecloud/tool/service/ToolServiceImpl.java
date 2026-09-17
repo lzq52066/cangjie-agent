@@ -1,6 +1,8 @@
 package cn.cangjiecloud.tool.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.core.plugin.Plugin;
@@ -75,7 +77,7 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
     }
 
     @Override
-    public List<ToolEntity> list(String keyword, String type) {
+    public IPage<ToolEntity> pageQuery(String keyword, String type, Integer pageNum, Integer pageSize) {
         LambdaQueryWrapper<ToolEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.orderByDesc(ToolEntity::getCreateTime);
         if (StringUtils.hasText(keyword)) {
@@ -84,7 +86,7 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
         if (StringUtils.hasText(type)) {
             wrapper.eq(ToolEntity::getType, type);
         }
-        return list(wrapper);
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 
     // ========== 工具执行（策略分发） ==========

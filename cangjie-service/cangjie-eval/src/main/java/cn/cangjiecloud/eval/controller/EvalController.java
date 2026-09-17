@@ -1,6 +1,7 @@
 package cn.cangjiecloud.eval.controller;
 
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.domain.PageResult;
 import cn.cangjiecloud.eval.entity.EvalCaseEntity;
 import cn.cangjiecloud.eval.entity.EvalDatasetEntity;
 import cn.cangjiecloud.eval.entity.EvalRunEntity;
@@ -11,7 +12,6 @@ import cn.dev33.satoken.annotation.SaCheckLogin;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -33,8 +33,10 @@ public class EvalController {
     // ========== 数据集 ==========
 
     @GetMapping("/datasets")
-    public List<EvalDatasetEntity> listDatasets(@RequestParam(required = false) String keyword) {
-        return datasetService.list(keyword);
+    public PageResult<EvalDatasetEntity> listDatasets(@RequestParam(required = false) String keyword,
+                                                      @RequestParam(defaultValue = "1") Integer pageNum,
+                                                      @RequestParam(defaultValue = "10") Integer pageSize) {
+        return PageResult.of(datasetService.pageQuery(keyword, pageNum, pageSize));
     }
 
     @PostMapping("/datasets")
@@ -55,8 +57,10 @@ public class EvalController {
     // ========== 用例 ==========
 
     @GetMapping("/datasets/{datasetId}/cases")
-    public List<EvalCaseEntity> listCases(@PathVariable String datasetId) {
-        return caseService.listByDataset(datasetId);
+    public PageResult<EvalCaseEntity> listCases(@PathVariable String datasetId,
+                                                @RequestParam(defaultValue = "1") Integer pageNum,
+                                                @RequestParam(defaultValue = "10") Integer pageSize) {
+        return PageResult.of(caseService.pageQuery(datasetId, pageNum, pageSize));
     }
 
     @PostMapping("/datasets/{datasetId}/cases")

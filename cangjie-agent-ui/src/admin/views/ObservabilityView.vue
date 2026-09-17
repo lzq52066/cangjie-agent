@@ -64,7 +64,7 @@
         <div class="toolbar">
           <div class="toolbar-left">
             <el-select v-model="metricQuery.metricType" placeholder="全部类型" clearable style="width:120px"
-                       @change="loadMetrics">
+                       @change="loadMetricCharts">
               <el-option v-for="t in metricTypes" :key="t.value" :label="t.label" :value="t.value" />
             </el-select>
             <el-date-picker
@@ -76,9 +76,9 @@
               format="YYYY-MM-DD HH:mm"
               value-format="YYYY-MM-DDTHH:mm:ss"
               style="width: 360px"
-              @change="loadMetrics"
+              @change="loadMetricCharts"
             />
-            <el-button type="primary" :loading="loading" @click="loadMetrics">查询</el-button>
+            <el-button type="primary" :loading="loading" @click="loadMetricCharts">查询</el-button>
           </div>
           <div class="toolbar-right">
             <el-button type="success" :loading="collecting" @click="handleCollect">
@@ -96,36 +96,12 @@
                     :title="`时间范围内共 ${metricsTotal} 条指标，图表仅展示最新 ${systemMetrics.length} 条，建议缩小时间范围或按类型筛选`"
                     style="margin-bottom:12px" />
 
+          <!-- 同一类型内量纲不同的指标拆成多张图，避免坐标轴被最大量程拉伸后小量级曲线贴底 -->
           <div class="metrics-charts">
-          <!-- CPU -->
-          <el-card v-if="chartData.cpu" class="chart-card" shadow="hover">
-            <template #header><span class="chart-title">CPU</span></template>
-            <div :ref="el => setChartRef('cpu', el)" class="chart-box"></div>
-          </el-card>
-
-          <!-- 内存 -->
-          <el-card v-if="chartData.memory" class="chart-card" shadow="hover">
-            <template #header><span class="chart-title">内存 (MB)</span></template>
-            <div :ref="el => setChartRef('memory', el)" class="chart-box"></div>
-          </el-card>
-
-          <!-- 线程 -->
-          <el-card v-if="chartData.thread" class="chart-card" shadow="hover">
-            <template #header><span class="chart-title">线程</span></template>
-            <div :ref="el => setChartRef('thread', el)" class="chart-box"></div>
-          </el-card>
-
-          <!-- 磁盘 -->
-          <el-card v-if="chartData.disk" class="chart-card" shadow="hover">
-            <template #header><span class="chart-title">磁盘 (GB)</span></template>
-            <div :ref="el => setChartRef('disk', el)" class="chart-box"></div>
-          </el-card>
-
-          <!-- GC -->
-          <el-card v-if="chartData.gc" class="chart-card" shadow="hover">
-            <template #header><span class="chart-title">GC</span></template>
-            <div :ref="el => setChartRef('gc', el)" class="chart-box"></div>
-          </el-card>
+            <el-card v-for="g in chartGroups" :key="g" class="chart-card" shadow="hover">
+              <template #header><span class="chart-title">{{ chartData[g].title }}</span></template>
+              <div :ref="el => setChartRef(g, el)" class="chart-box"></div>
+            </el-card>
           </div>
         </template>
       </template>
@@ -308,7 +284,11 @@ import { observabilityApi } from '@admin/api/observability-api'
 const metricTypes = [
   { label: 'CPU', value: 'cpu' },
   { label: '内存', value: 'memory' },
+  { label: '内存池', value: 'memory_pool' },
+  { label: '堆外内存', value: 'buffer_pool' },
   { label: '线程', value: 'thread' },
+  { label: '文件句柄', value: 'file_descriptor' },
+  { label: 'JVM', value: 'jvm' },
   { label: '磁盘', value: 'disk' },
   { label: 'GC', value: 'gc' },
 ]
@@ -339,16 +319,56 @@ const llmTraces = ref<any[]>([])
 const llmTraceQuery = reactive({ traceId: '', appName: '', modelName: '', sessionId: '', promptKeyword: '', responseKeyword: '', status: '', timeRange: null as [string, string] | null })
 
 // 图表相关
+interface ChartGroup {
+  title: string
+  categories: string[]
+  series: { name: string; data: (number | null)[] }[]
+  multiDay: boolean
+}
+
 const systemMetrics = ref<any[]>([])
 const hasMetricsData = computed(() => systemMetrics.value.length > 0)
 const metricsTotal = ref(0)
 const metricsTruncated = computed(() => metricsTotal.value > systemMetrics.value.length)
 const chartRefs: Record<string, any> = {}
 const chartInstances: Record<string, echarts.ECharts> = {}
-const chartData = reactive<Record<string, { categories: string[]; series: { name: string; data: number[] }[]; multiDay: boolean }>>({})
+const chartData = reactive<Record<string, ChartGroup>>({})
+// buildChartData 已按类型、单位排好序，这里保持卡片顺序与 metricTypes 一致
+const chartGroups = computed(() => Object.keys(chartData))
 
 function setChartRef(key: string, el: any) {
   if (el) chartRefs[key] = el
+}
+
+const TYPE_LABEL: Record<string, string> = Object.fromEntries(metricTypes.map(t => [t.value, t.label]))
+
+/** 拆分后图表的标题，未命中时回退为「类型 (单位)」 */
+const GROUP_TITLE_CN: Record<string, string> = {
+  'cpu#核': 'CPU 核数 / 负载',
+  'jvm#秒': 'JVM 运行时长 (秒)',
+  'jvm#个': '类加载数量 (个)',
+  'file_descriptor#%': '文件句柄使用率 (%)',
+  'gc#次': 'GC 回收次数 (次)',
+  'gc#ms': 'GC 回收耗时 (ms)',
+  'buffer_pool#个': '堆外缓冲区数量 (个)',
+}
+
+/**
+ * 图表分组键：同一类型下单位不同的指标不能共用一个坐标轴，
+ * 否则小量级曲线会被大量程压成直线（如 GC 的回收次数与耗时、JVM 的运行时长与类加载数）。
+ * CPU 可用核数与系统负载均值同为「核」量级，合并到一张图更有参照意义。
+ */
+function resolveGroupKey(metricType: string, unit?: string): string {
+  const u = (unit || '').trim()
+  if (metricType === 'cpu' && (u === '核' || u === '')) return 'cpu#核'
+  return `${metricType}#${u}`
+}
+
+function groupTitle(metricType: string, unit: string): string {
+  const key = resolveGroupKey(metricType, unit)
+  if (GROUP_TITLE_CN[key]) return GROUP_TITLE_CN[key]
+  const label = TYPE_LABEL[metricType] || metricType
+  return unit ? `${label} (${unit})` : label
 }
 
 // 指标名中英映射
@@ -362,6 +382,21 @@ const METRIC_NAME_CN: Record<string, string> = {
   thread_count: '线程数',
   daemon_thread_count: '守护线程数',
   peak_thread_count: '峰值线程数',
+  total_started_thread_count: '累计启动线程数',
+  runnable_thread_count: '可运行线程数',
+  blocked_thread_count: '阻塞线程数',
+  waiting_thread_count: '等待线程数',
+  timed_waiting_thread_count: '超时等待线程数',
+  deadlock_thread_count: '死锁线程数',
+  // 文件句柄
+  open_file_descriptors: '已打开句柄数',
+  max_file_descriptors: '句柄数上限',
+  file_descriptor_usage: '句柄使用率',
+  // JVM
+  uptime: 'JVM 运行时长',
+  loaded_class_count: '已加载类数',
+  total_loaded_class_count: '累计加载类数',
+  unloaded_class_count: '已卸载类数',
   // CPU
   available_processors: '可用处理器',
   system_load_average: '系统负载均值',
@@ -370,25 +405,83 @@ const METRIC_NAME_CN: Record<string, string> = {
   // GC
   collection_count: 'GC次数',
   collection_time: 'GC耗时',
+  full_gc_count: 'Full GC次数',
+  full_gc_time: 'Full GC耗时',
+}
+
+// GC 收集器名中英映射（JVM 按收集器实现上报，未命中时保留原名）
+const GC_COLLECTOR_CN: Record<string, string> = {
+  // G1
+  'G1 Young Generation': 'G1 年轻代',
+  'G1 Old Generation': 'G1 老年代',
+  // Parallel / Serial / CMS
+  'PS Scavenge': 'Parallel 年轻代',
+  'PS MarkSweep': 'Parallel 老年代',
+  'ParNew': 'CMS 年轻代',
+  'ConcurrentMarkSweep': 'CMS 老年代',
+  'Serial Scavenge': 'Serial 年轻代',
+  'Serial Old': 'Serial 老年代',
+  'Copy': 'Serial 年轻代',
+  'MarkSweepCompact': 'Serial 老年代',
+  // ZGC（非分代时每次回收整个堆，Pauses 为单次回收内的停顿）
+  'ZGC': 'ZGC 回收',
+  'ZGC Cycles': 'ZGC 整堆回收',
+  'ZGC Pauses': 'ZGC 停顿',
+  'ZGC Minor GC': 'ZGC 年轻代',
+  'ZGC Major GC': 'ZGC 老年代',
+  // Shenandoah
+  'Shenandoah': 'Shenandoah 回收',
+  'Shenandoah Cycles': 'Shenandoah 整堆回收',
+  'Shenandoah Pauses': 'Shenandoah 停顿',
+  'Shenandoah Young': 'Shenandoah 年轻代',
+  'Shenandoah Old': 'Shenandoah 老年代',
+}
+
+// 内存池 / 堆外缓冲区名中英映射（JVM 按实现上报池名，未命中时保留原名）
+const POOL_NAME_CN: Record<string, string> = {
+  Metaspace: '元空间',
+  'Compressed Class Space': '压缩类空间',
+  "CodeHeap 'non-nmethods'": '代码堆(非方法)',
+  "CodeHeap 'profiled nmethods'": '代码堆(profiled)',
+  "CodeHeap 'non-profiled nmethods'": '代码堆(non-profiled)',
+  direct: '直接内存',
+  mapped: '映射内存',
+  "mapped - 'non-volatile memory'": '映射内存(非易失)',
+}
+
+// 池类指标后缀含义
+const POOL_SUFFIX_CN: Record<string, string> = {
+  used: '已用量',
+  max: '上限',
+  count: '缓冲区数量',
+  memory_used: '已用量',
+  total_capacity: '总容量',
 }
 
 function translateMetricName(name: string): string {
   // 精确匹配
   if (METRIC_NAME_CN[name]) return METRIC_NAME_CN[name]
+  // 内存池 / 堆外缓冲区指标: <池名>_used / _max / _count / _memory_used / _total_capacity
+  const pool = name.match(/^(.+?)_(total_capacity|memory_used|count|max|used)$/)
+  if (pool && POOL_NAME_CN[pool[1]]) return POOL_NAME_CN[pool[1]] + ' ' + POOL_SUFFIX_CN[pool[2]]
   // 磁盘指标: xxx_total / xxx_usable / xxx_used
   if (name.endsWith('_total')) return name.replace(/_total$/, '') + ' 总空间'
   if (name.endsWith('_usable')) return name.replace(/_usable$/, '') + ' 可用空间'
   if (name.endsWith('_used')) return name.replace(/_used$/, '') + ' 已用空间'
-  // GC 指标: xx_collection_count / xx_collection_time
+  // GC 指标: <收集器名>_collection_count / <收集器名>_collection_time
   const gcCount = name.match(/^(.+)_collection_count$/)
-  if (gcCount) return gcCount[1] + ' GC次数'
+  if (gcCount) return translateGcCollector(gcCount[1]) + ' GC次数'
   const gcTime = name.match(/^(.+)_collection_time$/)
-  if (gcTime) return gcTime[1] + ' GC耗时'
+  if (gcTime) return translateGcCollector(gcTime[1]) + ' GC耗时'
   return name
 }
 
-function buildChartData(records: any[]): Record<string, { categories: string[]; series: { name: string; data: number[] }[]; multiDay: boolean }> {
-  const result: Record<string, any> = {}
+function translateGcCollector(collectorName: string): string {
+  return GC_COLLECTOR_CN[collectorName] || collectorName
+}
+
+function buildChartData(records: any[]): Record<string, ChartGroup> {
+  const result: Record<string, ChartGroup> = {}
   const sorted = [...records].sort((a, b) =>
     new Date(a.collectTime).getTime() - new Date(b.collectTime).getTime()
   )
@@ -405,23 +498,29 @@ function buildChartData(records: any[]): Record<string, { categories: string[]; 
   }
 
   const grouped: Record<string, Record<string, Map<string, number>>> = {}
+  const meta: Record<string, { metricType: string; unit: string }> = {}
   for (const r of sorted) {
-    const type = r.metricType
-    if (!grouped[type]) grouped[type] = {}
-    if (!grouped[type][r.metricName]) grouped[type][r.metricName] = new Map()
-    grouped[type][r.metricName].set(r.collectTime, r.metricValue)
+    const key = resolveGroupKey(r.metricType, r.unit)
+    if (!grouped[key]) {
+      grouped[key] = {}
+      meta[key] = { metricType: r.metricType, unit: (r.unit || '').trim() }
+    }
+    if (!grouped[key][r.metricName]) grouped[key][r.metricName] = new Map()
+    grouped[key][r.metricName].set(r.collectTime, r.metricValue)
   }
 
-  for (const type of Object.keys(grouped)) {
-    const series: { name: string; data: number[] }[] = []
-    for (const name of Object.keys(grouped[type])) {
-      const map = grouped[type][name]
-      series.push({
-        name: translateMetricName(name),
-        data: times.map(t => map.get(t) ?? null as any)
-      })
+  // 卡片顺序与筛选器里的类型顺序一致，同一类型内按单位排序
+  const typeOrder = metricTypes.map(t => t.value)
+  const keys = Object.keys(grouped).sort((a, b) => {
+    const diff = typeOrder.indexOf(meta[a].metricType) - typeOrder.indexOf(meta[b].metricType)
+    return diff !== 0 ? diff : a.localeCompare(b)
+  })
+  for (const key of keys) {
+    const series: { name: string; data: (number | null)[] }[] = []
+    for (const [name, map] of Object.entries(grouped[key])) {
+      series.push({ name: translateMetricName(name), data: times.map(t => map.get(t) ?? null) })
     }
-    result[type] = { categories: times, series, multiDay }
+    result[key] = { title: groupTitle(meta[key].metricType, meta[key].unit), categories: times, series, multiDay }
   }
   return result
 }
@@ -435,15 +534,15 @@ function formatAxisTime(t: string, multiDay: boolean): string {
   return multiDay ? datePart.substring(5) + ' ' + timePart : timePart
 }
 
-function renderChart(type: string, data: { categories: string[]; series: { name: string; data: number[] }[]; multiDay?: boolean }) {
-  const dom = chartRefs[type]
+function renderChart(key: string, data: ChartGroup) {
+  const dom = chartRefs[key]
   if (!dom) return
-  if (chartInstances[type]) {
-    chartInstances[type].dispose()
-    delete chartInstances[type]
+  if (chartInstances[key]) {
+    chartInstances[key].dispose()
+    delete chartInstances[key]
   }
   const chart = echarts.init(dom)
-  chartInstances[type] = chart
+  chartInstances[key] = chart
   const multiDay = data.multiDay || false
   chart.setOption({
     tooltip: {
@@ -488,10 +587,17 @@ function renderChart(type: string, data: { categories: string[]; series: { name:
 
 function renderAllCharts() {
   nextTick(() => {
+    // 先释放上一次的实例与分组：切换类型筛选后残留的分组会一直显示旧数据
+    for (const key of Object.keys(chartInstances)) {
+      chartInstances[key].dispose()
+      delete chartInstances[key]
+    }
+    for (const key of Object.keys(chartRefs)) delete chartRefs[key]
+    for (const key of Object.keys(chartData)) delete chartData[key]
     Object.assign(chartData, buildChartData(systemMetrics.value))
     nextTick(() => {
-      for (const type of Object.keys(chartData)) {
-        renderChart(type, chartData[type])
+      for (const key of Object.keys(chartData)) {
+        renderChart(key, chartData[key])
       }
     })
   })
@@ -548,7 +654,7 @@ function formatTimeParam(d: Date): string {
 async function loadMetricCharts() {
   loading.value = true
   try {
-    // 后端每 60s 采集约 14 条指标；按时间范围动态放大 pageSize，超出上限时提示截断
+    // 后端每 60s 按类型采集约 55 条指标；按时间范围动态放大 pageSize，超出上限时提示截断
     const DEFAULT_SIZE = 500
     const MAX_SIZE = 5000
     let size = DEFAULT_SIZE
@@ -556,7 +662,7 @@ async function loadMetricCharts() {
       const start = new Date(metricQuery.dateRange[0]).getTime()
       const end = new Date(metricQuery.dateRange[1]).getTime()
       const minutes = Math.max(1, Math.ceil((end - start) / 60000))
-      size = Math.min(MAX_SIZE, Math.max(DEFAULT_SIZE, minutes * 15 + 100))
+      size = Math.min(MAX_SIZE, Math.max(DEFAULT_SIZE, minutes * 60 + 100))
     }
     const params: any = { metricType: metricQuery.metricType || undefined, pageNum: 1, pageSize: size }
     if (metricQuery.dateRange) {
@@ -702,31 +808,12 @@ function handleResize() {
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .toolbar-left { display: flex; gap: 12px; flex-wrap: wrap; }
 .pager { margin-top: 16px; justify-content: flex-end; }
-.chart-grid { display: flex; flex-wrap: wrap; gap: 18px; }
 .chart-card {
   background: #fff; border: 1px solid #e8eaef; border-radius: 10px;
-  padding: 0; flex: 1 1 48%; min-width: 460px; overflow: hidden;
+  padding: 0; overflow: hidden; min-height: 320px;
   box-shadow: 0 1px 4px rgba(0,0,0,0.04); transition: box-shadow .25s;
 }
 .chart-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
-.chart-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 14px 18px; background: linear-gradient(135deg, #f8f9fc 0%, #f0f2f7 100%);
-  border-bottom: 1px solid #e8eaef;
-}
-.type-badge {
-  display: inline-block; padding: 3px 14px; border-radius: 20px;
-  font-size: 13px; font-weight: 600; letter-spacing: 0.5px;
-}
-.badge-cpu { background: #e6f7ff; color: #1890ff; }
-.badge-memory { background: #f6ffed; color: #52c41a; }
-.badge-thread { background: #fff7e6; color: #fa8c16; }
-.badge-disk { background: #fff0f6; color: #eb2f96; }
-.badge-gc { background: #f3e8ff; color: #7c3aed; }
-.badge-other { background: #f5f5f5; color: #8c8c8c; }
-.series-count { font-size: 12px; color: #8c8c8c; }
-.chart-body { height: 340px; width: 100%; padding: 4px 0; }
-.empty-chart { width: 100%; text-align: center; color: #a8abb2; padding: 60px 0; font-size: 14px; }
 .code-block {
   background: #f9fafc; border: 1px solid #ebeef5; border-radius: 8px; padding: 12px;
   max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all;
@@ -739,9 +826,6 @@ function handleResize() {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 16px;
-}
-.chart-card {
-  min-height: 320px;
 }
 .chart-title {
   font-size: 15px;
@@ -777,10 +861,7 @@ function handleResize() {
 @media (max-width: 768px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 10px; }
   .stat-value { font-size: 22px; }
-  /* 旧版 flex 图表卡的最小宽度在窄屏下去掉，改为单列不溢出 */
-  .chart-grid { flex-direction: column; gap: 12px; }
-  .chart-card { flex: 1 1 100%; min-width: 0; min-height: auto; }
-  .chart-body { height: 260px; }
+  .chart-card { min-height: auto; }
   .chart-box { height: 240px; }
   .pager { justify-content: center; }
 }

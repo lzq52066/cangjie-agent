@@ -1,6 +1,8 @@
 package cn.cangjiecloud.model.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.model.api.dto.ModelProviderCreateDTO;
@@ -18,7 +20,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.util.List;
 import java.util.Objects;
 
 @Slf4j
@@ -102,9 +103,8 @@ public class ModelProviderServiceImpl extends ServiceImpl<ModelProviderMapper, M
     }
 
     @Override
-    public List<ModelProviderEntity> list(String keyword, String status) {
+    public IPage<ModelProviderEntity> pageQuery(String keyword, String status, Integer pageNum, Integer pageSize) {
         LambdaQueryWrapper<ModelProviderEntity> wrapper = new LambdaQueryWrapper<>();
-        wrapper.orderByAsc(ModelProviderEntity::getCode);
         if (StringUtils.hasText(keyword)) {
             wrapper.and(w -> w.like(ModelProviderEntity::getName, keyword)
                     .or().like(ModelProviderEntity::getCode, keyword));
@@ -112,9 +112,10 @@ public class ModelProviderServiceImpl extends ServiceImpl<ModelProviderMapper, M
         if (StringUtils.hasText(status)) {
             wrapper.eq(ModelProviderEntity::getStatus, status);
         }
-        List<ModelProviderEntity> providers = list(wrapper);
-        providers.forEach(this::masked);
-        return providers;
+        wrapper.orderByAsc(ModelProviderEntity::getCode);
+        // 分页结果逐条脱敏 API Key
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper)
+                .convert(this::masked);
     }
 
     private ModelProviderEntity masked(ModelProviderEntity entity) {

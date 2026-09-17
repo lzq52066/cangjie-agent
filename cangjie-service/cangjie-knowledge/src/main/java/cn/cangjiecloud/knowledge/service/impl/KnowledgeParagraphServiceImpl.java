@@ -1,6 +1,8 @@
 package cn.cangjiecloud.knowledge.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.knowledge.entity.KnowledgeParagraphEntity;
 import cn.cangjiecloud.knowledge.mapper.KnowledgeParagraphMapper;
@@ -19,6 +21,14 @@ public class KnowledgeParagraphServiceImpl
         return list(new LambdaQueryWrapper<KnowledgeParagraphEntity>()
                 .eq(KnowledgeParagraphEntity::getDocumentId, documentId)
                 .orderByAsc(KnowledgeParagraphEntity::getChunkIndex));
+    }
+
+    @Override
+    public IPage<KnowledgeParagraphEntity> pageQuery(String documentId, Integer pageNum, Integer pageSize) {
+        LambdaQueryWrapper<KnowledgeParagraphEntity> wrapper = new LambdaQueryWrapper<KnowledgeParagraphEntity>()
+                .eq(KnowledgeParagraphEntity::getDocumentId, documentId)
+                .orderByAsc(KnowledgeParagraphEntity::getChunkIndex);
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 
     @Override

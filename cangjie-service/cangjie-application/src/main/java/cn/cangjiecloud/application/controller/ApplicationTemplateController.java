@@ -7,6 +7,7 @@ import cn.cangjiecloud.application.entity.ApplicationTemplateEntity;
 import cn.cangjiecloud.application.service.IApplicationTemplateService;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.domain.PageResult;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -35,8 +36,10 @@ public class ApplicationTemplateController {
     }
 
     @GetMapping
-    public R<List<ApplicationTemplateEntity>> list(@RequestParam(required = false) String category) {
-        return R.data(templateService.listTemplates(category));
+    public R<PageResult<ApplicationTemplateEntity>> list(@RequestParam(required = false) String category,
+                                                         @RequestParam(defaultValue = "1") Integer pageNum,
+                                                         @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(templateService.pageTemplates(category, pageNum, pageSize)));
     }
 
     /**

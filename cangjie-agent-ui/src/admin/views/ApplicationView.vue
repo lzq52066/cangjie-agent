@@ -5,10 +5,10 @@
         <div class="card-header">
           <div class="header-left">
             <el-input v-model="keyword" placeholder="搜索应用..." clearable style="width: 200px"
-                      @clear="loadList" @keyup.enter="loadList">
+                      @clear="reload" @keyup.enter="reload">
               <template #prefix><el-icon><Search /></el-icon></template>
             </el-input>
-            <el-select v-model="filterType" placeholder="全部类型" clearable style="width: 140px" @change="loadList">
+            <el-select v-model="filterType" placeholder="全部类型" clearable style="width: 140px" @change="reload">
               <el-option v-for="t in appTypes" :key="t.code" :label="t.label" :value="t.code" />
             </el-select>
           </div>
@@ -76,6 +76,10 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
+                     :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
+                     :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
     </el-card>
 
     <!-- 创建/编辑 -->
@@ -248,6 +252,9 @@ const list = ref<any[]>([])
 const loading = ref(false)
 const keyword = ref('')
 const filterType = ref('')
+const pageNum = ref(1)
+const pageSize = ref(10)
+const total = ref(0)
 const saving = ref(false)
 const current = ref<any>(null)
 
@@ -301,10 +308,21 @@ function countJson(text?: string) {
 async function loadList() {
   loading.value = true
   try {
-    list.value = await applicationApi.list(keyword.value, filterType.value)
+    const page = await applicationApi.list({
+      keyword: keyword.value, type: filterType.value,
+      pageNum: pageNum.value, pageSize: pageSize.value
+    })
+    list.value = page?.list || []
+    total.value = page?.total || 0
   } finally {
     loading.value = false
   }
+}
+
+/** 搜索/切换筛选条件时回到第一页，避免停留在无数据的第 N 页 */
+function reload() {
+  pageNum.value = 1
+  loadList()
 }
 
 function openCreate() {
@@ -445,9 +463,9 @@ async function copy(text?: string) {
 onMounted(async () => {
   loadList()
   const [m, k, t, s, r, tl] = await Promise.allSettled([
-    modelApi.list(), knowledgeApi.list(),
-    promptApi.template.list(), promptApi.skill.list(), promptApi.rule.list(),
-    toolApi.list()
+    modelApi.options(), knowledgeApi.options(),
+    promptApi.template.options(), promptApi.skill.options(), promptApi.rule.options(),
+    toolApi.options()
   ])
   if (m.status === 'fulfilled') models.value = m.value
   if (k.status === 'fulfilled') knowledgeBases.value = k.value
@@ -478,4 +496,5 @@ onMounted(async () => {
 .suggestion-editor { width: 100%; }
 .suggestion-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
 .form-hint { font-size: 12px; color: #909399; margin-top: 6px; }
+.pager { margin-top: 16px; justify-content: flex-end; }
 </style>

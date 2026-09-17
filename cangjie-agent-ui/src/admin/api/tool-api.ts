@@ -1,8 +1,19 @@
 import { request } from '@shared/api/http'
+import type { PageQuery, PageResult } from '@shared/types'
+import { OPTION_PAGE_SIZE } from '@shared/types'
+
+export interface ToolQuery extends PageQuery {
+  type?: string
+}
 
 export const toolApi = {
-  list(keyword?: string, type?: string) {
-    return request<any[]>({ method: 'GET', url: '/tool', params: { keyword, type } })
+  list(query: ToolQuery = {}) {
+    return request<PageResult<any>>({ method: 'GET', url: '/tool', params: query })
+  },
+  /** 供下拉选择使用的精简列表 */
+  async options(type?: string) {
+    const res = await toolApi.list({ pageSize: OPTION_PAGE_SIZE, type })
+    return res?.list ?? []
   },
   get(id: string) {
     return request<any>({ method: 'GET', url: `/tool/${id}` })
@@ -23,8 +34,13 @@ export const toolApi = {
 }
 
 export const pluginApi = {
-  list(keyword?: string, type?: string) {
-    return request<any[]>({ method: 'GET', url: '/plugin', params: { keyword, type } })
+  list(query: ToolQuery = {}) {
+    return request<PageResult<any>>({ method: 'GET', url: '/plugin', params: query })
+  },
+  /** 供下拉选择使用的精简列表 */
+  async options(type?: string) {
+    const res = await pluginApi.list({ pageSize: OPTION_PAGE_SIZE, type })
+    return res?.list ?? []
   },
   get(id: string) {
     return request<any>({ method: 'GET', url: `/plugin/${id}` })

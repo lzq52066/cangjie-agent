@@ -2,8 +2,7 @@ package cn.cangjiecloud.application.service;
 
 import cn.cangjiecloud.application.api.dto.ApplicationRollbackDTO;
 import cn.cangjiecloud.application.api.dto.ApplicationVersionDTO;
-
-import java.util.List;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 
 public interface IApplicationVersionService {
 
@@ -13,9 +12,9 @@ public interface IApplicationVersionService {
     ApplicationVersionDTO getVersion(String versionId);
 
     /**
-     * 按应用 ID 查询版本列表
+     * 按应用 ID 分页查询版本列表
      */
-    List<ApplicationVersionDTO> listByApplication(String applicationId);
+    IPage<ApplicationVersionDTO> pageByApplication(String applicationId, Integer pageNum, Integer pageSize);
 
     /**
      * 发布新版本：将当前应用状态快照为新的 version

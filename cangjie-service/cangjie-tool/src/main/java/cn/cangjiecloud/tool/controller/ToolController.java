@@ -3,14 +3,13 @@ package cn.cangjiecloud.tool.controller;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.domain.PageResult;
 import cn.cangjiecloud.tool.api.dto.ToolExecuteDTO;
 import cn.cangjiecloud.tool.api.dto.ToolExecuteResultDTO;
 import cn.cangjiecloud.tool.entity.ToolEntity;
 import cn.cangjiecloud.tool.service.IToolService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @SaCheckLogin
 @RestController
@@ -42,9 +41,11 @@ public class ToolController {
     }
 
     @GetMapping
-    public R<List<ToolEntity>> list(@RequestParam(required = false) String keyword,
-                                    @RequestParam(required = false) String type) {
-        return R.data(toolService.list(keyword, type));
+    public R<PageResult<ToolEntity>> list(@RequestParam(required = false) String keyword,
+                                          @RequestParam(required = false) String type,
+                                          @RequestParam(defaultValue = "1") Integer pageNum,
+                                          @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(toolService.pageQuery(keyword, type, pageNum, pageSize)));
     }
 
     @PostMapping("/{id}/execute")

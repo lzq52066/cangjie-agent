@@ -1,12 +1,11 @@
 package cn.cangjiecloud.model.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.model.api.dto.ModelCreateDTO;
 import cn.cangjiecloud.model.api.dto.ModelUpdateDTO;
 import cn.cangjiecloud.model.entity.ModelEntity;
 import cn.cangjiecloud.model.provider.OpenAICompatibleClient;
-
-import java.util.List;
 
 public interface IModelService extends IService<ModelEntity> {
 
@@ -17,9 +16,10 @@ public interface IModelService extends IService<ModelEntity> {
     void delete(String id);
 
     /**
-     * 模型列表（模型不持有凭证，凭证统一由厂商维护）
+     * 模型分页列表（模型不持有凭证，凭证统一由厂商维护）
      */
-    List<ModelEntity> list(String keyword, String modelType, String providerId);
+    IPage<ModelEntity> pageQuery(String keyword, String modelType, String providerId,
+                                 Integer pageNum, Integer pageSize);
 
     /**
      * 测试模型连通性

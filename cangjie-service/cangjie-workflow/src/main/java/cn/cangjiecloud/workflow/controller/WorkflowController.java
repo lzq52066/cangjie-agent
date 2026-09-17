@@ -3,6 +3,7 @@ package cn.cangjiecloud.workflow.controller;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.domain.PageResult;
 import cn.cangjiecloud.core.workflow.WorkflowNode;
 import cn.cangjiecloud.core.workflow.WorkflowNodeRegistry;
 import cn.cangjiecloud.workflow.api.dto.WorkflowExecuteDTO;
@@ -28,8 +29,10 @@ public class WorkflowController {
     private final WorkflowNodeRegistry workflowNodeRegistry;
 
     @GetMapping
-    public R<List<WorkflowEntity>> list(@RequestParam(required = false) String keyword) {
-        return R.data(workflowService.list(keyword));
+    public R<PageResult<WorkflowEntity>> list(@RequestParam(required = false) String keyword,
+                                             @RequestParam(defaultValue = "1") Integer pageNum,
+                                             @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(workflowService.pageQuery(keyword, pageNum, pageSize)));
     }
 
     @PostMapping
@@ -76,8 +79,10 @@ public class WorkflowController {
     }
 
     @GetMapping("/{id}/executions")
-    public R<List<WorkflowExecutionEntity>> executions(@PathVariable String id) {
-        return R.data(workflowExecutionService.listByWorkflow(id));
+    public R<PageResult<WorkflowExecutionEntity>> executions(@PathVariable String id,
+                                                             @RequestParam(defaultValue = "1") Integer pageNum,
+                                                             @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(workflowExecutionService.pageQuery(id, pageNum, pageSize)));
     }
 
     @GetMapping("/execution/{executionId}")

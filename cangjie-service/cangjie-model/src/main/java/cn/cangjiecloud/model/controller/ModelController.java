@@ -3,6 +3,7 @@ package cn.cangjiecloud.model.controller;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.domain.PageResult;
 import cn.cangjiecloud.model.api.dto.ModelCreateDTO;
 import cn.cangjiecloud.model.api.dto.ModelTestDTO;
 import cn.cangjiecloud.model.api.dto.ModelUpdateDTO;
@@ -44,10 +45,12 @@ public class ModelController {
     }
 
     @GetMapping
-    public R<List<ModelEntity>> list(@RequestParam(required = false) String keyword,
-                                     @RequestParam(required = false) String modelType,
-                                     @RequestParam(required = false) String providerId) {
-        return R.data(modelService.list(keyword, modelType, providerId));
+    public R<PageResult<ModelEntity>> list(@RequestParam(required = false) String keyword,
+                                           @RequestParam(required = false) String modelType,
+                                           @RequestParam(required = false) String providerId,
+                                           @RequestParam(defaultValue = "1") Integer pageNum,
+                                           @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(modelService.pageQuery(keyword, modelType, providerId, pageNum, pageSize)));
     }
 
     @PostMapping("/test")

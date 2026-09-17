@@ -2,6 +2,8 @@ package cn.cangjiecloud.tool.service;
 
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.tool.consts.ToolConstants;
@@ -64,9 +66,11 @@ public class McpServerServiceImpl extends ServiceImpl<McpServerMapper, McpServer
     }
 
     @Override
-    public List<McpServerEntity> listServers() {
-        return list(new LambdaQueryWrapper<McpServerEntity>()
-                .orderByDesc(McpServerEntity::getCreateTime));
+    public IPage<McpServerEntity> pageServers(String keyword, Integer pageNum, Integer pageSize) {
+        LambdaQueryWrapper<McpServerEntity> wrapper = new LambdaQueryWrapper<McpServerEntity>()
+                .like(StringUtils.hasText(keyword), McpServerEntity::getName, keyword)
+                .orderByDesc(McpServerEntity::getCreateTime);
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 
     @Override

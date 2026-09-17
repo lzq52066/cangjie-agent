@@ -8,11 +8,11 @@
             <div class="card-header">
               <div class="header-left">
                 <el-input v-model="keyword" placeholder="搜索模型..." clearable style="width: 200px"
-                          @clear="loadList" @keyup.enter="loadList">
+                          @clear="reload" @keyup.enter="reload">
                   <template #prefix><el-icon><Search /></el-icon></template>
                 </el-input>
-                <el-select v-model="filterProviderId" placeholder="全部厂商" clearable style="width: 160px" @change="loadList">
-                  <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id" />
+                <el-select v-model="filterProviderId" placeholder="全部厂商" clearable style="width: 160px" @change="reload">
+                  <el-option v-for="p in providerOptions" :key="p.id" :label="p.name" :value="p.id" />
                 </el-select>
               </div>
               <el-button type="primary" @click="openCreate">
@@ -61,6 +61,10 @@
               </template>
             </el-table-column>
           </el-table>
+
+          <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
+                         :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
+                         :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
         </el-card>
       </el-tab-pane>
 
@@ -71,7 +75,7 @@
             <div class="card-header">
               <div class="header-left">
                 <el-input v-model="providerKeyword" placeholder="搜索厂商..." clearable style="width: 200px"
-                          @clear="loadProviders" @keyup.enter="loadProviders">
+                          @clear="reloadProviders" @keyup.enter="reloadProviders">
                   <template #prefix><el-icon><Search /></el-icon></template>
                 </el-input>
               </div>
@@ -118,6 +122,11 @@
               </template>
             </el-table-column>
           </el-table>
+
+          <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
+                         :total="providerTotal" v-model:current-page="providerPageNum"
+                         v-model:page-size="providerPageSize"
+                         :page-sizes="[10, 20, 50]" @size-change="loadProviders" @current-change="loadProviders" />
         </el-card>
       </el-tab-pane>
     </el-tabs>
@@ -130,7 +139,7 @@
         </el-form-item>
         <el-form-item label="厂商" prop="providerId">
           <el-select v-model="form.providerId" style="width: 100%" placeholder="选择厂商">
-            <el-option v-for="p in providers" :key="p.id" :label="`${p.name}（${p.code}）`" :value="p.id" />
+            <el-option v-for="p in providerOptions" :key="p.id" :label="`${p.name}（${p.code}）`" :value="p.id" />
           </el-select>
           <span class="form-hint">API Key 与 Base URL 统一在「厂商管理」中维护，模型无需填写</span>
         </el-form-item>
@@ -229,10 +238,18 @@ const list = ref<any[]>([])
 const loading = ref(false)
 const keyword = ref('')
 const filterProviderId = ref('')
+const pageNum = ref(1)
+const pageSize = ref(10)
+const total = ref(0)
 
 const providers = ref<ModelProvider[]>([])
 const providerLoading = ref(false)
 const providerKeyword = ref('')
+const providerPageNum = ref(1)
+const providerPageSize = ref(10)
+const providerTotal = ref(0)
+/** 厂商下拉候选（全量，独立于厂商表格的分页数据） */
+const providerOptions = ref<ModelProvider[]>([])
 
 /** 标签配色（仅用于展示，厂商可随时增删） */
 const tagColors: Record<string, string> = {
@@ -291,19 +308,45 @@ const testModelId = ref('')
 async function loadProviders() {
   providerLoading.value = true
   try {
-    providers.value = await modelProviderApi.list(providerKeyword.value) || []
+    const page = await modelProviderApi.list({
+      keyword: providerKeyword.value, pageNum: providerPageNum.value, pageSize: providerPageSize.value
+    })
+    providers.value = page?.list || []
+    providerTotal.value = page?.total || 0
   } finally {
     providerLoading.value = false
   }
 }
 
+/** 加载厂商下拉候选（供筛选与表单选择使用） */
+async function loadProviderOptions() {
+  providerOptions.value = await modelProviderApi.options() || []
+}
+
+/** 厂商搜索：只重置厂商分页 */
+function reloadProviders() {
+  providerPageNum.value = 1
+  loadProviders()
+}
+
 async function loadList() {
   loading.value = true
   try {
-    list.value = await modelApi.list(keyword.value, undefined, filterProviderId.value)
+    const page = await modelApi.list({
+      keyword: keyword.value, providerId: filterProviderId.value,
+      pageNum: pageNum.value, pageSize: pageSize.value
+    })
+    list.value = page?.list || []
+    total.value = page?.total || 0
   } finally {
     loading.value = false
   }
+}
+
+/** 模型搜索/筛选：只重置模型分页 */
+function reload() {
+  pageNum.value = 1
+  loadList()
 }
 
 function openCreate() {
@@ -329,7 +372,7 @@ function openEdit(row: any) {
 }
 
 /** 当前选中厂商（凭证唯一来源） */
-const selectedProvider = computed(() => providers.value.find(p => p.id === form.providerId))
+const selectedProvider = computed(() => providerOptions.value.find(p => p.id === form.providerId))
 
 /** 凭证来源说明 */
 const credentialHint = computed(() => {
@@ -419,7 +462,7 @@ async function handleProviderSave() {
       ElMessage.success('添加成功')
     }
     showProviderDialog.value = false
-    await loadProviders()
+    await Promise.all([loadProviders(), loadProviderOptions()])
     loadList()
   } finally {
     providerSaving.value = false
@@ -429,13 +472,13 @@ async function handleProviderSave() {
 async function handleProviderDelete(id: string) {
   await modelProviderApi.remove(id)
   ElMessage.success('删除成功')
-  await loadProviders()
+  await Promise.all([loadProviders(), loadProviderOptions()])
   loadList()
 }
 
 function providerLabel(row: any) {
   if (row.providerId) {
-    return providers.value.find(p => p.id === row.providerId)?.name || row.modelType || '已删厂商'
+    return providerOptions.value.find(p => p.id === row.providerId)?.name || row.modelType || '未知厂商'
   }
   return row.modelType || '未关联'
 }
@@ -445,7 +488,7 @@ function typeTag(code: string): any {
 }
 
 onMounted(async () => {
-  await loadProviders()
+  await Promise.all([loadProviders(), loadProviderOptions()])
   loadList()
 })
 </script>
@@ -453,6 +496,7 @@ onMounted(async () => {
 <style lang="scss" scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .header-left { display: flex; gap: 12px; }
+.pager { margin-top: 16px; justify-content: flex-end; }
 .form-hint { margin-left: 8px; color: #909399; font-size: 12px; }
 .text-muted { color: #909399; font-size: 12px; }
 .provider-tip { margin-bottom: 12px; }

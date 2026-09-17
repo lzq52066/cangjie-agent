@@ -1,5 +1,6 @@
 package cn.cangjiecloud.eval.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.eval.entity.EvalCaseEntity;
 
@@ -13,5 +14,10 @@ public interface IEvalCaseService extends IService<EvalCaseEntity> {
 
     void delete(String id);
 
+    IPage<EvalCaseEntity> pageQuery(String datasetId, Integer pageNum, Integer pageSize);
+
+    /**
+     * 全量列表（评估运行时需遍历全部用例，供 EvalRunService 使用，勿用于分页接口）
+     */
     List<EvalCaseEntity> listByDataset(String datasetId);
 }

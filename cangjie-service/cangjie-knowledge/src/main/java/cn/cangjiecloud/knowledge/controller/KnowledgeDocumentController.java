@@ -3,6 +3,7 @@ package cn.cangjiecloud.knowledge.controller;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.domain.PageResult;
 import cn.cangjiecloud.knowledge.entity.KnowledgeDocumentEntity;
 import cn.cangjiecloud.knowledge.entity.KnowledgeParagraphEntity;
 import cn.cangjiecloud.knowledge.service.IKnowledgeDocumentService;
@@ -10,8 +11,6 @@ import cn.cangjiecloud.knowledge.service.IKnowledgeParagraphService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-
-import java.util.List;
 
 @SaCheckLogin
 @RestController
@@ -35,8 +34,10 @@ public class KnowledgeDocumentController {
     }
 
     @GetMapping("/list/{knowledgeBaseId}")
-    public R<List<KnowledgeDocumentEntity>> list(@PathVariable String knowledgeBaseId) {
-        return R.data(documentService.listByKnowledgeBase(knowledgeBaseId));
+    public R<PageResult<KnowledgeDocumentEntity>> list(@PathVariable String knowledgeBaseId,
+                                                       @RequestParam(defaultValue = "1") Integer pageNum,
+                                                       @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(documentService.pageQuery(knowledgeBaseId, pageNum, pageSize)));
     }
 
     @GetMapping("/{documentId}")
@@ -45,8 +46,10 @@ public class KnowledgeDocumentController {
     }
 
     @GetMapping("/paragraphs/{documentId}")
-    public R<List<KnowledgeParagraphEntity>> paragraphs(@PathVariable String documentId) {
-        return R.data(paragraphService.listByDocument(documentId));
+    public R<PageResult<KnowledgeParagraphEntity>> paragraphs(@PathVariable String documentId,
+                                                              @RequestParam(defaultValue = "1") Integer pageNum,
+                                                              @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(paragraphService.pageQuery(documentId, pageNum, pageSize)));
     }
 
     @PostMapping("/re-embed/{documentId}")

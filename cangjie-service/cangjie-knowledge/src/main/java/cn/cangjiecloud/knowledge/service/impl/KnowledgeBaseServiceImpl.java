@@ -1,6 +1,8 @@
 package cn.cangjiecloud.knowledge.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.constant.AppConst;
 import cn.cangjiecloud.common.context.UserContext;
@@ -16,8 +18,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
-
-import java.util.List;
 
 @Slf4j
 @Service
@@ -82,7 +82,7 @@ public class KnowledgeBaseServiceImpl extends ServiceImpl<KnowledgeBaseMapper, K
     }
 
     @Override
-    public List<KnowledgeBaseEntity> list(String keyword) {
+    public IPage<KnowledgeBaseEntity> pageQuery(String keyword, Integer pageNum, Integer pageSize) {
         LambdaQueryWrapper<KnowledgeBaseEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.orderByDesc(KnowledgeBaseEntity::getCreateTime);
         if (StringUtils.hasText(keyword)) {
@@ -95,7 +95,7 @@ public class KnowledgeBaseServiceImpl extends ServiceImpl<KnowledgeBaseMapper, K
             wrapper.and(w -> w.eq(KnowledgeBaseEntity::getVisibility, VISIBILITY_PUBLIC)
                     .or().eq(KnowledgeBaseEntity::getCreateBy, userId));
         }
-        return list(wrapper);
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 
     @Override

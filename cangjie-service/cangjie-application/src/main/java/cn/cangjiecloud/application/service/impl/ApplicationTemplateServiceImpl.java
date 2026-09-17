@@ -3,6 +3,8 @@ package cn.cangjiecloud.application.service.impl;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.application.entity.ApplicationEntity;
 import cn.cangjiecloud.application.entity.ApplicationTemplateEntity;
@@ -96,19 +98,19 @@ public class ApplicationTemplateServiceImpl
     }
 
     @Override
-    public List<ApplicationTemplateEntity> listTemplates(String category) {
+    public IPage<ApplicationTemplateEntity> pageTemplates(String category, Integer pageNum, Integer pageSize) {
         LambdaQueryWrapper<ApplicationTemplateEntity> wrapper = new LambdaQueryWrapper<>();
         // 列表不返回 bundle 大字段
         wrapper.select(ApplicationTemplateEntity.class,
                 f -> !"snapshot".equals(f.getColumn()));
-        wrapper.eq(ApplicationTemplateEntity::getStatus, "published")
-                .orderByDesc(ApplicationTemplateEntity::getBuiltin)
-                .orderByDesc(ApplicationTemplateEntity::getUseCount)
-                .orderByDesc(ApplicationTemplateEntity::getCreateTime);
+        wrapper.eq(ApplicationTemplateEntity::getStatus, "published");
         if (StringUtils.hasText(category)) {
             wrapper.eq(ApplicationTemplateEntity::getCategory, category);
         }
-        return list(wrapper);
+        wrapper.orderByDesc(ApplicationTemplateEntity::getBuiltin)
+                .orderByDesc(ApplicationTemplateEntity::getUseCount)
+                .orderByDesc(ApplicationTemplateEntity::getCreateTime);
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 
     @Override

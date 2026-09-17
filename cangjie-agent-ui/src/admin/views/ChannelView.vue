@@ -4,10 +4,10 @@
       <div class="toolbar">
         <div class="toolbar-left">
           <el-input v-model="keyword" placeholder="搜索渠道名称..." clearable style="width: 200px"
-                    @clear="loadList" @keyup.enter="loadList">
+                    @clear="reload" @keyup.enter="reload">
             <template #prefix><el-icon><Search /></el-icon></template>
           </el-input>
-          <el-select v-model="filterType" placeholder="全部类型" clearable style="width: 160px" @change="loadList">
+          <el-select v-model="filterType" placeholder="全部类型" clearable style="width: 160px" @change="reload">
             <el-option v-for="t in channelTypes" :key="t.code" :label="t.label" :value="t.code" />
           </el-select>
         </div>
@@ -55,6 +55,10 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
+                     :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
+                     :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
     </el-card>
 
     <!-- 渠道编辑 -->
@@ -142,6 +146,10 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
+                     :total="msgTotal" v-model:current-page="msgPageNum" v-model:page-size="msgPageSize"
+                     :page-sizes="[10, 20, 50]" @size-change="loadMessages" @current-change="loadMessages" />
       <el-empty v-if="!msgLoading && messages.length === 0" description="暂无消息记录" :image-size="80" />
     </el-dialog>
   </div>
@@ -167,6 +175,9 @@ const applications = ref<any[]>([])
 const loading = ref(false)
 const keyword = ref('')
 const filterType = ref('')
+const pageNum = ref(1)
+const pageSize = ref(10)
+const total = ref(0)
 const saving = ref(false)
 const editing = ref(false)
 const current = ref<any>(null)
@@ -210,10 +221,21 @@ function appName(id?: string) {
 async function loadList() {
   loading.value = true
   try {
-    list.value = await channelApi.list(keyword.value, filterType.value)
+    const page = await channelApi.list({
+      keyword: keyword.value, type: filterType.value,
+      pageNum: pageNum.value, pageSize: pageSize.value
+    })
+    list.value = page?.list || []
+    total.value = page?.total || 0
   } finally {
     loading.value = false
   }
+}
+
+/** 搜索/切换筛选条件时回到第一页，避免停留在无数据的第 N 页 */
+function reload() {
+  pageNum.value = 1
+  loadList()
 }
 
 function openCreate() {
@@ -274,16 +296,33 @@ function openAccess(row: any) {
 const msgDialog = ref(false)
 const msgLoading = ref(false)
 const messages = ref<any[]>([])
-async function openMessages(row: any) {
-  current.value = row
-  messages.value = []
-  msgDialog.value = true
+const msgChannelId = ref('')
+const msgPageNum = ref(1)
+const msgPageSize = ref(10)
+const msgTotal = ref(0)
+
+async function loadMessages() {
+  if (!msgChannelId.value) return
   msgLoading.value = true
   try {
-    messages.value = await channelApi.messages(row.id)
+    const page = await channelApi.messages(msgChannelId.value, {
+      pageNum: msgPageNum.value, pageSize: msgPageSize.value
+    })
+    messages.value = page?.list || []
+    msgTotal.value = page?.total || 0
   } finally {
     msgLoading.value = false
   }
+}
+
+function openMessages(row: any) {
+  current.value = row
+  msgChannelId.value = row.id
+  messages.value = []
+  msgTotal.value = 0
+  msgPageNum.value = 1
+  msgDialog.value = true
+  loadMessages()
 }
 
 async function copy(text: string) {
@@ -299,7 +338,7 @@ onMounted(async () => {
   origin.value = location.origin
   loadList()
   try {
-    applications.value = await applicationApi.list()
+    applications.value = await applicationApi.options()
   } catch {
     applications.value = []
   }
@@ -311,4 +350,5 @@ onMounted(async () => {
 .toolbar-left { display: flex; gap: 12px; }
 .copy-line { display: flex; align-items: center; gap: 10px; }
 .mono { font-family: Consolas, Monaco, monospace; font-size: 13px; word-break: break-all; }
+.pager { margin-top: 16px; justify-content: flex-end; }
 </style>

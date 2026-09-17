@@ -1,12 +1,23 @@
 import { request } from '@shared/api/http'
+import type { PageQuery, PageResult } from '@shared/types'
+import { OPTION_PAGE_SIZE } from '@shared/types'
 
 /** 提示词模块子资源：模板 / 技能 / 记忆 / 规则 / 命令 */
 export type PromptResource = 'template' | 'skill' | 'memory' | 'rule' | 'command'
 
 function crud(resource: PromptResource) {
   return {
-    list(keyword?: string) {
-      return request<any[]>({ method: 'GET', url: `/prompt/${resource}`, params: { keyword } })
+    list(query: PageQuery = {}) {
+      return request<PageResult<any>>({ method: 'GET', url: `/prompt/${resource}`, params: query })
+    },
+    /** 供下拉选择使用的精简列表 */
+    async options() {
+      const res = await request<PageResult<any>>({
+        method: 'GET',
+        url: `/prompt/${resource}`,
+        params: { pageSize: OPTION_PAGE_SIZE }
+      })
+      return res?.list ?? []
     },
     get(id: string) {
       return request<any>({ method: 'GET', url: `/prompt/${resource}/${id}` })

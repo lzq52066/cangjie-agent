@@ -1,6 +1,8 @@
 package cn.cangjiecloud.workflow.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.workflow.entity.WorkflowExecutionEntity;
 import cn.cangjiecloud.workflow.mapper.WorkflowExecutionMapper;
@@ -8,8 +10,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.List;
 
 @Slf4j
 @Service
@@ -19,11 +19,11 @@ public class WorkflowExecutionServiceImpl
         implements IWorkflowExecutionService {
 
     @Override
-    public List<WorkflowExecutionEntity> listByWorkflow(String workflowId) {
+    public IPage<WorkflowExecutionEntity> pageQuery(String workflowId, Integer pageNum, Integer pageSize) {
         LambdaQueryWrapper<WorkflowExecutionEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(WorkflowExecutionEntity::getWorkflowId, workflowId)
                 .orderByDesc(WorkflowExecutionEntity::getStartTime);
-        return list(wrapper);
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 
     @Override

@@ -11,14 +11,13 @@ import cn.cangjiecloud.application.service.IApplicationVersionService;
 import cn.cangjiecloud.common.exception.ApiException;
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.List;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -40,12 +39,12 @@ public class ApplicationVersionServiceImpl extends ServiceImpl<ApplicationVersio
     }
 
     @Override
-    public List<ApplicationVersionDTO> listByApplication(String applicationId) {
+    public IPage<ApplicationVersionDTO> pageByApplication(String applicationId, Integer pageNum, Integer pageSize) {
         LambdaQueryWrapper<ApplicationVersionEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ApplicationVersionEntity::getApplicationId, applicationId)
                 .orderByDesc(ApplicationVersionEntity::getVersion);
-        List<ApplicationVersionEntity> list = list(wrapper);
-        return list.stream().map(this::toDTO).collect(Collectors.toList());
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper)
+                .convert(this::toDTO);
     }
 
     @Override

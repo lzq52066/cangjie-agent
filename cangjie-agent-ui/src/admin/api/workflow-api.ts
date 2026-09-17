@@ -1,8 +1,15 @@
 import { request } from '@shared/api/http'
+import type { PageQuery, PageResult } from '@shared/types'
+import { OPTION_PAGE_SIZE } from '@shared/types'
 
 export const workflowApi = {
-  list(keyword?: string) {
-    return request<any[]>({ method: 'GET', url: '/workflow', params: { keyword } })
+  list(query: PageQuery = {}) {
+    return request<PageResult<any>>({ method: 'GET', url: '/workflow', params: query })
+  },
+  /** 供下拉选择使用的精简列表 */
+  async options() {
+    const res = await workflowApi.list({ pageSize: OPTION_PAGE_SIZE })
+    return res?.list ?? []
   },
   get(id: string) {
     return request<any>({ method: 'GET', url: `/workflow/${id}` })
@@ -22,8 +29,8 @@ export const workflowApi = {
   execute(id: string, inputs: Record<string, any>) {
     return request<any>({ method: 'POST', url: `/workflow/${id}/execute`, data: { inputs } })
   },
-  executions(id: string) {
-    return request<any[]>({ method: 'GET', url: `/workflow/${id}/executions` })
+  executions(id: string, query: PageQuery = {}) {
+    return request<PageResult<any>>({ method: 'GET', url: `/workflow/${id}/executions`, params: query })
   },
   execution(executionId: string) {
     return request<any>({ method: 'GET', url: `/workflow/execution/${executionId}` })

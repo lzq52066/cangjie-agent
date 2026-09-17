@@ -20,6 +20,8 @@ import cn.cangjiecloud.workflow.service.IWorkflowService;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -97,7 +99,7 @@ public class ChannelServiceImpl extends ServiceImpl<ChannelMapper, ChannelEntity
     }
 
     @Override
-    public List<ChannelEntity> list(String keyword, String type) {
+    public IPage<ChannelEntity> pageQuery(String keyword, String type, Integer pageNum, Integer pageSize) {
         LambdaQueryWrapper<ChannelEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.orderByDesc(ChannelEntity::getCreateTime);
         if (StringUtils.hasText(keyword)) {
@@ -106,7 +108,7 @@ public class ChannelServiceImpl extends ServiceImpl<ChannelMapper, ChannelEntity
         if (StringUtils.hasText(type)) {
             wrapper.eq(ChannelEntity::getType, type);
         }
-        return list(wrapper);
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 
     @Override

@@ -3,6 +3,7 @@ package cn.cangjiecloud.tool.controller;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.domain.PageResult;
 import cn.cangjiecloud.tool.entity.PluginEntity;
 import cn.cangjiecloud.tool.service.IPluginService;
 import lombok.RequiredArgsConstructor;
@@ -40,9 +41,11 @@ public class PluginController {
     }
 
     @GetMapping
-    public R<List<PluginEntity>> list(@RequestParam(required = false) String keyword,
-                                      @RequestParam(required = false) String type) {
-        return R.data(pluginService.list(keyword, type));
+    public R<PageResult<PluginEntity>> list(@RequestParam(required = false) String keyword,
+                                            @RequestParam(required = false) String type,
+                                            @RequestParam(defaultValue = "1") Integer pageNum,
+                                            @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(pluginService.pageQuery(keyword, type, pageNum, pageSize)));
     }
 
     @PostMapping("/{id}/reload")

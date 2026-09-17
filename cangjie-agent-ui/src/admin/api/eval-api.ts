@@ -1,9 +1,10 @@
 import { request } from '@shared/api/http'
+import type { PageQuery, PageResult } from '@shared/types'
 
 export const evalApi = {
   // 数据集
-  listDatasets(keyword?: string) {
-    return request<any[]>({ method: 'GET', url: '/observability/eval/datasets', params: { keyword } })
+  listDatasets(query: PageQuery = {}) {
+    return request<PageResult<any>>({ method: 'GET', url: '/observability/eval/datasets', params: query })
   },
   createDataset(data: any) {
     return request<any>({ method: 'POST', url: '/observability/eval/datasets', data })
@@ -16,8 +17,8 @@ export const evalApi = {
   },
 
   // 用例
-  listCases(datasetId: string) {
-    return request<any[]>({ method: 'GET', url: `/observability/eval/datasets/${datasetId}/cases` })
+  listCases(datasetId: string, query: PageQuery = {}) {
+    return request<PageResult<any>>({ method: 'GET', url: `/observability/eval/datasets/${datasetId}/cases`, params: query })
   },
   createCase(datasetId: string, data: any) {
     return request<any>({ method: 'POST', url: `/observability/eval/datasets/${datasetId}/cases`, data })

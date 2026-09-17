@@ -7,7 +7,7 @@
 
       <div class="toolbar">
         <el-input v-model="keyword" placeholder="搜索名称..." clearable style="width: 220px"
-                  @clear="loadList" @keyup.enter="loadList">
+                  @clear="reload" @keyup.enter="reload">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
         <el-button type="primary" @click="openCreate">
@@ -48,6 +48,10 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
+                     :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
+                     :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
     </el-card>
 
     <!-- 编辑对话框 -->
@@ -294,6 +298,9 @@ const columns = computed(() => columnsMap[activeTab.value])
 const list = ref<any[]>([])
 const loading = ref(false)
 const keyword = ref('')
+const pageNum = ref(1)
+const pageSize = ref(10)
+const total = ref(0)
 
 const showDialog = ref(false)
 const editing = ref(false)
@@ -341,14 +348,25 @@ const defaultsMap: Record<PromptResource, Record<string, any>> = {
 async function loadList() {
   loading.value = true
   try {
-    list.value = await promptApi.of(activeTab.value).list(keyword.value)
+    const page = await promptApi.of(activeTab.value).list({
+      keyword: keyword.value, pageNum: pageNum.value, pageSize: pageSize.value
+    })
+    list.value = page?.list || []
+    total.value = page?.total || 0
   } finally {
     loading.value = false
   }
 }
 
+/** 搜索：回到第一页 */
+function reload() {
+  pageNum.value = 1
+  loadList()
+}
+
 function onTabChange() {
   keyword.value = ''
+  pageNum.value = 1
   loadList()
 }
 
@@ -431,6 +449,7 @@ onMounted(loadList)
 
 <style lang="scss" scoped>
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.pager { margin-top: 16px; justify-content: flex-end; }
 .hint { font-size: 12px; color: #909399; margin-top: 4px; }
 .hint-inline { margin-left: 10px; font-size: 12px; color: #909399; }
 .cmd { background: #f4f4f5; padding: 2px 6px; border-radius: 4px; color: #e6a23c; }

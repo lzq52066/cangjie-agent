@@ -1,16 +1,15 @@
 package cn.cangjiecloud.workflow.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.workflow.entity.WorkflowExecutionEntity;
-
-import java.util.List;
 
 public interface IWorkflowExecutionService extends IService<WorkflowExecutionEntity> {
 
     /**
-     * 按工作流 ID 查询执行历史
+     * 按工作流 ID 分页查询执行历史
      */
-    List<WorkflowExecutionEntity> listByWorkflow(String workflowId);
+    IPage<WorkflowExecutionEntity> pageQuery(String workflowId, Integer pageNum, Integer pageSize);
 
     /**
      * 记录执行状态

@@ -1,5 +1,5 @@
 import { request } from '@shared/api/http'
-import type { PageResult } from '@admin/api/observability-api'
+import type { PageResult } from '@shared/types'
 
 export const fileApi = {
   list(params: { keyword?: string; category?: string; pageNum?: number; pageSize?: number }) {

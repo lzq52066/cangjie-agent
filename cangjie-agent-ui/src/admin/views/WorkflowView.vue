@@ -4,7 +4,7 @@
       <template #header>
         <div class="card-header">
           <el-input v-model="keyword" placeholder="搜索工作流..." clearable style="width: 220px"
-                    @clear="loadList" @keyup.enter="loadList">
+                    @clear="reload" @keyup.enter="reload">
             <template #prefix><el-icon><Search /></el-icon></template>
           </el-input>
           <el-button type="primary" @click="openCreate">
@@ -46,6 +46,10 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
+                     :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
+                     :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
     </el-card>
 
     <!-- 基础信息 -->
@@ -97,6 +101,9 @@
         <el-table-column label="开始时间" prop="startTime" width="170" />
         <el-table-column label="错误" prop="errorMessage" min-width="180" show-overflow-tooltip />
       </el-table>
+      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
+                     :total="execTotal" v-model:current-page="execPageNum" v-model:page-size="execPageSize"
+                     :page-sizes="[10, 20, 50]" @size-change="loadExecutions" @current-change="loadExecutions" />
       <template v-if="detailExecution">
         <el-divider>执行详情</el-divider>
         <ExecutionDetail :execution="detailExecution" />
@@ -119,6 +126,9 @@ const router = useRouter()
 const list = ref<any[]>([])
 const loading = ref(false)
 const keyword = ref('')
+const pageNum = ref(1)
+const pageSize = ref(10)
+const total = ref(0)
 const saving = ref(false)
 const current = ref<any>(null)
 const applications = ref<any[]>([])
@@ -153,10 +163,19 @@ function statusTag(s: string): any {
 async function loadList() {
   loading.value = true
   try {
-    list.value = await workflowApi.list(keyword.value)
+    const page = await workflowApi.list({
+      keyword: keyword.value, pageNum: pageNum.value, pageSize: pageSize.value
+    })
+    list.value = page?.list || []
+    total.value = page?.total || 0
   } finally {
     loading.value = false
   }
+}
+
+function reload() {
+  pageNum.value = 1
+  loadList()
 }
 
 function openCreate() {
@@ -247,14 +266,27 @@ const execDrawer = ref(false)
 const executions = ref<any[]>([])
 const execLoading = ref(false)
 const detailExecution = ref<any>(null)
+const execPageNum = ref(1)
+const execPageSize = ref(10)
+const execTotal = ref(0)
 
-async function openExecutions(row: any) {
+function openExecutions(row: any) {
   current.value = row
   detailExecution.value = null
   execDrawer.value = true
+  execPageNum.value = 1
+  loadExecutions()
+}
+
+async function loadExecutions() {
+  if (!current.value) return
   execLoading.value = true
   try {
-    executions.value = await workflowApi.executions(row.id)
+    const page = await workflowApi.executions(current.value.id, {
+      pageNum: execPageNum.value, pageSize: execPageSize.value
+    })
+    executions.value = page?.list || []
+    execTotal.value = page?.total || 0
   } finally {
     execLoading.value = false
   }
@@ -263,7 +295,7 @@ async function openExecutions(row: any) {
 onMounted(async () => {
   loadList()
   try {
-    applications.value = await applicationApi.list()
+    applications.value = await applicationApi.options()
   } catch {
     applications.value = []
   }
@@ -272,4 +304,5 @@ onMounted(async () => {
 
 <style lang="scss" scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; }
+.pager { margin-top: 16px; justify-content: flex-end; }
 </style>

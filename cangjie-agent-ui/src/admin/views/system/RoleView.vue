@@ -171,7 +171,7 @@ const currentRoleIdForMenu = ref('')
 async function loadList() {
   loading.value = true
   try {
-    const res = await roleApi.list({ page: page.value, size: size.value, ...searchForm })
+    const res = await roleApi.list({ pageNum: page.value, pageSize: size.value, ...searchForm })
     list.value = res.list
     total.value = res.total
   } finally {

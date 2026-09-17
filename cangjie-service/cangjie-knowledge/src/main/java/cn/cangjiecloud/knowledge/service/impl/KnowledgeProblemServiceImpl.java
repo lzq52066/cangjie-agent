@@ -1,6 +1,8 @@
 package cn.cangjiecloud.knowledge.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.knowledge.api.dto.ProblemCreateDTO;
@@ -32,11 +34,12 @@ public class KnowledgeProblemServiceImpl
     private final IProblemParagraphService problemParagraphService;
 
     @Override
-    public List<KnowledgeProblemEntity> listByKnowledgeBase(String knowledgeBaseId) {
+    public IPage<KnowledgeProblemEntity> pageQuery(String knowledgeBaseId, Integer pageNum, Integer pageSize) {
         knowledgeBaseService.checkAccess(knowledgeBaseId);
-        return list(new LambdaQueryWrapper<KnowledgeProblemEntity>()
+        LambdaQueryWrapper<KnowledgeProblemEntity> wrapper = new LambdaQueryWrapper<KnowledgeProblemEntity>()
                 .eq(KnowledgeProblemEntity::getKnowledgeBaseId, knowledgeBaseId)
-                .orderByDesc(KnowledgeProblemEntity::getCreateTime));
+                .orderByDesc(KnowledgeProblemEntity::getCreateTime);
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 
     @Override
@@ -90,10 +93,14 @@ public class KnowledgeProblemServiceImpl
     }
 
     @Override
-    public List<String> listParagraphIds(String problemId) {
-        return problemParagraphService.list(new LambdaQueryWrapper<ProblemParagraphEntity>()
-                        .eq(ProblemParagraphEntity::getProblemId, problemId))
-                .stream().map(ProblemParagraphEntity::getParagraphId).toList();
+    public IPage<String> pageQueryParagraphIds(String problemId, Integer pageNum, Integer pageSize) {
+        LambdaQueryWrapper<ProblemParagraphEntity> wrapper = new LambdaQueryWrapper<ProblemParagraphEntity>()
+                .eq(ProblemParagraphEntity::getProblemId, problemId)
+                // 分页需要稳定排序，按主键升序
+                .orderByAsc(ProblemParagraphEntity::getId);
+        IPage<ProblemParagraphEntity> relationPage = problemParagraphService.page(
+                new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
+        return relationPage.convert(ProblemParagraphEntity::getParagraphId);
     }
 
     @Override

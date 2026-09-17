@@ -1,9 +1,8 @@
 package cn.cangjiecloud.knowledge.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.knowledge.entity.KnowledgeBaseEntity;
-
-import java.util.List;
 
 public interface IKnowledgeBaseService extends IService<KnowledgeBaseEntity> {
 
@@ -13,7 +12,10 @@ public interface IKnowledgeBaseService extends IService<KnowledgeBaseEntity> {
 
     void delete(String id);
 
-    List<KnowledgeBaseEntity> list(String keyword);
+    /**
+     * 分页查询知识库列表（含数据权限：非管理员仅可见公开库与本人创建的库）
+     */
+    IPage<KnowledgeBaseEntity> pageQuery(String keyword, Integer pageNum, Integer pageSize);
 
     /**
      * 校验当前用户对知识库的访问权限（管理员放行；私有库仅创建者可访问），

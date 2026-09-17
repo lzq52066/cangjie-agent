@@ -1,9 +1,16 @@
 import { request } from '@shared/api/http'
+import type { PageQuery, PageResult } from '@shared/types'
+import { OPTION_PAGE_SIZE } from '@shared/types'
 
 export const knowledgeApi = {
   // 知识库 CRUD
-  list(keyword?: string) {
-    return request<any[]>({ method: 'GET', url: '/knowledge/base', params: { keyword } })
+  list(query: PageQuery = {}) {
+    return request<PageResult<any>>({ method: 'GET', url: '/knowledge/base', params: query })
+  },
+  /** 供下拉选择使用的精简列表 */
+  async options() {
+    const res = await knowledgeApi.list({ pageSize: OPTION_PAGE_SIZE })
+    return res?.list ?? []
   },
   get(id: string) {
     return request<any>({ method: 'GET', url: `/knowledge/base/${id}` })
@@ -19,8 +26,8 @@ export const knowledgeApi = {
   },
 
   // 文档管理
-  listDocuments(knowledgeBaseId: string) {
-    return request<any[]>({ method: 'GET', url: `/knowledge/document/list/${knowledgeBaseId}` })
+  listDocuments(knowledgeBaseId: string, query: PageQuery = {}) {
+    return request<PageResult<any>>({ method: 'GET', url: `/knowledge/document/list/${knowledgeBaseId}`, params: query })
   },
   uploadDocument(knowledgeBaseId: string, file: File) {
     const formData = new FormData()
@@ -38,8 +45,8 @@ export const knowledgeApi = {
   getDocument(documentId: string) {
     return request<any>({ method: 'GET', url: `/knowledge/document/${documentId}` })
   },
-  listParagraphs(documentId: string) {
-    return request<any[]>({ method: 'GET', url: `/knowledge/document/paragraphs/${documentId}` })
+  listParagraphs(documentId: string, query: PageQuery = {}) {
+    return request<PageResult<any>>({ method: 'GET', url: `/knowledge/document/paragraphs/${documentId}`, params: query })
   },
 
   // 重新向量化（仅文档级，逐个操作避免成本过高）

@@ -838,9 +838,9 @@ onMounted(async () => {
     loading.value = false
   }
 
-  try { models.value = await modelApi.list() } catch { models.value = [] }
-  try { knowledgeBases.value = await knowledgeApi.list() } catch { knowledgeBases.value = [] }
-  try { tools.value = await toolApi.list() } catch { tools.value = [] }
+  try { models.value = await modelApi.options() } catch { models.value = [] }
+  try { knowledgeBases.value = await knowledgeApi.options() } catch { knowledgeBases.value = [] }
+  try { tools.value = await toolApi.options() } catch { tools.value = [] }
 
   // 注册 Pointer-based 拖拽（不依赖 HTML5 DnD，兼容 SVG 画布）
   document.addEventListener('pointerup', onPointerUp)

@@ -1,9 +1,8 @@
 package cn.cangjiecloud.prompt.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.prompt.entity.RuleEntity;
-
-import java.util.List;
 
 public interface IRuleService extends IService<RuleEntity> {
 
@@ -13,5 +12,5 @@ public interface IRuleService extends IService<RuleEntity> {
 
     void delete(String id);
 
-    List<RuleEntity> list(String keyword);
+    IPage<RuleEntity> pageQuery(String keyword, Integer pageNum, Integer pageSize);
 }

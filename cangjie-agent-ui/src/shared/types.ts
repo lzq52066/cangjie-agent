@@ -5,9 +5,12 @@ export interface R<T = any> {
   timestamp: number
 }
 
+/** 下拉选项一次取足量数据用的分页大小（与后端分页插件 maxLimit 保持一致或更小） */
+export const OPTION_PAGE_SIZE = 500
+
 export interface PageQuery {
-  page?: number
-  size?: number
+  pageNum?: number
+  pageSize?: number
   keyword?: string
 }
 

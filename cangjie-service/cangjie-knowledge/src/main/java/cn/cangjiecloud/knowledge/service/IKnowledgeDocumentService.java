@@ -1,10 +1,9 @@
 package cn.cangjiecloud.knowledge.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.knowledge.entity.KnowledgeDocumentEntity;
 import org.springframework.web.multipart.MultipartFile;
-
-import java.util.List;
 
 public interface IKnowledgeDocumentService extends IService<KnowledgeDocumentEntity> {
 
@@ -29,7 +28,7 @@ public interface IKnowledgeDocumentService extends IService<KnowledgeDocumentEnt
     void reEmbed(String documentId);
 
     /**
-     * 查询知识库下的文档列表
+     * 分页查询知识库下的文档列表
      */
-    List<KnowledgeDocumentEntity> listByKnowledgeBase(String knowledgeBaseId);
+    IPage<KnowledgeDocumentEntity> pageQuery(String knowledgeBaseId, Integer pageNum, Integer pageSize);
 }

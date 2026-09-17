@@ -3,6 +3,7 @@ package cn.cangjiecloud.prompt.controller;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.domain.PageResult;
 import cn.cangjiecloud.prompt.entity.CommandEntity;
 import cn.cangjiecloud.prompt.entity.MemoryEntity;
 import cn.cangjiecloud.prompt.entity.PromptTemplateEntity;
@@ -15,8 +16,6 @@ import cn.cangjiecloud.prompt.service.IRuleService;
 import cn.cangjiecloud.prompt.service.ISkillService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @SaCheckLogin
 @RestController
@@ -33,8 +32,11 @@ public class PromptController {
     // ==================== 提示词模板 CRUD ====================
 
     @GetMapping("/template")
-    public R<List<PromptTemplateEntity>> listTemplate(@RequestParam(required = false) String keyword) {
-        return R.data(promptTemplateService.list(keyword));
+    public R<PageResult<PromptTemplateEntity>> listTemplate(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(promptTemplateService.pageQuery(keyword, pageNum, pageSize)));
     }
 
     @PostMapping("/template")
@@ -61,8 +63,11 @@ public class PromptController {
     // ==================== Skill 技能 CRUD ====================
 
     @GetMapping("/skill")
-    public R<List<SkillEntity>> listSkill(@RequestParam(required = false) String keyword) {
-        return R.data(skillService.list(keyword));
+    public R<PageResult<SkillEntity>> listSkill(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(skillService.pageQuery(keyword, pageNum, pageSize)));
     }
 
     @PostMapping("/skill")
@@ -89,8 +94,11 @@ public class PromptController {
     // ==================== 记忆 CRUD ====================
 
     @GetMapping("/memory")
-    public R<List<MemoryEntity>> listMemory(@RequestParam(required = false) String keyword) {
-        return R.data(memoryService.list(keyword));
+    public R<PageResult<MemoryEntity>> listMemory(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(memoryService.pageQuery(keyword, pageNum, pageSize)));
     }
 
     @PostMapping("/memory")
@@ -117,8 +125,11 @@ public class PromptController {
     // ==================== 规则 CRUD ====================
 
     @GetMapping("/rule")
-    public R<List<RuleEntity>> listRule(@RequestParam(required = false) String keyword) {
-        return R.data(ruleService.list(keyword));
+    public R<PageResult<RuleEntity>> listRule(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(ruleService.pageQuery(keyword, pageNum, pageSize)));
     }
 
     @PostMapping("/rule")
@@ -145,8 +156,11 @@ public class PromptController {
     // ==================== 命令 CRUD ====================
 
     @GetMapping("/command")
-    public R<List<CommandEntity>> listCommand(@RequestParam(required = false) String keyword) {
-        return R.data(commandService.list(keyword));
+    public R<PageResult<CommandEntity>> listCommand(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(commandService.pageQuery(keyword, pageNum, pageSize)));
     }
 
     @PostMapping("/command")

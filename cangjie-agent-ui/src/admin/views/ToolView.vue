@@ -9,10 +9,10 @@
       <div class="toolbar">
         <div class="toolbar-left">
           <el-input v-model="keyword" placeholder="搜索名称..." clearable style="width: 200px"
-                    @clear="loadList" @keyup.enter="loadList">
+                    @clear="reload" @keyup.enter="reload">
             <template #prefix><el-icon><Search /></el-icon></template>
           </el-input>
-          <el-select v-model="filterType" placeholder="全部类型" clearable style="width: 150px" @change="loadList">
+          <el-select v-model="filterType" placeholder="全部类型" clearable style="width: 150px" @change="reload">
             <el-option v-for="t in currentTypes" :key="t.code" :label="t.label" :value="t.code" />
           </el-select>
         </div>
@@ -97,6 +97,11 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <!-- 分页：工具与插件两个表格互斥渲染，共用同一组分页状态 -->
+      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
+                     :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
+                     :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
     </el-card>
 
     <!-- 工具编辑 -->
@@ -278,6 +283,9 @@ const list = ref<any[]>([])
 const loading = ref(false)
 const keyword = ref('')
 const filterType = ref('')
+const pageNum = ref(1)
+const pageSize = ref(10)
+const total = ref(0)
 const saving = ref(false)
 const editing = ref(false)
 const reloadingId = ref('')
@@ -326,17 +334,25 @@ function toolTypeTag(code: string): any {
 async function loadList() {
   loading.value = true
   try {
-    list.value = activeTab.value === 'tool'
-      ? await toolApi.list(keyword.value, filterType.value)
-      : await pluginApi.list(keyword.value, filterType.value)
+    const query = { keyword: keyword.value, type: filterType.value, pageNum: pageNum.value, pageSize: pageSize.value }
+    const page = activeTab.value === 'tool' ? await toolApi.list(query) : await pluginApi.list(query)
+    list.value = page?.list || []
+    total.value = page?.total || 0
   } finally {
     loading.value = false
   }
 }
 
+/** 搜索 / 切换筛选：回到第一页 */
+function reload() {
+  pageNum.value = 1
+  loadList()
+}
+
 function onTabChange() {
   keyword.value = ''
   filterType.value = ''
+  pageNum.value = 1
   loadList()
 }
 
@@ -578,6 +594,7 @@ onMounted(loadList)
 <style lang="scss" scoped>
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .toolbar-left { display: flex; gap: 12px; }
+.pager { margin-top: 16px; justify-content: flex-end; }
 .exec-output {
   margin-top: 12px; background: #f9fafc; border: 1px solid #ebeef5;
   border-radius: 8px; padding: 14px; max-height: 280px; overflow: auto;

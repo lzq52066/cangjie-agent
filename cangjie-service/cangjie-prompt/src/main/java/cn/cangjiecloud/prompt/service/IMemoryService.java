@@ -1,9 +1,8 @@
 package cn.cangjiecloud.prompt.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.prompt.entity.MemoryEntity;
-
-import java.util.List;
 
 public interface IMemoryService extends IService<MemoryEntity> {
 
@@ -13,5 +12,5 @@ public interface IMemoryService extends IService<MemoryEntity> {
 
     void delete(String id);
 
-    List<MemoryEntity> list(String keyword);
+    IPage<MemoryEntity> pageQuery(String keyword, Integer pageNum, Integer pageSize);
 }

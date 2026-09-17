@@ -8,6 +8,7 @@ import cn.cangjiecloud.application.service.IApplicationService;
 import cn.cangjiecloud.application.service.IApplicationVersionService;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.domain.PageResult;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,9 +47,11 @@ public class ApplicationController {
     }
 
     @GetMapping
-    public R<List<ApplicationEntity>> list(@RequestParam(required = false) String keyword,
-                                          @RequestParam(required = false) String type) {
-        return R.data(applicationService.list(keyword, type));
+    public R<PageResult<ApplicationEntity>> list(@RequestParam(required = false) String keyword,
+                                                 @RequestParam(required = false) String type,
+                                                 @RequestParam(defaultValue = "1") Integer pageNum,
+                                                 @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(applicationService.pageQuery(keyword, type, pageNum, pageSize)));
     }
 
     @PostMapping("/{id}/publish")

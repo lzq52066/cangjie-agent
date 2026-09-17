@@ -149,7 +149,7 @@ async function loadList() {
       keyword: keyword.value, category: category.value,
       pageNum: pageNum.value, pageSize: pageSize.value
     })
-    list.value = page?.records || []
+    list.value = page?.list || []
     total.value = page?.total || 0
   } finally {
     loading.value = false

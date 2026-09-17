@@ -1,6 +1,8 @@
 package cn.cangjiecloud.eval.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.eval.entity.EvalDatasetEntity;
@@ -10,8 +12,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
-
-import java.util.List;
 
 @Slf4j
 @Service
@@ -49,12 +49,12 @@ public class EvalDatasetServiceImpl extends ServiceImpl<EvalDatasetMapper, EvalD
     }
 
     @Override
-    public List<EvalDatasetEntity> list(String keyword) {
+    public IPage<EvalDatasetEntity> pageQuery(String keyword, Integer pageNum, Integer pageSize) {
         LambdaQueryWrapper<EvalDatasetEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.orderByDesc(EvalDatasetEntity::getCreateTime);
         if (StringUtils.hasText(keyword)) {
             wrapper.like(EvalDatasetEntity::getName, keyword);
         }
-        return list(wrapper);
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 }

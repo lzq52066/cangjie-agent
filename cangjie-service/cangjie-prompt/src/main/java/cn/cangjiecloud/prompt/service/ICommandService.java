@@ -1,9 +1,8 @@
 package cn.cangjiecloud.prompt.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.prompt.entity.CommandEntity;
-
-import java.util.List;
 
 public interface ICommandService extends IService<CommandEntity> {
 
@@ -13,5 +12,5 @@ public interface ICommandService extends IService<CommandEntity> {
 
     void delete(String id);
 
-    List<CommandEntity> list(String keyword);
+    IPage<CommandEntity> pageQuery(String keyword, Integer pageNum, Integer pageSize);
 }

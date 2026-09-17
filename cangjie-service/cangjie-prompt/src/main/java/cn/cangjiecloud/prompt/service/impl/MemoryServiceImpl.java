@@ -1,6 +1,8 @@
 package cn.cangjiecloud.prompt.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.prompt.entity.MemoryEntity;
@@ -10,8 +12,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
-
-import java.util.List;
 
 @Slf4j
 @Service
@@ -54,14 +54,14 @@ public class MemoryServiceImpl extends ServiceImpl<MemoryMapper, MemoryEntity>
     }
 
     @Override
-    public List<MemoryEntity> list(String keyword) {
+    public IPage<MemoryEntity> pageQuery(String keyword, Integer pageNum, Integer pageSize) {
         LambdaQueryWrapper<MemoryEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.orderByDesc(MemoryEntity::getImportance)
                 .orderByDesc(MemoryEntity::getCreateTime);
-        if (StringUtils.hasText(keyword)) {
-            wrapper.like(MemoryEntity::getContent, keyword)
-                    .or().like(MemoryEntity::getSummary, keyword);
-        }
-        return list(wrapper);
+        wrapper.and(StringUtils.hasText(keyword), w -> w
+                .like(MemoryEntity::getContent, keyword)
+                .or()
+                .like(MemoryEntity::getSummary, keyword));
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 }

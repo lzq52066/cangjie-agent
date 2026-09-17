@@ -3,6 +3,8 @@ package cn.cangjiecloud.application.service.impl;
 import cn.hutool.core.util.RandomUtil;
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.application.api.dto.ApplicationCreateDTO;
 import cn.cangjiecloud.application.entity.ApplicationEntity;
@@ -84,17 +86,17 @@ public class ApplicationServiceImpl extends ServiceImpl<ApplicationMapper, Appli
     }
 
     @Override
-    public List<ApplicationEntity> list(String keyword, String type) {
+    public IPage<ApplicationEntity> pageQuery(String keyword, String type, Integer pageNum, Integer pageSize) {
         LambdaQueryWrapper<ApplicationEntity> wrapper = new LambdaQueryWrapper<>();
-        wrapper.orderByDesc(ApplicationEntity::getCreateTime);
         if (StringUtils.hasText(keyword)) {
-            wrapper.like(ApplicationEntity::getName, keyword)
-                    .or().like(ApplicationEntity::getDescription, keyword);
+            wrapper.and(w -> w.like(ApplicationEntity::getName, keyword)
+                    .or().like(ApplicationEntity::getDescription, keyword));
         }
         if (StringUtils.hasText(type)) {
             wrapper.eq(ApplicationEntity::getType, type);
         }
-        return list(wrapper);
+        wrapper.orderByDesc(ApplicationEntity::getCreateTime);
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 
     @Override

@@ -1,10 +1,9 @@
 package cn.cangjiecloud.application.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.application.api.dto.ApplicationCreateDTO;
 import cn.cangjiecloud.application.entity.ApplicationEntity;
-
-import java.util.List;
 
 public interface IApplicationService extends IService<ApplicationEntity> {
 
@@ -14,7 +13,7 @@ public interface IApplicationService extends IService<ApplicationEntity> {
 
     void delete(String id);
 
-    List<ApplicationEntity> list(String keyword, String type);
+    IPage<ApplicationEntity> pageQuery(String keyword, String type, Integer pageNum, Integer pageSize);
 
     /**
      * 发布应用：生成对外 API Key，状态置为 published

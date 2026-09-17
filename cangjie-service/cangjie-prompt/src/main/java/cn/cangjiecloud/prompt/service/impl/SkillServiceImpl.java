@@ -1,6 +1,8 @@
 package cn.cangjiecloud.prompt.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.prompt.entity.SkillEntity;
@@ -10,8 +12,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
-
-import java.util.List;
 
 @Slf4j
 @Service
@@ -51,13 +51,13 @@ public class SkillServiceImpl extends ServiceImpl<SkillMapper, SkillEntity>
     }
 
     @Override
-    public List<SkillEntity> list(String keyword) {
+    public IPage<SkillEntity> pageQuery(String keyword, Integer pageNum, Integer pageSize) {
         LambdaQueryWrapper<SkillEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.orderByDesc(SkillEntity::getCreateTime);
-        if (StringUtils.hasText(keyword)) {
-            wrapper.like(SkillEntity::getName, keyword)
-                    .or().like(SkillEntity::getDescription, keyword);
-        }
-        return list(wrapper);
+        wrapper.and(StringUtils.hasText(keyword), w -> w
+                .like(SkillEntity::getName, keyword)
+                .or()
+                .like(SkillEntity::getDescription, keyword));
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 }

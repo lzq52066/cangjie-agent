@@ -1,10 +1,10 @@
 package cn.cangjiecloud.workflow.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.workflow.entity.WorkflowEntity;
 import cn.cangjiecloud.workflow.entity.WorkflowExecutionEntity;
 
-import java.util.List;
 import java.util.Map;
 
 public interface IWorkflowService extends IService<WorkflowEntity> {
@@ -15,7 +15,7 @@ public interface IWorkflowService extends IService<WorkflowEntity> {
 
     void delete(String id);
 
-    List<WorkflowEntity> list(String keyword);
+    IPage<WorkflowEntity> pageQuery(String keyword, Integer pageNum, Integer pageSize);
 
     /**
      * 发布工作流

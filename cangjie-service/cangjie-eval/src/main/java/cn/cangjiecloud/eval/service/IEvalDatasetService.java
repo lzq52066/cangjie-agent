@@ -1,9 +1,8 @@
 package cn.cangjiecloud.eval.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.eval.entity.EvalDatasetEntity;
-
-import java.util.List;
 
 public interface IEvalDatasetService extends IService<EvalDatasetEntity> {
 
@@ -13,5 +12,5 @@ public interface IEvalDatasetService extends IService<EvalDatasetEntity> {
 
     void delete(String id);
 
-    List<EvalDatasetEntity> list(String keyword);
+    IPage<EvalDatasetEntity> pageQuery(String keyword, Integer pageNum, Integer pageSize);
 }

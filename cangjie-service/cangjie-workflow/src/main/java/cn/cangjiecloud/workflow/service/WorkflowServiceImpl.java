@@ -3,6 +3,8 @@ package cn.cangjiecloud.workflow.service;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.core.observability.TraceCollector;
@@ -85,13 +87,13 @@ public class WorkflowServiceImpl extends ServiceImpl<WorkflowMapper, WorkflowEnt
     }
 
     @Override
-    public List<WorkflowEntity> list(String keyword) {
+    public IPage<WorkflowEntity> pageQuery(String keyword, Integer pageNum, Integer pageSize) {
         LambdaQueryWrapper<WorkflowEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.orderByDesc(WorkflowEntity::getCreateTime);
         if (StringUtils.hasText(keyword)) {
             wrapper.like(WorkflowEntity::getName, keyword);
         }
-        return list(wrapper);
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 
     @Override

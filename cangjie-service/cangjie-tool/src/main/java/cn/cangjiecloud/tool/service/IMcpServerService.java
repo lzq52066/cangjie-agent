@@ -1,5 +1,6 @@
 package cn.cangjiecloud.tool.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.tool.entity.McpServerEntity;
 
@@ -13,7 +14,12 @@ public interface IMcpServerService extends IService<McpServerEntity> {
 
     McpServerEntity register(McpServerEntity entity);
 
-    List<McpServerEntity> listServers();
+    /**
+     * 分页查询 MCP 服务列表
+     *
+     * @param keyword 按服务名称模糊匹配（可选）
+     */
+    IPage<McpServerEntity> pageServers(String keyword, Integer pageNum, Integer pageSize);
 
     /**
      * 连通性测试（强制重新握手），并回写检查结果

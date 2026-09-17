@@ -5,7 +5,7 @@
         <div class="card-header">
           <div class="header-left">
             <el-input v-model="keyword" placeholder="搜索知识库..." clearable style="width: 240px"
-                      @clear="loadList" @keyup.enter="loadList">
+                      @clear="reload" @keyup.enter="reload">
               <template #prefix><el-icon><Search /></el-icon></template>
             </el-input>
           </div>
@@ -57,6 +57,10 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
+                     :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
+                     :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
     </el-card>
 
     <!-- 创建/编辑对话框 -->
@@ -133,6 +137,9 @@ const router = useRouter()
 const list = ref<any[]>([])
 const loading = ref(false)
 const keyword = ref('')
+const pageNum = ref(1)
+const pageSize = ref(10)
+const total = ref(0)
 const showCreate = ref(false)
 const editing = ref(false)
 const saving = ref(false)
@@ -155,10 +162,22 @@ const rules: FormRules = {
 async function loadList() {
   loading.value = true
   try {
-    list.value = await knowledgeApi.list(keyword.value)
+    const page = await knowledgeApi.list({
+      keyword: keyword.value,
+      pageNum: pageNum.value,
+      pageSize: pageSize.value
+    })
+    list.value = page?.list || []
+    total.value = page?.total || 0
   } finally {
     loading.value = false
   }
+}
+
+/** 搜索/筛选/新建后回到第一页再加载 */
+function reload() {
+  pageNum.value = 1
+  loadList()
 }
 
 function goDetail(id: string) {
@@ -193,7 +212,8 @@ async function handleSave() {
       chunkSize: form.splitStrategy === 'smart' ? undefined : form.chunkSize,
       separators: form.splitStrategy === 'smart' ? undefined : JSON.stringify(form.separators)
     }
-    if (editing.value) {
+    const isEdit = editing.value
+    if (isEdit) {
       await knowledgeApi.update(form.id, payload)
       ElMessage.success('更新成功')
     } else {
@@ -202,7 +222,12 @@ async function handleSave() {
     }
     showCreate.value = false
     editing.value = false
-    loadList()
+    // 新建后回到第一页，编辑后留在当前页
+    if (isEdit) {
+      loadList()
+    } else {
+      reload()
+    }
   } finally {
     saving.value = false
   }
@@ -233,4 +258,5 @@ onMounted(loadList)
 <style lang="scss" scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .form-hint { margin-left: 8px; color: #909399; font-size: 12px; }
+.pager { margin-top: 16px; justify-content: flex-end; }
 </style>

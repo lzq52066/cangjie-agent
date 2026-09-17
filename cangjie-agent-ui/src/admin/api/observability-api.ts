@@ -1,6 +1,7 @@
 import { request } from '@shared/api/http'
 
-export interface PageResult<T> {
+/** MyBatis-Plus IPage 序列化结构（仅 observability 接口使用） */
+export interface MpPage<T> {
   records: T[]
   total: number
   size: number
@@ -13,10 +14,10 @@ export const observabilityApi = {
     return request<Record<string, any>>({ method: 'GET', url: '/observability/dashboard' })
   },
   logs(params: { module?: string; action?: string; status?: string; pageNum?: number; pageSize?: number }) {
-    return request<PageResult<any>>({ method: 'GET', url: '/observability/logs', params })
+    return request<MpPage<any>>({ method: 'GET', url: '/observability/logs', params })
   },
   metrics(params: { metricType?: string; startTime?: string; endTime?: string; pageNum?: number; pageSize?: number }) {
-    return request<PageResult<any>>({ method: 'GET', url: '/observability/metrics', params })
+    return request<MpPage<any>>({ method: 'GET', url: '/observability/metrics', params })
   },
   /** 图表数据：按 metricType 分组多 series，支持时间范围 */
   metricsChart(params?: { metricType?: string; startTime?: string; endTime?: string }) {
@@ -35,7 +36,7 @@ export const observabilityApi = {
     pageNum?: number
     pageSize?: number
   }) {
-    return request<PageResult<any>>({ method: 'GET', url: '/observability/traces', params })
+    return request<MpPage<any>>({ method: 'GET', url: '/observability/traces', params })
   },
   /** LLM 调用追踪分页 */
   llmTraces(params: {
@@ -51,7 +52,7 @@ export const observabilityApi = {
     pageNum?: number
     pageSize?: number
   }) {
-    return request<PageResult<any>>({ method: 'GET', url: '/observability/llm-traces', params })
+    return request<MpPage<any>>({ method: 'GET', url: '/observability/llm-traces', params })
   },
   /** LLM 调用详情 */
   llmTraceDetail(id: string) {

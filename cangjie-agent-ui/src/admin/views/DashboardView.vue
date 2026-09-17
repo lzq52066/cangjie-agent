@@ -95,9 +95,9 @@ onMounted(async () => {
   ])
   if (s.status === 'fulfilled') sysInfo.value = s.value
   if (d.status === 'fulfilled') stat.value = d.value || {}
-  if (m.status === 'fulfilled') modelCount.value = (m.value || []).length
-  if (k.status === 'fulfilled') knowledgeCount.value = (k.value || []).length
-  if (t.status === 'fulfilled') toolCount.value = (t.value || []).length
+  if (m.status === 'fulfilled') modelCount.value = m.value?.total || 0
+  if (k.status === 'fulfilled') knowledgeCount.value = k.value?.total || 0
+  if (t.status === 'fulfilled') toolCount.value = t.value?.total || 0
 })
 </script>
 

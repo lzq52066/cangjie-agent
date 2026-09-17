@@ -4,6 +4,7 @@ import cn.cangjiecloud.trigger.api.dto.ChannelCreateDTO;
 import cn.cangjiecloud.trigger.api.dto.ChannelReplyDTO;
 import cn.cangjiecloud.trigger.api.dto.ChannelUpdateDTO;
 import cn.cangjiecloud.trigger.entity.ChannelEntity;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 
 import java.util.List;
@@ -16,7 +17,7 @@ public interface IChannelService extends IService<ChannelEntity> {
 
     void delete(String id);
 
-    List<ChannelEntity> list(String keyword, String type);
+    IPage<ChannelEntity> pageQuery(String keyword, String type, Integer pageNum, Integer pageSize);
 
     /**
      * 查询某类型所有启用渠道

@@ -3,6 +3,7 @@ package cn.cangjiecloud.knowledge.controller;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.domain.PageResult;
 import cn.cangjiecloud.knowledge.api.dto.ProblemCreateDTO;
 import cn.cangjiecloud.knowledge.entity.KnowledgeProblemEntity;
 import cn.cangjiecloud.knowledge.service.IKnowledgeProblemService;
@@ -25,8 +26,10 @@ public class KnowledgeProblemController {
     private final IKnowledgeProblemService problemService;
 
     @GetMapping("/list/{knowledgeBaseId}")
-    public R<List<KnowledgeProblemEntity>> list(@PathVariable String knowledgeBaseId) {
-        return R.data(problemService.listByKnowledgeBase(knowledgeBaseId));
+    public R<PageResult<KnowledgeProblemEntity>> list(@PathVariable String knowledgeBaseId,
+                                                      @RequestParam(defaultValue = "1") Integer pageNum,
+                                                      @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(problemService.pageQuery(knowledgeBaseId, pageNum, pageSize)));
     }
 
     @PostMapping("/{knowledgeBaseId}")
@@ -62,7 +65,9 @@ public class KnowledgeProblemController {
     }
 
     @GetMapping("/{problemId}/paragraphs")
-    public R<List<String>> paragraphs(@PathVariable String problemId) {
-        return R.data(problemService.listParagraphIds(problemId));
+    public R<PageResult<String>> paragraphs(@PathVariable String problemId,
+                                            @RequestParam(defaultValue = "1") Integer pageNum,
+                                            @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(problemService.pageQueryParagraphIds(problemId, pageNum, pageSize)));
     }
 }

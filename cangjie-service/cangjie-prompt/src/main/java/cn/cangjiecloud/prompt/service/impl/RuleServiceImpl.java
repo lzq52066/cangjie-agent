@@ -1,6 +1,8 @@
 package cn.cangjiecloud.prompt.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.prompt.entity.RuleEntity;
@@ -10,8 +12,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
-
-import java.util.List;
 
 @Slf4j
 @Service
@@ -54,14 +54,14 @@ public class RuleServiceImpl extends ServiceImpl<RuleMapper, RuleEntity>
     }
 
     @Override
-    public List<RuleEntity> list(String keyword) {
+    public IPage<RuleEntity> pageQuery(String keyword, Integer pageNum, Integer pageSize) {
         LambdaQueryWrapper<RuleEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.orderByDesc(RuleEntity::getPriority)
                 .orderByDesc(RuleEntity::getCreateTime);
-        if (StringUtils.hasText(keyword)) {
-            wrapper.like(RuleEntity::getName, keyword)
-                    .or().like(RuleEntity::getDescription, keyword);
-        }
-        return list(wrapper);
+        wrapper.and(StringUtils.hasText(keyword), w -> w
+                .like(RuleEntity::getName, keyword)
+                .or()
+                .like(RuleEntity::getDescription, keyword));
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 }

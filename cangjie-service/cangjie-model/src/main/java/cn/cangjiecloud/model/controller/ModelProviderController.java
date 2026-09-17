@@ -3,6 +3,7 @@ package cn.cangjiecloud.model.controller;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.domain.PageResult;
 import cn.cangjiecloud.model.api.dto.ModelProviderCreateDTO;
 import cn.cangjiecloud.model.api.dto.ModelProviderUpdateDTO;
 import cn.cangjiecloud.model.entity.ModelProviderEntity;
@@ -10,8 +11,6 @@ import cn.cangjiecloud.model.service.IModelProviderService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 /**
  * 厂商管理：统一维护各模型厂商的 API Key 与 Base URL
@@ -41,8 +40,10 @@ public class ModelProviderController {
     }
 
     @GetMapping
-    public R<List<ModelProviderEntity>> list(@RequestParam(required = false) String keyword,
-                                             @RequestParam(required = false) String status) {
-        return R.data(modelProviderService.list(keyword, status));
+    public R<PageResult<ModelProviderEntity>> list(@RequestParam(required = false) String keyword,
+                                                   @RequestParam(required = false) String status,
+                                                   @RequestParam(defaultValue = "1") Integer pageNum,
+                                                   @RequestParam(defaultValue = "10") Integer pageSize) {
+        return R.data(PageResult.of(modelProviderService.pageQuery(keyword, status, pageNum, pageSize)));
     }
 }

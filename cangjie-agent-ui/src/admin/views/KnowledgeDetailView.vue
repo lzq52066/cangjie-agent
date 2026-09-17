@@ -79,6 +79,10 @@
               </template>
             </el-table-column>
           </el-table>
+
+          <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
+                         :total="docTotal" v-model:current-page="docPageNum" v-model:page-size="docPageSize"
+                         :page-sizes="[10, 20, 50]" @size-change="loadDocuments" @current-change="loadDocuments" />
         </el-tab-pane>
 
         <!-- 检索测试 -->
@@ -119,7 +123,7 @@
 
     <!-- 段落预览对话框 -->
     <el-dialog v-model="paragraphDialog" :title="`段落切片 - ${currentDoc?.name || ''}`" width="800px" top="5vh">
-      <el-table :data="paragraphs" stripe max-height="600">
+      <el-table :data="paragraphs" stripe max-height="600" v-loading="paraLoading">
         <el-table-column label="#" prop="chunkIndex" width="60" align="center" />
         <el-table-column label="标题" prop="title" width="180" show-overflow-tooltip />
         <el-table-column label="内容" min-width="300">
@@ -137,6 +141,10 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
+                     :total="paraTotal" v-model:current-page="paraPageNum" v-model:page-size="paraPageSize"
+                     :page-sizes="[10, 20, 50]" @size-change="loadParagraphs" @current-change="loadParagraphs" />
     </el-dialog>
 
     <!-- 文档摘要对话框 -->
@@ -160,6 +168,9 @@ const loading = ref(false)
 const kb = ref<any>({})
 const documents = ref<any[]>([])
 const docLoading = ref(false)
+const docPageNum = ref(1)
+const docPageSize = ref(10)
+const docTotal = ref(0)
 const uploading = ref(false)
 const activeTab = ref('documents')
 
@@ -175,6 +186,10 @@ const searched = ref(false)
 const paragraphDialog = ref(false)
 const currentDoc = ref<any>(null)
 const paragraphs = ref<any[]>([])
+const paraLoading = ref(false)
+const paraPageNum = ref(1)
+const paraPageSize = ref(10)
+const paraTotal = ref(0)
 
 // 摘要对话框
 const summaryDialog = ref(false)
@@ -192,9 +207,35 @@ async function loadKb() {
 async function loadDocuments() {
   docLoading.value = true
   try {
-    documents.value = await knowledgeApi.listDocuments(kbId)
+    const page = await knowledgeApi.listDocuments(kbId, {
+      pageNum: docPageNum.value,
+      pageSize: docPageSize.value
+    })
+    documents.value = page?.list || []
+    docTotal.value = page?.total || 0
   } finally {
     docLoading.value = false
+  }
+}
+
+/** 上传/删除文档后回到第一页再加载 */
+function reloadDocuments() {
+  docPageNum.value = 1
+  loadDocuments()
+}
+
+async function loadParagraphs() {
+  if (!currentDoc.value) return
+  paraLoading.value = true
+  try {
+    const page = await knowledgeApi.listParagraphs(currentDoc.value.id, {
+      pageNum: paraPageNum.value,
+      pageSize: paraPageSize.value
+    })
+    paragraphs.value = page?.list || []
+    paraTotal.value = page?.total || 0
+  } finally {
+    paraLoading.value = false
   }
 }
 
@@ -203,7 +244,7 @@ async function handleUpload(file: File) {
   try {
     await knowledgeApi.uploadDocument(kbId, file)
     ElMessage.success('上传成功，文档正在处理中')
-    loadDocuments()
+    reloadDocuments()
     loadKb()
   } catch (e) {
     ElMessage.error('上传失败')
@@ -216,7 +257,7 @@ async function handleUpload(file: File) {
 async function handleDeleteDoc(docId: string) {
   await knowledgeApi.removeDocument(docId)
   ElMessage.success('删除成功')
-  loadDocuments()
+  reloadDocuments()
   loadKb()
 }
 
@@ -233,10 +274,12 @@ async function handleReEmbedDoc(docId: string) {
   }
 }
 
+/** 切换选中文档时回到第一页再加载段落 */
 async function showParagraphs(doc: any) {
   currentDoc.value = doc
   paragraphDialog.value = true
-  paragraphs.value = await knowledgeApi.listParagraphs(doc.id)
+  paraPageNum.value = 1
+  await loadParagraphs()
 }
 
 function showSummary(doc: any) {
@@ -315,6 +358,7 @@ onMounted(() => {
 .score-sub { color: #909399; }
 .result-content { color: #303133; line-height: 1.8; white-space: pre-wrap; }
 .no-file { color: #c0c4cc; }
+.pager { margin-top: 16px; justify-content: flex-end; }
 .para-content {
   max-height: 80px; overflow: hidden; text-overflow: ellipsis;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;

@@ -1,6 +1,8 @@
 package cn.cangjiecloud.eval.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.eval.entity.EvalCaseEntity;
@@ -58,6 +60,14 @@ public class EvalCaseServiceImpl extends ServiceImpl<EvalCaseMapper, EvalCaseEnt
         removeById(id);
         updateCaseCount(entity.getDatasetId());
         log.info("评估用例已删除: {}", id);
+    }
+
+    @Override
+    public IPage<EvalCaseEntity> pageQuery(String datasetId, Integer pageNum, Integer pageSize) {
+        LambdaQueryWrapper<EvalCaseEntity> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(EvalCaseEntity::getDatasetId, datasetId);
+        wrapper.orderByAsc(EvalCaseEntity::getCreateTime);
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 
     @Override

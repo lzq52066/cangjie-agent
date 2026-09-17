@@ -1,8 +1,20 @@
 import { request } from '@shared/api/http'
+import type { PageQuery, PageResult } from '@shared/types'
+import { OPTION_PAGE_SIZE } from '@shared/types'
+
+export interface ModelQuery extends PageQuery {
+  modelType?: string
+  providerId?: string
+}
 
 export const modelApi = {
-  list(keyword?: string, modelType?: string, providerId?: string) {
-    return request<any[]>({ method: 'GET', url: '/model', params: { keyword, modelType, providerId } })
+  list(query: ModelQuery = {}) {
+    return request<PageResult<any>>({ method: 'GET', url: '/model', params: query })
+  },
+  /** 供下拉选择使用的精简列表 */
+  async options(providerId?: string) {
+    const res = await modelApi.list({ pageSize: OPTION_PAGE_SIZE, providerId })
+    return res?.list ?? []
   },
   get(id: string) {
     return request<any>({ method: 'GET', url: `/model/${id}` })
@@ -35,9 +47,18 @@ export interface ModelProvider {
   description?: string
 }
 
+export interface ModelProviderQuery extends PageQuery {
+  status?: string
+}
+
 export const modelProviderApi = {
-  list(keyword?: string, status?: string) {
-    return request<ModelProvider[]>({ method: 'GET', url: '/model-provider', params: { keyword, status } })
+  list(query: ModelProviderQuery = {}) {
+    return request<PageResult<ModelProvider>>({ method: 'GET', url: '/model-provider', params: query })
+  },
+  /** 供下拉选择使用的精简列表 */
+  async options() {
+    const res = await modelProviderApi.list({ pageSize: OPTION_PAGE_SIZE })
+    return res?.list ?? []
   },
   create(data: Partial<ModelProvider>) {
     return request<ModelProvider>({ method: 'POST', url: '/model-provider', data })

@@ -1,14 +1,13 @@
 package cn.cangjiecloud.trigger.service;
 
 import cn.cangjiecloud.trigger.entity.ChannelMessageEntity;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
-
-import java.util.List;
 
 public interface IChannelMessageService extends IService<ChannelMessageEntity> {
 
     /**
-     * 查询渠道消息记录
+     * 分页查询渠道消息记录（按创建时间倒序）
      */
-    List<ChannelMessageEntity> listByChannel(String channelId);
+    IPage<ChannelMessageEntity> pageQuery(String channelId, Integer pageNum, Integer pageSize);
 }

@@ -2,6 +2,8 @@ package cn.cangjiecloud.knowledge.service.impl;
 
 import cn.cangjiecloud.oss.service.IFileService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.core.rag.VectorStore;
@@ -172,11 +174,12 @@ public class KnowledgeDocumentServiceImpl
     }
 
     @Override
-    public List<KnowledgeDocumentEntity> listByKnowledgeBase(String knowledgeBaseId) {
+    public IPage<KnowledgeDocumentEntity> pageQuery(String knowledgeBaseId, Integer pageNum, Integer pageSize) {
         knowledgeBaseService.checkAccess(knowledgeBaseId);
-        return list(new LambdaQueryWrapper<KnowledgeDocumentEntity>()
+        LambdaQueryWrapper<KnowledgeDocumentEntity> wrapper = new LambdaQueryWrapper<KnowledgeDocumentEntity>()
                 .eq(KnowledgeDocumentEntity::getKnowledgeBaseId, knowledgeBaseId)
-                .orderByDesc(KnowledgeDocumentEntity::getCreateTime));
+                .orderByDesc(KnowledgeDocumentEntity::getCreateTime);
+        return page(new Page<>(pageNum == null ? 1 : pageNum, pageSize == null ? 10 : pageSize), wrapper);
     }
 
     /**

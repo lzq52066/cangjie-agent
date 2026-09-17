@@ -12,6 +12,7 @@ import cn.cangjiecloud.observability.service.ITraceRecordService;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.util.StringUtils;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +37,11 @@ import java.util.Map;
 @RequiredArgsConstructor
 @RequestMapping(AppConst.ADMIN_API + "/observability")
 public class ObservabilityController {
+
+    /**
+     * 图表接口单次读取的明细行上限，与分页插件的 maxLimit 对齐。
+     */
+    private static final int MAX_CHART_ROWS = 5000;
 
     private final IOperationLogService operationLogService;
     private final ISystemMetricService systemMetricService;
@@ -94,12 +101,16 @@ public class ObservabilityController {
         if (startTime == null) startTime = LocalDateTime.now().minusHours(2);
         if (endTime == null) endTime = LocalDateTime.now();
 
-        List<SystemMetricEntity> rows = systemMetricService.list(
+        // 明细行数随时间窗口线性增长，只取窗口内最新的 MAX_CHART_ROWS 条（不查 count），避免一次性物化全量结果
+        IPage<SystemMetricEntity> chartPage = systemMetricService.page(
+                new Page<>(1, MAX_CHART_ROWS, false),
                 new LambdaQueryWrapper<SystemMetricEntity>()
                         .eq(StringUtils.hasText(metricType), SystemMetricEntity::getMetricType, metricType)
                         .ge(SystemMetricEntity::getCollectTime, startTime)
                         .le(SystemMetricEntity::getCollectTime, endTime)
-                        .orderByAsc(SystemMetricEntity::getCollectTime));
+                        .orderByDesc(SystemMetricEntity::getCollectTime));
+        List<SystemMetricEntity> rows = new ArrayList<>(chartPage.getRecords());
+        Collections.reverse(rows);
 
         // 按 metricType 分组，每组下多个 series（按 metricName）
         Map<String, Map<String, Object>> typeGroups = new LinkedHashMap<>();
