@@ -42,4 +42,16 @@ public class ToolEntity extends BaseEntity {
 
     /** 分类 */
     private String category;
+
+    /** 风险等级：low / medium / high */
+    private String riskLevel;
+
+    /** 调用前是否必须人工审批：0 否 / 1 是 */
+    private Integer requireApproval;
+
+    /** 单次执行超时（秒），null 用全局默认 */
+    private Integer timeoutSeconds;
+
+    /** 输出回喂模型前的最大字符数，null 用全局默认 */
+    private Integer maxOutputChars;
 }

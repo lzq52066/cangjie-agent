@@ -1,0 +1,9 @@
+package cn.cangjiecloud.observability.mapper;
+
+import cn.cangjiecloud.observability.entity.AgentApprovalEntity;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Mapper;
+
+@Mapper
+public interface AgentApprovalMapper extends BaseMapper<AgentApprovalEntity> {
+}

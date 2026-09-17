@@ -10,7 +10,17 @@ import cn.cangjiecloud.application.entity.ApplicationEntity;
 import cn.cangjiecloud.application.service.IApplicationService;
 import cn.cangjiecloud.chat.entity.ChatMessageEntity;
 import cn.cangjiecloud.chat.entity.ChatSessionEntity;
+import cn.cangjiecloud.chat.harness.ChatHarnessContextFactory;
+import cn.cangjiecloud.chat.harness.HarnessConfigResolver;
+import cn.cangjiecloud.chat.harness.SseHarnessListener;
+import cn.cangjiecloud.chat.harness.ToolSpecAssembler;
 import cn.cangjiecloud.chat.service.IChatMessageService;
+import cn.cangjiecloud.core.harness.AgentHarness;
+import cn.cangjiecloud.core.harness.HarnessListener;
+import cn.cangjiecloud.core.harness.HarnessOutcome;
+import cn.cangjiecloud.core.harness.HarnessRequest;
+import cn.cangjiecloud.core.harness.HarnessTimeoutException;
+import cn.cangjiecloud.core.harness.RunStatus;
 import cn.cangjiecloud.observability.context.TraceContext;
 import cn.cangjiecloud.observability.service.ILlmTraceRecorder;
 import cn.cangjiecloud.chat.service.IChatService;
@@ -48,6 +58,7 @@ import cn.cangjiecloud.workflow.entity.WorkflowExecutionEntity;
 import cn.cangjiecloud.workflow.service.IWorkflowService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -124,6 +135,15 @@ public class ChatServiceImpl implements IChatService {
     private int historyMaxTokens;
 
     private final cn.cangjiecloud.chat.service.SessionSummaryService sessionSummaryService;
+
+    // ==================== Agent Harness 灰度 ====================
+    // 引擎 Bean 只在 cangjie.harness.enabled=true 时注册，这里用 ObjectProvider 延迟获取，
+    // 关闭时（默认）走改造前的双循环实现，保证可一键回滚。
+
+    private final ObjectProvider<AgentHarness> agentHarnessProvider;
+    private final HarnessConfigResolver harnessConfigResolver;
+    private final ChatHarnessContextFactory harnessContextFactory;
+    private final ToolSpecAssembler toolSpecAssembler;
 
     private static final int DEFAULT_TOP_K = 5;
 
@@ -275,23 +295,21 @@ public class ChatServiceImpl implements IChatService {
             AtomicReference<Long> streamTotalTokens = new AtomicReference<>();
 
             // 构建工具列表（Function Calling），与同步路径 callModel 对齐
-            List<String> toolIds = parseStringList(application.getToolIds());
-            List<ToolSpecification> toolSpecs = new ArrayList<>();
-            if (!toolIds.isEmpty()) {
-                toolSpecs.addAll(toolService.getToolSpecifications(toolIds));
-            }
-            List<String> skillIds = parseStringList(application.getSkillIds());
-            if (!skillIds.isEmpty()) {
-                toolSpecs.addAll(toolService.getSkillSpecifications(skillIds));
-            }
-            // Agentic RAG：知识库检索注册为工具
-            List<String> kbIdsStream = parseStringList(application.getKnowledgeBaseIds());
-            if ("agentic".equals(application.getRagMode()) && !kbIdsStream.isEmpty()) {
-                toolSpecs.add(retrievalToolService.buildSpec("agentic-retrieval"));
-            }
-            List<Map<String, Object>> tools = buildToolDefinitions(toolSpecs);
+            List<ToolSpecification> toolSpecs = toolSpecAssembler.assemble(application);
+            List<String> kbIdsStream = toolSpecAssembler.knowledgeBaseIds(application);
+            List<Map<String, Object>> tools = ToolSpecAssembler.toDefinitions(toolSpecs);
 
             List<ChatMessage> conversation = new ArrayList<>(messages);
+
+            // === 灰度：交由 Agent Harness 引擎执行（关闭时保留下方改造前的双循环） ===
+            AgentHarness harness = harnessIfEnabled();
+            if (harness != null) {
+                chatStreamViaHarness(harness, application, session, userMessage, conversation, retrievalSources,
+                        emitter, openAiFormat, requestId, modelName, created, traceId, userId, chatStart,
+                        llmStart, cancelled);
+                return;
+            }
+
             long deadline = chatStart + agentTimeoutSeconds * 1000L;
 
             // 内部格式先发送 init 事件
@@ -845,27 +863,22 @@ public class ChatServiceImpl implements IChatService {
 
     private ChatResponse callModel(ApplicationEntity application, String sessionId, String userId,
                                    List<ChatMessage> messages, String traceId) {
-        OpenAICompatibleClient client = getClient(application);
         String modelName = getModelName(application.getModelId());
         long llmStart = System.currentTimeMillis();
 
+        // === 灰度：交由 Agent Harness 引擎执行（关闭时保留下方改造前的双循环） ===
+        AgentHarness harness = harnessIfEnabled();
+        if (harness != null) {
+            return callModelViaHarness(harness, application, sessionId, userId, messages, traceId,
+                    modelName, llmStart);
+        }
+
+        OpenAICompatibleClient client = getClient(application);
+
         // === 构建工具列表（Function Calling） ===
-        List<String> toolIds = parseStringList(application.getToolIds());
-        List<ToolSpecification> toolSpecs = new ArrayList<>();
-        if (!toolIds.isEmpty()) {
-            toolSpecs.addAll(toolService.getToolSpecifications(toolIds));
-        }
-        // 技能也作为工具暴露给 function calling
-        List<String> skillIds = parseStringList(application.getSkillIds());
-        if (!skillIds.isEmpty()) {
-            toolSpecs.addAll(toolService.getSkillSpecifications(skillIds));
-        }
-        // Agentic RAG：知识库检索注册为工具
-        List<String> kbIds = parseStringList(application.getKnowledgeBaseIds());
-        if ("agentic".equals(application.getRagMode()) && !kbIds.isEmpty()) {
-            toolSpecs.add(retrievalToolService.buildSpec("agentic-retrieval"));
-        }
-        List<Map<String, Object>> tools = buildToolDefinitions(toolSpecs);
+        List<ToolSpecification> toolSpecs = toolSpecAssembler.assemble(application);
+        List<String> kbIds = toolSpecAssembler.knowledgeBaseIds(application);
+        List<Map<String, Object>> tools = ToolSpecAssembler.toDefinitions(toolSpecs);
 
         // 多轮 function calling 循环（带总超时保护）
         long deadline = System.currentTimeMillis() + agentTimeoutSeconds * 1000L;
@@ -971,6 +984,182 @@ public class ChatServiceImpl implements IChatService {
         return response;
     }
 
+    /**
+     * 灰度开关：仅在 {@code cangjie.harness.enabled=true} 且引擎 Bean 已注册时返回实例，
+     * 否则返回 null 由调用方回落改造前的实现。
+     */
+    private AgentHarness harnessIfEnabled() {
+        if (!harnessConfigResolver.isEnabled()) {
+            return null;
+        }
+        AgentHarness harness = agentHarnessProvider.getIfAvailable();
+        if (harness == null) {
+            log.warn("已开启 cangjie.harness.enabled 但未找到 AgentHarness Bean，本次对话回落旧实现");
+        }
+        return harness;
+    }
+
+    /**
+     * 同步对话的 Harness 路径：收尾语义与改造前的 {@code callModel} 一致——
+     * 超时不写 llm_trace 失败行、其余失败写失败行，两者都以 {@link ApiException} 抛出。
+     */
+    private ChatResponse callModelViaHarness(AgentHarness harness, ApplicationEntity application, String sessionId,
+                                             String userId, List<ChatMessage> messages, String traceId,
+                                             String modelName, long llmStart) {
+        HarnessRequest request = harnessContextFactory.newRequest(application, messages, false, null,
+                sessionId, userId, traceId, agentMaxRounds, agentTimeoutSeconds);
+        HarnessOutcome outcome = harness.run(request, HarnessListener.NOOP);
+        List<ChatMessage> conversation = outcome.getConversation();
+
+        if (outcome.getStatus() == RunStatus.WAITING_APPROVAL) {
+            throw new ApiException("存在待人工审批的工具调用，请通过审批接口恢复运行: runId=" + outcome.getRunId());
+        }
+        if (outcome.getStatus() != RunStatus.COMPLETED) {
+            String error = outcome.getErrorMessage() == null ? "模型调用失败" : outcome.getErrorMessage();
+            boolean timeout = HarnessTimeoutException.isTimeoutMessage(error);
+            if (traceCollector != null) {
+                recordTrace("chat", "llm_call", traceId,
+                        System.currentTimeMillis() - llmStart, "fail",
+                        timeout ? "Agent 循环总超时（>" + request.getLoopPolicy().getTimeoutSeconds() + "s），已终止"
+                                : "模型调用失败: " + error);
+            }
+            if (!timeout) {
+                llmTraceRecorder.recordFailure(ILlmTraceRecorder.LlmTraceRecord.builder()
+                        .requestId("chatcmpl-" + traceId)
+                        .appId(application.getId())
+                        .appName(application.getName())
+                        .modelId(application.getModelId())
+                        .modelName(modelName)
+                        .promptContent(JSON.toJSONString(conversation))
+                        .duration(System.currentTimeMillis() - llmStart)
+                        .startTimeMs(llmStart)
+                        .build(), "模型调用失败: " + error);
+            }
+            throw new ApiException(timeout ? error : "模型调用失败: " + error);
+        }
+
+        ChatResponse response = ChatResponse.builder()
+                .content(outcome.getFinalText())
+                .finishReason(outcome.getFinishReason())
+                .promptTokens((int) outcome.getInputTokens())
+                .completionTokens((int) outcome.getOutputTokens())
+                .totalTokens((int) outcome.getTotalTokens())
+                .build();
+
+        if (traceCollector != null) {
+            recordTrace("chat", "llm_call", traceId,
+                    System.currentTimeMillis() - llmStart, "success",
+                    "模型: " + modelName + ", tokens: " + response.getTotalTokens());
+        }
+        llmTraceRecorder.recordSuccess(ILlmTraceRecorder.LlmTraceRecord.builder()
+                .requestId("chatcmpl-" + traceId)
+                .appId(application.getId())
+                .appName(application.getName())
+                .modelId(application.getModelId())
+                .modelName(modelName)
+                .promptContent(JSON.toJSONString(conversation))
+                .inputTokens(outcome.getInputTokens())
+                .outputTokens(outcome.getOutputTokens())
+                .totalTokens(outcome.getTotalTokens())
+                .responseContent(outcome.getFinalText())
+                .finishReason(outcome.getFinishReason())
+                .duration(System.currentTimeMillis() - llmStart)
+                .startTimeMs(llmStart)
+                .build());
+        return response;
+    }
+
+    /**
+     * 流式对话的 Harness 路径：SSE 帧由 {@link SseHarnessListener} 按改造前的格式逐帧推送，
+     * 收尾语义与改造前的 {@code chatStream} 一致——失败只记 trace 不落库，成功先落库再发终止帧，
+     * 等待审批时不发终止帧（由恢复运行接口继续产出）。
+     */
+    private void chatStreamViaHarness(AgentHarness harness, ApplicationEntity application, ChatSessionEntity session,
+                                      ChatMessageEntity userMessage, List<ChatMessage> conversation,
+                                      List<Map<String, Object>> retrievalSources, SseEmitter emitter,
+                                      boolean openAiFormat, String requestId, String modelName, long created,
+                                      String traceId, String userId, long chatStart, long llmStart,
+                                      AtomicBoolean cancelled) {
+        SseHarnessListener listener = new SseHarnessListener(emitter, openAiFormat, requestId, modelName, created,
+                session.getSessionId(), retrievalSources, harnessConfigResolver.isSseToolEvents());
+        listener.sendInit();
+
+        HarnessRequest request = harnessContextFactory.newRequest(application, conversation, true, cancelled,
+                session.getSessionId(), userId, traceId, agentMaxRounds, agentTimeoutSeconds);
+        HarnessOutcome outcome = harness.run(request, listener);
+
+        if (outcome.getStatus() == RunStatus.WAITING_APPROVAL) {
+            log.info("流式对话挂起等待审批: runId={}, session={}, tool={}", outcome.getRunId(),
+                    session.getSessionId(),
+                    outcome.getPendingApproval() == null ? null : outcome.getPendingApproval().getToolName());
+            return;
+        }
+
+        List<ChatMessage> messages = outcome.getConversation();
+        if (outcome.getStatus() != RunStatus.COMPLETED) {
+            // 错误帧已由 listener 推送；仅记录失败 trace，不保存空消息、不更新会话统计
+            String error = outcome.getErrorMessage() == null ? "对话处理失败" : outcome.getErrorMessage();
+            if (traceCollector != null) {
+                recordTrace("chat", "llm_call", traceId,
+                        System.currentTimeMillis() - llmStart, "fail", "模型调用失败: " + error);
+            }
+            llmTraceRecorder.recordFailure(ILlmTraceRecorder.LlmTraceRecord.builder()
+                    .requestId(requestId)
+                    .appId(application.getId())
+                    .appName(application.getName())
+                    .modelId(application.getModelId())
+                    .modelName(modelName)
+                    .promptContent(JSON.toJSONString(messages))
+                    .duration(System.currentTimeMillis() - llmStart)
+                    .startTimeMs(llmStart)
+                    .build(), error);
+            return;
+        }
+
+        if (traceCollector != null) {
+            recordTrace("chat", "llm_call", traceId,
+                    System.currentTimeMillis() - llmStart, "success",
+                    "模型: " + modelName + ", 流式推送完成");
+        }
+
+        long duration = System.currentTimeMillis() - chatStart;
+        String finalText = outcome.getFinalText() == null ? "" : outcome.getFinalText();
+        ChatMessageEntity aiMessage = saveAiMessage(session, application,
+                ChatResponse.builder()
+                        .content(finalText)
+                        .totalTokens((int) outcome.getTotalTokens())
+                        .finishReason(null)
+                        .build(),
+                retrievalSources, duration);
+
+        llmTraceRecorder.recordSuccess(ILlmTraceRecorder.LlmTraceRecord.builder()
+                .requestId(requestId)
+                .appId(application.getId())
+                .appName(application.getName())
+                .modelId(application.getModelId())
+                .modelName(modelName)
+                .promptContent(JSON.toJSONString(messages))
+                .inputTokens(outcome.getInputTokens())
+                .outputTokens(outcome.getOutputTokens())
+                .totalTokens(outcome.getTotalTokens())
+                .responseContent(finalText)
+                .finishReason(outcome.getFinishReason())
+                .duration(System.currentTimeMillis() - llmStart)
+                .startTimeMs(llmStart)
+                .build());
+
+        updateSessionStats(session, aiMessage);
+        addApplicationTokens(application.getId(), outcome.getTotalTokens());
+        sessionSummaryService.maybeSummarizeAsync(session.getSessionId(), application.getModelId());
+
+        if (Boolean.TRUE.equals(application.getMemoryEnabled())) {
+            longTermMemoryExtractService.extract(
+                    userId, application, session.getSessionId(), userMessage, aiMessage);
+        }
+
+        listener.sendTerminal();
+    }
+
     private Stream<ChatChunk> callModelStream(ApplicationEntity application,
                                                List<ChatMessage> messages,
                                                String traceId,
@@ -978,21 +1167,8 @@ public class ChatServiceImpl implements IChatService {
         OpenAICompatibleClient client = getClient(application);
 
         // 构建工具列表（Function Calling）
-        List<String> toolIds = parseStringList(application.getToolIds());
-        List<ToolSpecification> toolSpecs = new ArrayList<>();
-        if (!toolIds.isEmpty()) {
-            toolSpecs.addAll(toolService.getToolSpecifications(toolIds));
-        }
-        List<String> skillIds = parseStringList(application.getSkillIds());
-        if (!skillIds.isEmpty()) {
-            toolSpecs.addAll(toolService.getSkillSpecifications(skillIds));
-        }
-        // Agentic RAG
-        List<String> kbIds = parseStringList(application.getKnowledgeBaseIds());
-        if ("agentic".equals(application.getRagMode()) && !kbIds.isEmpty()) {
-            toolSpecs.add(retrievalToolService.buildSpec("agentic-retrieval"));
-        }
-        List<Map<String, Object>> tools = buildToolDefinitions(toolSpecs);
+        List<ToolSpecification> toolSpecs = toolSpecAssembler.assemble(application);
+        List<Map<String, Object>> tools = ToolSpecAssembler.toDefinitions(toolSpecs);
 
         ChatRequest chatRequest = ChatRequest.builder()
                 .messages(messages)
@@ -1162,27 +1338,6 @@ public class ChatServiceImpl implements IChatService {
     }
 
     // ========== Tool / Workflow Integration ==========
-
-    /**
-     * 构建 OpenAI 兼容的 tool definitions
-     */
-    private List<Map<String, Object>> buildToolDefinitions(List<ToolSpecification> toolSpecs) {
-        if (toolSpecs == null || toolSpecs.isEmpty()) return List.of();
-        return toolSpecs.stream().map(spec -> {
-            Map<String, Object> toolDef = new HashMap<>();
-            toolDef.put("type", "function");
-            Map<String, Object> function = new HashMap<>();
-            function.put("name", spec.getName());
-            function.put("description", spec.getDescription());
-            if (spec.getParameters() != null) {
-                function.put("parameters", spec.getParameters());
-            } else {
-                function.put("parameters", Map.of("type", "object", "properties", Map.of()));
-            }
-            toolDef.put("function", function);
-            return toolDef;
-        }).toList();
-    }
 
     /**
      * 路由到工作流执行
