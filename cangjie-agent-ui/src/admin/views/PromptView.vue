@@ -5,6 +5,10 @@
         <el-tab-pane v-for="t in tabs" :key="t.key" :label="t.label" :name="t.key" />
       </el-tabs>
 
+      <!-- 记忆：独立的长期记忆管理（自动提取/手工录入），与其他通用 CRUD 资源不同 -->
+      <MemoryManager v-if="activeTab === 'memory'" />
+
+      <template v-else>
       <div class="toolbar">
         <el-input v-model="keyword" placeholder="搜索名称..." clearable style="width: 220px"
                   @clear="reload" @keyup.enter="reload">
@@ -52,6 +56,7 @@
       <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
                      :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
                      :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+      </template>
     </el-card>
 
     <!-- 编辑对话框 -->
@@ -101,30 +106,6 @@
           <el-form-item label="描述"><el-input v-model="form.description" type="textarea" :rows="2" /></el-form-item>
         </template>
 
-        <!-- 记忆 -->
-        <template v-else-if="activeTab === 'memory'">
-          <el-form-item label="应用 ID"><el-input v-model="form.applicationId" /></el-form-item>
-          <el-form-item label="会话 ID"><el-input v-model="form.sessionId" /></el-form-item>
-          <el-form-item label="角色" prop="role">
-            <el-select v-model="form.role" style="width:100%">
-              <el-option label="user" value="user" />
-              <el-option label="assistant" value="assistant" />
-              <el-option label="system" value="system" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="内容" prop="content">
-            <el-input v-model="form.content" type="textarea" :rows="5" />
-          </el-form-item>
-          <el-form-item label="摘要"><el-input v-model="form.summary" type="textarea" :rows="2" /></el-form-item>
-          <el-form-item label="重要度">
-            <el-slider v-model="form.importance" :min="1" :max="10" show-stops />
-          </el-form-item>
-          <el-form-item label="过期时间">
-            <el-date-picker v-model="form.expireTime" type="datetime"
-                            value-format="YYYY-MM-DD HH:mm:ss" style="width:100%" />
-          </el-form-item>
-        </template>
-
         <!-- 规则 -->
         <template v-else-if="activeTab === 'rule'">
           <el-form-item label="名称" prop="name"><el-input v-model="form.name" /></el-form-item>
@@ -167,7 +148,7 @@
           <el-form-item label="描述"><el-input v-model="form.description" type="textarea" :rows="2" /></el-form-item>
         </template>
 
-        <el-form-item v-if="activeTab !== 'memory'" label="状态">
+        <el-form-item label="状态">
           <el-radio-group v-model="form.status">
             <el-radio value="active">激活</el-radio>
             <el-radio value="inactive">停用</el-radio>
@@ -199,6 +180,10 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
 import { promptApi, type PromptResource } from '@admin/api/prompt-api'
+import MemoryManager from '@admin/components/MemoryManager.vue'
+
+/** Tab 标识：memory 为独立的长期记忆管理，其余走通用 CRUD */
+type TabKey = PromptResource | 'memory'
 
 interface Col {
   label: string
@@ -212,7 +197,7 @@ interface Col {
 }
 type DictName = 'skillType' | 'ruleType' | 'commandType'
 
-const tabs: { key: PromptResource; label: string }[] = [
+const tabs: { key: TabKey; label: string }[] = [
   { key: 'template', label: '提示词模板' },
   { key: 'skill', label: 'Skill 技能' },
   { key: 'memory', label: '记忆' },
@@ -265,15 +250,6 @@ const columnsMap: Record<PromptResource, Col[]> = {
     { label: '描述', prop: 'description', minWidth: 240, ellipsis: true },
     { label: '状态', prop: 'status', width: 90, align: 'center', kind: 'status' }
   ],
-  memory: [
-    { label: '应用', prop: 'applicationId', width: 170, ellipsis: true },
-    { label: '会话', prop: 'sessionId', width: 170, ellipsis: true },
-    { label: '角色', prop: 'role', width: 90, align: 'center' },
-    { label: '内容', prop: 'content', minWidth: 240, ellipsis: true },
-    { label: '摘要', prop: 'summary', minWidth: 160, ellipsis: true },
-    { label: '重要度', prop: 'importance', width: 80, align: 'center' },
-    { label: '过期时间', prop: 'expireTime', width: 170 }
-  ],
   rule: [
     { label: '名称', prop: 'name', minWidth: 140 },
     { label: '类型', prop: 'type', width: 120, align: 'center', kind: 'dict', dict: 'ruleType' },
@@ -291,9 +267,9 @@ const columnsMap: Record<PromptResource, Col[]> = {
   ]
 }
 
-const activeTab = ref<PromptResource>('template')
+const activeTab = ref<TabKey>('template')
 const currentTab = computed(() => tabs.find(t => t.key === activeTab.value)!)
-const columns = computed(() => columnsMap[activeTab.value])
+const columns = computed(() => columnsMap[activeTab.value as PromptResource])
 
 const list = ref<any[]>([])
 const loading = ref(false)
@@ -318,10 +294,6 @@ const rulesMap: Record<PromptResource, FormRules> = {
     type: [{ required: true, message: '请选择类型', trigger: 'change' }],
     content: [{ required: true, message: '请输入内容', trigger: 'blur' }]
   },
-  memory: {
-    role: [{ required: true, message: '请选择角色', trigger: 'change' }],
-    content: [{ required: true, message: '请输入内容', trigger: 'blur' }]
-  },
   rule: {
     name: [{ required: true, message: '请输入名称', trigger: 'blur' }],
     type: [{ required: true, message: '请选择类型', trigger: 'change' }],
@@ -335,12 +307,11 @@ const rulesMap: Record<PromptResource, FormRules> = {
     script: [{ required: true, message: '请输入脚本', trigger: 'blur' }]
   }
 }
-const rules = computed(() => rulesMap[activeTab.value])
+const rules = computed(() => rulesMap[activeTab.value as PromptResource])
 
 const defaultsMap: Record<PromptResource, Record<string, any>> = {
   template: { name: '', category: '通用', content: '', description: '', variables: '', isDefault: false, status: 'active' },
   skill: { name: '', type: 'prompt', content: '', functionName: '', parameters: '', description: '', status: 'active' },
-  memory: { applicationId: '', sessionId: '', role: 'user', content: '', summary: '', importance: 5, expireTime: null, status: 'active' },
   rule: { name: '', type: 'input', condition: '', action: '', priority: 100, description: '', status: 'active' },
   command: { name: '', command: '', type: 'prompt', script: '', parameters: '', description: '', status: 'active' }
 }
@@ -348,7 +319,7 @@ const defaultsMap: Record<PromptResource, Record<string, any>> = {
 async function loadList() {
   loading.value = true
   try {
-    const page = await promptApi.of(activeTab.value).list({
+    const page = await promptApi.of(activeTab.value as PromptResource).list({
       keyword: keyword.value, pageNum: pageNum.value, pageSize: pageSize.value
     })
     list.value = page?.list || []
@@ -365,6 +336,8 @@ function reload() {
 }
 
 function onTabChange() {
+  // 记忆 tab 由 MemoryManager 自管理数据，不加载通用列表
+  if (activeTab.value === 'memory') return
   keyword.value = ''
   pageNum.value = 1
   loadList()
@@ -372,7 +345,7 @@ function onTabChange() {
 
 function resetForm(source?: any) {
   Object.keys(form).forEach(k => delete form[k])
-  Object.assign(form, { id: '', ...defaultsMap[activeTab.value] }, source || {})
+  Object.assign(form, { id: '', ...defaultsMap[activeTab.value as PromptResource] }, source || {})
 }
 
 function openCreate() {
@@ -392,7 +365,7 @@ async function handleSave() {
   await formRef.value.validate()
   saving.value = true
   try {
-    const api = promptApi.of(activeTab.value)
+    const api = promptApi.of(activeTab.value as PromptResource)
     const { id, ...payload } = form
     if (editing.value) {
       await api.update(id, payload)
@@ -409,7 +382,7 @@ async function handleSave() {
 }
 
 async function handleDelete(id: string) {
-  await promptApi.of(activeTab.value).remove(id)
+  await promptApi.of(activeTab.value as PromptResource).remove(id)
   ElMessage.success('删除成功')
   loadList()
 }

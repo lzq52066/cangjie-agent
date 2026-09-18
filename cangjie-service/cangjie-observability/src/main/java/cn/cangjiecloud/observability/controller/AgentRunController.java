@@ -7,6 +7,7 @@ import cn.cangjiecloud.observability.dto.AgentRunQueryDTO;
 import cn.cangjiecloud.observability.entity.AgentRunEntity;
 import cn.cangjiecloud.observability.entity.AgentRunStepEntity;
 import cn.cangjiecloud.observability.service.IAgentRunService;
+import cn.dev33.satoken.annotation.SaCheckLogin;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +20,7 @@ import java.util.List;
 /**
  * Agent 执行留痕查询接口
  */
+@SaCheckLogin
 @RestController
 @RequiredArgsConstructor
 @RequestMapping(AppConst.ADMIN_API + "/observability/agent-runs")

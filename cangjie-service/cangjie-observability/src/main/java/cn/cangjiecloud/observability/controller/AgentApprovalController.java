@@ -4,6 +4,7 @@ import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
 import cn.cangjiecloud.observability.entity.AgentApprovalEntity;
 import cn.cangjiecloud.observability.service.IAgentApprovalService;
+import cn.dev33.satoken.annotation.SaCheckLogin;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 决策与恢复执行在对话侧：{@code POST /api/chat/approval/{approvalId}/decide}，
  * 由对话侧持有引擎与检查点，观测模块只负责存单与幂等改单。
  */
+@SaCheckLogin
 @RestController
 @RequiredArgsConstructor
 @RequestMapping(AppConst.ADMIN_API + "/observability/agent-approvals")

@@ -86,8 +86,33 @@ public class EvalController {
         return runService.run(datasetId, config);
     }
 
+    /**
+     * 运行历史分页：可按数据集 / 状态筛选
+     */
+    @GetMapping("/runs")
+    public PageResult<EvalRunEntity> listRuns(@RequestParam(required = false) String datasetId,
+                                              @RequestParam(required = false) String status,
+                                              @RequestParam(defaultValue = "1") Integer pageNum,
+                                              @RequestParam(defaultValue = "10") Integer pageSize) {
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<EvalRunEntity> wrapper =
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<EvalRunEntity>()
+                        .eq(datasetId != null && !datasetId.isBlank(), EvalRunEntity::getDatasetId, datasetId)
+                        .eq(status != null && !status.isBlank(), EvalRunEntity::getStatus, status)
+                        .orderByDesc(EvalRunEntity::getStartTime);
+        return PageResult.of(runService.page(
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(pageNum, pageSize), wrapper));
+    }
+
     @GetMapping("/runs/{runId}")
     public EvalRunEntity getRunReport(@PathVariable String runId) {
         return runService.getReport(runId);
+    }
+
+    /**
+     * 删除运行记录（运行中不允许删除）
+     */
+    @DeleteMapping("/runs/{runId}")
+    public void deleteRun(@PathVariable String runId) {
+        runService.removeById(runId);
     }
 }

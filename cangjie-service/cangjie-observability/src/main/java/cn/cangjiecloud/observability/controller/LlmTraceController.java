@@ -5,6 +5,7 @@ import cn.cangjiecloud.common.constant.AppConst;
 import cn.cangjiecloud.observability.dto.LlmTraceQueryDTO;
 import cn.cangjiecloud.observability.entity.LlmTraceEntity;
 import cn.cangjiecloud.observability.service.ILlmTraceService;
+import cn.dev33.satoken.annotation.SaCheckLogin;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,6 +18,7 @@ import java.util.List;
 /**
  * LLM 调用追踪查询接口
  */
+@SaCheckLogin
 @RestController
 @RequiredArgsConstructor
 @RequestMapping(AppConst.ADMIN_API + "/observability/llm-traces")

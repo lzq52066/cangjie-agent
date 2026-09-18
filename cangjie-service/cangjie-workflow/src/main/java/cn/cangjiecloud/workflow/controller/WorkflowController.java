@@ -78,6 +78,27 @@ public class WorkflowController {
         return R.data(workflowService.executeAsync(id, dto.getInputs()));
     }
 
+    /**
+     * 跨工作流执行总览：可按工作流 / 应用 / 会话 / 状态筛选
+     */
+    @GetMapping("/executions")
+    public R<PageResult<WorkflowExecutionEntity>> allExecutions(@RequestParam(required = false) String workflowId,
+                                                                @RequestParam(required = false) String applicationId,
+                                                                @RequestParam(required = false) String sessionId,
+                                                                @RequestParam(required = false) String status,
+                                                                @RequestParam(defaultValue = "1") Integer pageNum,
+                                                                @RequestParam(defaultValue = "10") Integer pageSize) {
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<WorkflowExecutionEntity> wrapper =
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<WorkflowExecutionEntity>()
+                        .eq(workflowId != null && !workflowId.isBlank(), WorkflowExecutionEntity::getWorkflowId, workflowId)
+                        .eq(applicationId != null && !applicationId.isBlank(), WorkflowExecutionEntity::getApplicationId, applicationId)
+                        .eq(sessionId != null && !sessionId.isBlank(), WorkflowExecutionEntity::getSessionId, sessionId)
+                        .eq(status != null && !status.isBlank(), WorkflowExecutionEntity::getStatus, status)
+                        .orderByDesc(WorkflowExecutionEntity::getStartTime);
+        return R.data(PageResult.of(workflowExecutionService.page(
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(pageNum, pageSize), wrapper)));
+    }
+
     @GetMapping("/{id}/executions")
     public R<PageResult<WorkflowExecutionEntity>> executions(@PathVariable String id,
                                                              @RequestParam(defaultValue = "1") Integer pageNum,

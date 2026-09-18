@@ -5,12 +5,10 @@ import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
 import cn.cangjiecloud.common.domain.PageResult;
 import cn.cangjiecloud.prompt.entity.CommandEntity;
-import cn.cangjiecloud.prompt.entity.MemoryEntity;
 import cn.cangjiecloud.prompt.entity.PromptTemplateEntity;
 import cn.cangjiecloud.prompt.entity.RuleEntity;
 import cn.cangjiecloud.prompt.entity.SkillEntity;
 import cn.cangjiecloud.prompt.service.ICommandService;
-import cn.cangjiecloud.prompt.service.IMemoryService;
 import cn.cangjiecloud.prompt.service.IPromptTemplateService;
 import cn.cangjiecloud.prompt.service.IRuleService;
 import cn.cangjiecloud.prompt.service.ISkillService;
@@ -25,7 +23,6 @@ public class PromptController {
 
     private final IPromptTemplateService promptTemplateService;
     private final ISkillService skillService;
-    private final IMemoryService memoryService;
     private final IRuleService ruleService;
     private final ICommandService commandService;
 
@@ -89,37 +86,6 @@ public class PromptController {
     @GetMapping("/skill/{id}")
     public R<SkillEntity> getSkill(@PathVariable String id) {
         return R.data(skillService.getById(id));
-    }
-
-    // ==================== 记忆 CRUD ====================
-
-    @GetMapping("/memory")
-    public R<PageResult<MemoryEntity>> listMemory(
-            @RequestParam(required = false) String keyword,
-            @RequestParam(defaultValue = "1") Integer pageNum,
-            @RequestParam(defaultValue = "10") Integer pageSize) {
-        return R.data(PageResult.of(memoryService.pageQuery(keyword, pageNum, pageSize)));
-    }
-
-    @PostMapping("/memory")
-    public R<MemoryEntity> createMemory(@RequestBody MemoryEntity entity) {
-        return R.data(memoryService.create(entity));
-    }
-
-    @PutMapping("/memory/{id}")
-    public R<MemoryEntity> updateMemory(@PathVariable String id, @RequestBody MemoryEntity entity) {
-        return R.data(memoryService.update(id, entity));
-    }
-
-    @DeleteMapping("/memory/{id}")
-    public R<Void> deleteMemory(@PathVariable String id) {
-        memoryService.delete(id);
-        return R.ok();
-    }
-
-    @GetMapping("/memory/{id}")
-    public R<MemoryEntity> getMemory(@PathVariable String id) {
-        return R.data(memoryService.getById(id));
     }
 
     // ==================== 规则 CRUD ====================

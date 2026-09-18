@@ -2,8 +2,8 @@ import { request } from '@shared/api/http'
 import type { PageQuery, PageResult } from '@shared/types'
 import { OPTION_PAGE_SIZE } from '@shared/types'
 
-/** 提示词模块子资源：模板 / 技能 / 记忆 / 规则 / 命令 */
-export type PromptResource = 'template' | 'skill' | 'memory' | 'rule' | 'command'
+/** 提示词模块子资源：模板 / 技能 / 规则 / 命令（记忆已独立为长期记忆管理） */
+export type PromptResource = 'template' | 'skill' | 'rule' | 'command'
 
 function crud(resource: PromptResource) {
   return {
@@ -37,7 +37,6 @@ function crud(resource: PromptResource) {
 export const promptApi = {
   template: crud('template'),
   skill: crud('skill'),
-  memory: crud('memory'),
   rule: crud('rule'),
   command: crud('command'),
   /** 按资源名动态取用，供 Tab 页统一调用 */

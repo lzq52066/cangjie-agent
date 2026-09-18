@@ -2,6 +2,7 @@ package cn.cangjiecloud.observability.entity;
 
 import cn.cangjiecloud.common.mp.base.BaseEntity;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -74,8 +75,10 @@ public class AgentRunEntity extends BaseEntity {
     /** 一次性恢复令牌 */
     private String resumeToken;
 
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime startTime;
 
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime endTime;
 
     private Long duration;

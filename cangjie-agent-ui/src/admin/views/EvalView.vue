@@ -1,5 +1,10 @@
 <template>
   <div class="eval-view">
+    <div class="page-toolbar">
+      <el-button @click="openRunHistory">
+        <el-icon><Clock /></el-icon> 运行历史
+      </el-button>
+    </div>
     <el-row :gutter="16">
       <!-- 左侧：数据集列表 -->
       <el-col :xs="24" :sm="24" :md="8" :lg="8">
@@ -166,13 +171,70 @@
       </div>
       <div v-else class="report-loading" v-loading="true"></div>
     </el-drawer>
+
+    <!-- 运行历史（跨数据集） -->
+    <el-drawer v-model="historyDrawer" title="评估运行历史" size="860px" destroy-on-close>
+      <div class="history-filters">
+        <el-select v-model="historyQuery.datasetId" placeholder="全部数据集" clearable filterable
+                   style="width:200px" @change="reloadHistory">
+          <el-option v-for="ds in datasets" :key="ds.id" :label="ds.name" :value="ds.id" />
+        </el-select>
+        <el-select v-model="historyQuery.status" placeholder="全部状态" clearable style="width:140px"
+                   @change="reloadHistory">
+          <el-option label="排队中" value="pending" />
+          <el-option label="执行中" value="running" />
+          <el-option label="已完成" value="completed" />
+          <el-option label="失败" value="failed" />
+        </el-select>
+      </div>
+      <el-table :data="history" v-loading="historyLoading" stripe size="small">
+        <el-table-column label="开始时间" prop="startTime" width="160" />
+        <el-table-column label="数据集" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">{{ datasetName(row.datasetId) }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag size="small" :type="runStatusTag(row.status)">{{ runStatusLabel(row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="进度" width="140" align="center">
+          <template #default="{ row }">
+            <el-progress :percentage="row.progress ?? 0" :stroke-width="8"
+                         :status="row.status === 'failed' ? 'exception' : (row.progress >= 100 ? 'success' : '')" />
+          </template>
+        </el-table-column>
+        <el-table-column label="平均召回" width="90" align="center">
+          <template #default="{ row }">{{ fmt(parseSummary(row.summary).avgRecall) }}</template>
+        </el-table-column>
+        <el-table-column label="平均正确性" width="100" align="center">
+          <template #default="{ row }">{{ fmt(parseSummary(row.summary).avgCorrectness) }}</template>
+        </el-table-column>
+        <el-table-column label="Token" prop="summary" width="90" align="center">
+          <template #default="{ row }">{{ parseSummary(row.summary).totalTokens ?? '-' }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="110" align="center" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" link type="primary" @click="viewRunReport(row)">报告</el-button>
+            <el-popconfirm title="确定删除该运行记录？" @confirm="deleteRun(row)">
+              <template #reference>
+                <el-button size="small" link type="danger">删除</el-button>
+              </template>
+            </el-popconfirm>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
+                     :total="historyTotal" v-model:current-page="historyPageNum"
+                     v-model:page-size="historyPageSize" :page-sizes="[10, 20, 50]"
+                     @size-change="loadHistory" @current-change="loadHistory" />
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Plus, MoreFilled } from '@element-plus/icons-vue'
+import { Plus, MoreFilled, Clock } from '@element-plus/icons-vue'
 import { evalApi } from '@admin/api/eval-api'
 import { modelApi } from '@admin/api/model-api'
 import { knowledgeApi } from '@admin/api/knowledge-api'
@@ -414,6 +476,69 @@ function fmt(v: any) {
   return v == null || isNaN(v) ? '-' : (Number(v) * 100).toFixed(1) + '%'
 }
 
+// ============ 运行历史 ============
+const historyDrawer = ref(false)
+const history = ref<any[]>([])
+const historyLoading = ref(false)
+const historyPageNum = ref(1)
+const historyPageSize = ref(10)
+const historyTotal = ref(0)
+const historyQuery = reactive({ datasetId: '', status: '' })
+
+function runStatusLabel(s?: string) {
+  return ({ pending: '排队中', running: '执行中', completed: '已完成', failed: '失败' } as Record<string, string>)[s || ''] || s || '-'
+}
+function runStatusTag(s?: string): any {
+  return ({ running: 'warning', completed: 'success', failed: 'danger' } as Record<string, string>)[s || ''] || 'info'
+}
+function datasetName(id?: string) {
+  return datasets.value.find(d => d.id === id)?.name || id || '-'
+}
+function parseSummary(text?: string) {
+  return safeParse<Record<string, any>>(text, {})
+}
+
+function openRunHistory() {
+  historyDrawer.value = true
+  historyPageNum.value = 1
+  loadHistory()
+}
+function reloadHistory() {
+  historyPageNum.value = 1
+  loadHistory()
+}
+async function loadHistory() {
+  historyLoading.value = true
+  try {
+    const page = await evalApi.listRuns({
+      datasetId: historyQuery.datasetId || undefined,
+      status: historyQuery.status || undefined,
+      pageNum: historyPageNum.value,
+      pageSize: historyPageSize.value
+    })
+    history.value = page?.list || []
+    historyTotal.value = page?.total || 0
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+function viewRunReport(run: any) {
+  current.value = { id: run.datasetId, name: datasetName(run.datasetId) }
+  report.value = null
+  resultList.value = []
+  Object.keys(summary).forEach(k => delete summary[k])
+  historyDrawer.value = false
+  reportDrawer.value = true
+  pollReport(run.id)
+}
+
+async function deleteRun(run: any) {
+  await evalApi.deleteRun(run.id)
+  ElMessage.success('运行记录已删除')
+  loadHistory()
+}
+
 onMounted(async () => {
   loadDatasets()
   const [m, k] = await Promise.allSettled([modelApi.options(), knowledgeApi.options()])
@@ -423,6 +548,8 @@ onMounted(async () => {
 </script>
 
 <style lang="scss" scoped>
+.page-toolbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.history-filters { display: flex; gap: 10px; margin-bottom: 12px; }
 .card-header {
   display: flex; justify-content: space-between; align-items: center;
 }

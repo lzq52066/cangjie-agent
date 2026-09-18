@@ -65,6 +65,33 @@ public class ChannelController {
         return R.data(channelService.disable(id));
     }
 
+    /**
+     * 跨渠道消息全局审计：可按渠道 / 类型 / 应用 / 外部用户 / 处理状态 / 关键词筛选
+     */
+    @GetMapping("/messages")
+    public R<PageResult<ChannelMessageEntity>> allMessages(@RequestParam(required = false) String channelId,
+                                                           @RequestParam(required = false) String channelType,
+                                                           @RequestParam(required = false) String applicationId,
+                                                           @RequestParam(required = false) String openId,
+                                                           @RequestParam(required = false) String status,
+                                                           @RequestParam(required = false) String keyword,
+                                                           @RequestParam(defaultValue = "1") Integer pageNum,
+                                                           @RequestParam(defaultValue = "10") Integer pageSize) {
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ChannelMessageEntity> wrapper =
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ChannelMessageEntity>()
+                        .eq(channelId != null && !channelId.isBlank(), ChannelMessageEntity::getChannelId, channelId)
+                        .eq(channelType != null && !channelType.isBlank(), ChannelMessageEntity::getChannelType, channelType)
+                        .eq(applicationId != null && !applicationId.isBlank(), ChannelMessageEntity::getApplicationId, applicationId)
+                        .eq(openId != null && !openId.isBlank(), ChannelMessageEntity::getOpenId, openId)
+                        .eq(status != null && !status.isBlank(), ChannelMessageEntity::getStatus, status)
+                        .and(keyword != null && !keyword.isBlank(), w -> w
+                                .like(ChannelMessageEntity::getContent, keyword)
+                                .or().like(ChannelMessageEntity::getReplyContent, keyword))
+                        .orderByDesc(ChannelMessageEntity::getCreateTime);
+        return R.data(PageResult.of(channelMessageService.page(
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(pageNum, pageSize), wrapper)));
+    }
+
     @GetMapping("/{id}/messages")
     public R<PageResult<ChannelMessageEntity>> messages(@PathVariable String id,
                                                         @RequestParam(defaultValue = "1") Integer pageNum,

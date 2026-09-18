@@ -1,6 +1,7 @@
 package cn.cangjiecloud.eval.entity;
 
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import cn.cangjiecloud.common.mp.base.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -25,9 +26,11 @@ public class EvalRunEntity extends BaseEntity {
     private String status;
 
     /** 开始时间 */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime startTime;
 
     /** 结束时间 */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime endTime;
 
     /** 汇总指标（JSON：avgRecall / avgCorrectness / avgLatency / totalTokens） */

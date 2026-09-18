@@ -1,17 +1,24 @@
 <template>
   <div class="workflow-view">
     <el-card>
-      <template #header>
-        <div class="card-header">
-          <el-input v-model="keyword" placeholder="搜索工作流..." clearable style="width: 220px"
-                    @clear="reload" @keyup.enter="reload">
-            <template #prefix><el-icon><Search /></el-icon></template>
-          </el-input>
-          <el-button type="primary" @click="openCreate">
-            <el-icon><Plus /></el-icon> 新建工作流
-          </el-button>
-        </div>
-      </template>
+      <el-tabs v-model="activeTab">
+        <el-tab-pane label="工作流" name="list">
+          <div class="tab-toolbar">
+            <el-input v-model="keyword" placeholder="搜索工作流..." clearable style="width: 220px"
+                      @clear="reload" @keyup.enter="reload">
+              <template #prefix><el-icon><Search /></el-icon></template>
+            </el-input>
+            <el-button type="primary" @click="openCreate">
+              <el-icon><Plus /></el-icon> 新建工作流
+            </el-button>
+          </div>
+        </el-tab-pane>
+        <el-tab-pane label="执行总览" name="executions" />
+      </el-tabs>
+
+      <WorkflowExecutionsPanel v-if="activeTab === 'executions'" />
+
+      <template v-if="activeTab === 'list'">
 
       <el-table :data="list" v-loading="loading" stripe>
         <el-table-column label="名称" prop="name" min-width="160" />
@@ -50,6 +57,7 @@
       <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
                      :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
                      :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+      </template>
     </el-card>
 
     <!-- 基础信息 -->
@@ -120,8 +128,10 @@ import { Search, Plus } from '@element-plus/icons-vue'
 import { workflowApi } from '@admin/api/workflow-api'
 import { applicationApi } from '@admin/api/application-api'
 import ExecutionDetail from '@admin/components/ExecutionDetail.vue'
+import WorkflowExecutionsPanel from '@admin/components/workflow/WorkflowExecutionsPanel.vue'
 
 const router = useRouter()
+const activeTab = ref<'list' | 'executions'>('list')
 
 const list = ref<any[]>([])
 const loading = ref(false)
@@ -304,5 +314,6 @@ onMounted(async () => {
 
 <style lang="scss" scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; }
+.tab-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .pager { margin-top: 16px; justify-content: flex-end; }
 </style>

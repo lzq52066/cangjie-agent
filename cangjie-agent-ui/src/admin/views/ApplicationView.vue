@@ -62,9 +62,10 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="290" fixed="right" align="center">
+        <el-table-column label="操作" width="350" fixed="right" align="center">
           <template #default="{ row }">
             <el-button size="small" link type="warning" @click="handlePublish(row)">发布</el-button>
+            <el-button size="small" link type="primary" @click="openVersions(row)">版本</el-button>
             <el-button size="small" link type="success" :disabled="!row.apikey" @click="openAccess(row)">接入</el-button>
             <el-button size="small" link :disabled="!row.apikey" @click="openChat(row)">试聊</el-button>
             <el-button size="small" link type="primary" @click="openEdit(row)">编辑</el-button>
@@ -229,6 +230,39 @@
         </el-tab-pane>
       </el-tabs>
     </el-dialog>
+
+    <!-- 历史版本 -->
+    <el-drawer v-model="versionDrawer" :title="`历史版本 - ${versionApp?.name || ''}`" size="760px" destroy-on-close>
+      <el-table :data="versions" v-loading="versionLoading" stripe size="small">
+        <el-table-column label="版本" width="70" align="center">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.version === latestVersion ? 'success' : 'info'">v{{ row.version }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="发布说明" prop="publishLog" min-width="150" show-overflow-tooltip />
+        <el-table-column label="发布人" prop="publishBy" width="110" show-overflow-tooltip />
+        <el-table-column label="发布时间" prop="createTime" width="160" />
+        <el-table-column label="操作" width="130" align="center" fixed="right">
+          <template #default="{ row }">
+            <el-popconfirm
+              :title="row.version === latestVersion ? '该版本即最新版本，确定用它覆盖当前配置？' : `确定回滚到 v${row.version}？当前配置将被快照覆盖（不会新增版本）`"
+              @confirm="handleRollback(row)">
+              <template #reference>
+                <el-button size="small" link type="warning">回滚</el-button>
+              </template>
+            </el-popconfirm>
+            <el-popconfirm title="确定删除该历史版本？最新版本不可删除" @confirm="handleDeleteVersion(row)">
+              <template #reference>
+                <el-button size="small" link type="danger" :disabled="row.version === latestVersion">删除</el-button>
+              </template>
+            </el-popconfirm>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty description="暂无历史版本，发布应用后自动生成版本快照" :image-size="70" />
+        </template>
+      </el-table>
+    </el-drawer>
   </div>
 </template>
 
@@ -416,6 +450,45 @@ async function handlePublish(row: any) {
   ElMessage.success('已发布，API Key 已生成')
   current.value = updated
   loadList()
+  if (versionDrawer.value && versionApp.value?.id === row.id) loadVersions()
+}
+
+// 历史版本
+const versionDrawer = ref(false)
+const versionApp = ref<any>(null)
+const versions = ref<any[]>([])
+const versionLoading = ref(false)
+const latestVersion = computed(() => versions.value[0]?.version ?? 0)
+
+async function loadVersions() {
+  if (!versionApp.value) return
+  versionLoading.value = true
+  try {
+    // 版本按 version 倒序返回，一次取全量，版本数量通常很少
+    const page = await applicationApi.versions(versionApp.value.id, { pageNum: 1, pageSize: 200 })
+    versions.value = page?.list || []
+  } finally {
+    versionLoading.value = false
+  }
+}
+
+function openVersions(row: any) {
+  versionApp.value = row
+  versions.value = []
+  versionDrawer.value = true
+  loadVersions()
+}
+
+async function handleRollback(v: any) {
+  await applicationApi.rollbackVersion(versionApp.value.id, v.id)
+  ElMessage.success(`已回滚到 v${v.version}`)
+  loadList()
+}
+
+async function handleDeleteVersion(v: any) {
+  await applicationApi.deleteVersion(v.id)
+  ElMessage.success('版本已删除')
+  loadVersions()
 }
 
 // 接入方式

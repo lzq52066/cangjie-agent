@@ -15,6 +15,8 @@
         <el-tab-pane label="系统指标" name="metrics" />
         <el-tab-pane label="调用追踪" name="traces" />
         <el-tab-pane label="LLM 调用" name="llm-traces" />
+        <el-tab-pane label="Agent 执行" name="agent-runs" />
+        <el-tab-pane label="审批单" name="agent-approvals" />
       </el-tabs>
 
       <!-- 操作日志 -->
@@ -215,7 +217,14 @@
         </el-table>
       </template>
 
-      <el-pagination v-if="activeTab !== 'metrics'" class="pager" background layout="total, sizes, prev, pager, next"
+      <!-- Agent 执行记录 -->
+      <AgentRunsPanel v-else-if="activeTab === 'agent-runs'" />
+
+      <!-- Agent 审批单 -->
+      <AgentApprovalsPanel v-else-if="activeTab === 'agent-approvals'" />
+
+      <el-pagination v-if="activeTab !== 'metrics' && activeTab !== 'agent-runs' && activeTab !== 'agent-approvals'"
+                     class="pager" background layout="total, sizes, prev, pager, next"
                      :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
                      :page-sizes="[10, 20, 50, 100]" @size-change="reload" @current-change="reload" />
     </el-card>
@@ -280,6 +289,8 @@ import { ElMessage } from 'element-plus'
 import { Refresh, Odometer } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { observabilityApi } from '@admin/api/observability-api'
+import AgentRunsPanel from '@admin/components/observability/AgentRunsPanel.vue'
+import AgentApprovalsPanel from '@admin/components/observability/AgentApprovalsPanel.vue'
 
 const metricTypes = [
   { label: 'CPU', value: 'cpu' },
@@ -293,7 +304,7 @@ const metricTypes = [
   { label: 'GC', value: 'gc' },
 ]
 
-const activeTab = ref<'logs' | 'metrics' | 'traces' | 'llm-traces'>('logs')
+const activeTab = ref<'logs' | 'metrics' | 'traces' | 'llm-traces' | 'agent-runs' | 'agent-approvals'>('logs')
 const loading = ref(false)
 const collecting = ref(false)
 const pageNum = ref(1)
@@ -709,6 +720,8 @@ async function loadLlmTraces() {
 }
 
 function reload() {
+  // Agent 执行/审批单为自包含面板，各自维护查询与分页
+  if (activeTab.value === 'agent-runs' || activeTab.value === 'agent-approvals') return
   if (activeTab.value === 'logs') loadLogs()
   else if (activeTab.value === 'metrics') loadMetricCharts()
   else if (activeTab.value === 'llm-traces') loadLlmTraces()

@@ -35,5 +35,9 @@ export const channelApi = {
   },
   messages(id: string, query: PageQuery = {}) {
     return request<PageResult<any>>({ method: 'GET', url: `/channel/${id}/messages`, params: query })
+  },
+  /** 跨渠道消息全局审计 */
+  allMessages(params: Record<string, any>) {
+    return request<PageResult<any>>({ method: 'GET', url: '/channel/messages', params })
   }
 }

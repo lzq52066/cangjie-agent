@@ -34,7 +34,13 @@ export const evalApi = {
   run(datasetId: string, config: any) {
     return request<any>({ method: 'POST', url: `/observability/eval/datasets/${datasetId}/run`, data: config })
   },
+  listRuns(params: Record<string, any>) {
+    return request<PageResult<any>>({ method: 'GET', url: '/observability/eval/runs', params })
+  },
   getRun(runId: string) {
     return request<any>({ method: 'GET', url: `/observability/eval/runs/${runId}` })
+  },
+  deleteRun(runId: string) {
+    return request<void>({ method: 'DELETE', url: `/observability/eval/runs/${runId}` })
   }
 }

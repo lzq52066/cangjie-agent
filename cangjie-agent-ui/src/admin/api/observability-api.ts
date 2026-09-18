@@ -61,5 +61,21 @@ export const observabilityApi = {
   /** 会话 LLM 调用时间线 */
   llmTraceTimeline(sessionId: string) {
     return request<any[]>({ method: 'GET', url: '/observability/llm-traces/timeline', params: { sessionId } })
+  },
+  /** Agent 执行记录分页 */
+  agentRuns(params: Record<string, any>) {
+    return request<MpPage<any>>({ method: 'GET', url: '/observability/agent-runs', params })
+  },
+  /** Agent run 详情（run + steps + approvals + children） */
+  agentRunDetail(runId: string) {
+    return request<any>({ method: 'GET', url: `/observability/agent-runs/${runId}` })
+  },
+  /** Agent 审批单分页 */
+  agentApprovals(params: { status?: string; appId?: string; userId?: string; pageNum?: number; pageSize?: number }) {
+    return request<MpPage<any>>({ method: 'GET', url: '/observability/agent-approvals', params })
+  },
+  /** Agent 审批单详情 */
+  agentApprovalDetail(id: string) {
+    return request<any>({ method: 'GET', url: `/observability/agent-approvals/${id}` })
   }
 }

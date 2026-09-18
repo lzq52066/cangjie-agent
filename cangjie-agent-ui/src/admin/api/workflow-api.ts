@@ -32,8 +32,15 @@ export const workflowApi = {
   executions(id: string, query: PageQuery = {}) {
     return request<PageResult<any>>({ method: 'GET', url: `/workflow/${id}/executions`, params: query })
   },
+  /** 跨工作流执行总览 */
+  allExecutions(params: Record<string, any>) {
+    return request<PageResult<any>>({ method: 'GET', url: '/workflow/executions', params })
+  },
   execution(executionId: string) {
     return request<any>({ method: 'GET', url: `/workflow/execution/${executionId}` })
+  },
+  executionEvents(executionId: string) {
+    return request<any[]>({ method: 'GET', url: `/workflow/execution/${executionId}/events` })
   },
   /** 已注册的节点类型编码 */
   nodeTypes() {

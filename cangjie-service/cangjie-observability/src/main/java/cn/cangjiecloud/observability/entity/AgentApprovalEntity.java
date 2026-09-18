@@ -2,6 +2,7 @@ package cn.cangjiecloud.observability.entity;
 
 import cn.cangjiecloud.common.mp.base.BaseEntity;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -45,7 +46,9 @@ public class AgentApprovalEntity extends BaseEntity {
 
     private String decideRemark;
 
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime decideTime;
 
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime expireTime;
 }

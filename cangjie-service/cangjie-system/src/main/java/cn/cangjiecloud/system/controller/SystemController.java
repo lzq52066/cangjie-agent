@@ -5,6 +5,7 @@ import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
 import cn.cangjiecloud.system.entity.SystemSettingEntity;
 import cn.cangjiecloud.system.mapper.SystemSettingMapper;
+import cn.dev33.satoken.annotation.SaCheckLogin;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,6 +13,7 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
+@SaCheckLogin
 @RestController
 @RequiredArgsConstructor
 @RequestMapping(AppConst.ADMIN_API + "/system")

@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
-@TableName(value = "long_term_memory")
+@TableName(value = "memory")
 public class LongTermMemoryEntity extends BaseEntity {
 
     /** 用户 ID */

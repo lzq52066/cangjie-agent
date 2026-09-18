@@ -40,6 +40,23 @@ export const applicationApi = {
       url: `/application/version/application/${applicationId}`,
       params: query
     })
+  },
+  /** 版本详情 */
+  getVersion(versionId: string) {
+    return request<any>({ method: 'GET', url: `/application/version/${versionId}` })
+  },
+  /** 回滚到指定版本（不产生新版本，直接用快照覆盖当前配置） */
+  rollbackVersion(applicationId: string, versionId: string) {
+    return request<void>({
+      method: 'POST',
+      url: '/application/version/rollback',
+      params: { applicationId },
+      data: { versionId }
+    })
+  },
+  /** 删除历史版本（最新版本不允许删除） */
+  deleteVersion(versionId: string) {
+    return request<void>({ method: 'DELETE', url: `/application/version/${versionId}` })
   }
 }
 
@@ -60,13 +77,22 @@ export const applicationTemplateApi = {
     return request<any>({ method: 'POST', url: '/application-template/from-application', data })
   },
   createFromTemplate(id: string, appName?: string) {
-    return request<any>({ method: 'POST', url: `/application-template/${id}/create-app`, params: { appName } })
+    return request<any>({
+      method: 'POST',
+      url: `/application-template/${id}/create-app`,
+      data: appName ? { name: appName } : {}
+    })
   },
   exportBundle(id: string) {
     return request<string>({ method: 'GET', url: `/application-template/${id}/export` })
   },
-  importBundle(data: any) {
-    return request<any>({ method: 'POST', url: '/application-template/import', data })
+  importBundle(bundleJson: string) {
+    return request<any>({
+      method: 'POST',
+      url: '/application-template/import',
+      data: bundleJson,
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+    })
   },
   remove(id: string) {
     return request<void>({ method: 'DELETE', url: `/application-template/${id}` })

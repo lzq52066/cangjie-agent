@@ -1,6 +1,14 @@
 <template>
   <div class="channel-view">
     <el-card>
+      <el-tabs v-model="activeTab">
+        <el-tab-pane label="渠道" name="list" />
+        <el-tab-pane label="消息审计" name="messages" />
+      </el-tabs>
+
+      <ChannelMessagesPanel v-if="activeTab === 'messages'" />
+
+      <template v-if="activeTab === 'list'">
       <div class="toolbar">
         <div class="toolbar-left">
           <el-input v-model="keyword" placeholder="搜索渠道名称..." clearable style="width: 200px"
@@ -59,6 +67,7 @@
       <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
                      :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
                      :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+      </template>
     </el-card>
 
     <!-- 渠道编辑 -->
@@ -161,6 +170,9 @@ import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
 import { channelApi } from '@admin/api/channel-api'
 import { applicationApi } from '@admin/api/application-api'
+import ChannelMessagesPanel from '@admin/components/trigger/ChannelMessagesPanel.vue'
+
+const activeTab = ref<'list' | 'messages'>('list')
 
 const channelTypes = [
   { code: 'wechat', label: '微信公众号' },

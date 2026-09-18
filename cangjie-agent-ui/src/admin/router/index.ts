@@ -26,13 +26,17 @@ const routes: RouteRecordRaw[] = [
       { path: 'prompt', component: () => import('../views/PromptView.vue'), meta: { title: '提示词/Skill' } },
       { path: 'workflow', component: () => import('../views/WorkflowView.vue'), meta: { title: '工作流' } },
       { path: 'application', component: () => import('../views/ApplicationView.vue'), meta: { title: '智能应用' } },
+      { path: 'template', component: () => import('../views/TemplateView.vue'), meta: { title: '应用模板' } },
       { path: 'channel', component: () => import('../views/ChannelView.vue'), meta: { title: '渠道接入' } },
+      { path: 'session', component: () => import('../views/SessionView.vue'), meta: { title: '会话记录' } },
       { path: 'observability', component: () => import('../views/ObservabilityView.vue'), meta: { title: '可观测性' } },
       { path: 'observability/eval', component: () => import('../views/EvalView.vue'), meta: { title: '评估体系' } },
       { path: 'file', component: () => import('../views/FileView.vue'), meta: { title: '文件管理' } },
+      { path: 'system/setting', component: () => import('../views/SystemView.vue'), meta: { title: '系统设置' } },
+      { path: 'system/user', component: () => import('../views/system/UserView.vue'), meta: { title: '用户管理' } },
       { path: 'system/role', component: () => import('../views/system/RoleView.vue'), meta: { title: '角色管理' } },
       { path: 'system/menu', component: () => import('../views/system/MenuView.vue'), meta: { title: '菜单管理' } },
-      { path: 'system', component: () => import('../views/SystemView.vue'), meta: { title: '系统设置' } }
+      { path: 'system', redirect: '/system/setting' }
     ]
   }
 ]
