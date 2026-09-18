@@ -1,7 +1,4 @@
-# 制品由 pack.ps1 在本地生成，不入库
+# 制品由 pack.ps1 / pack.sh 在本地生成，不入库
 # 注：frontend/dist 已被根 .gitignore 的 dist/ 规则忽略，无需在此重复声明
-app/*.jar
+backend/*.jar
 .env
-
-# 保留 app 目录占位
-!app/.gitkeep

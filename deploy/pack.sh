@@ -57,9 +57,9 @@ if [ "$SKIP_BACKEND" -eq 0 ]; then
   fi
   JAR="$ROOT_DIR/cangjie-start/target/cangjie-start.jar"
   [ -f "$JAR" ] || { echo "未找到后端产物：$JAR" >&2; exit 1; }
-  mkdir -p "$SCRIPT_DIR/app"
-  cp -f "$JAR" "$SCRIPT_DIR/app/cangjie-start.jar"
-  echo ">>> 后端制品已就位：app/cangjie-start.jar ($(du -m "$JAR" | cut -f1) MB)"
+  mkdir -p "$SCRIPT_DIR/backend"
+  cp -f "$JAR" "$SCRIPT_DIR/backend/cangjie-start.jar"
+  echo ">>> 后端制品已就位：backend/cangjie-start.jar ($(du -m "$JAR" | cut -f1) MB)"
 fi
 
 # ---------- 前端 ----------

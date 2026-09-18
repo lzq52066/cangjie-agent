@@ -12,8 +12,8 @@ RUN useradd -r -m -s /bin/bash cangjie \
     && chown -R cangjie:cangjie /app
 USER cangjie
 
-# jar 放在部署包的 app/ 目录，构建上下文为部署包根目录
-COPY --chown=cangjie:cangjie app/cangjie-start.jar app.jar
+# jar 与本 Dockerfile 同目录，构建上下文即 backend/
+COPY --chown=cangjie:cangjie cangjie-start.jar app.jar
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=5 \
     CMD curl -fsS http://localhost:8080/actuator/health || exit 1

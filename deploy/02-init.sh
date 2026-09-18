@@ -14,12 +14,12 @@ else
 fi
 
 # 2. 校验后端制品
-if [ ! -f app/cangjie-start.jar ]; then
-  echo "[02] 错误：未找到 app/cangjie-start.jar" >&2
-  echo "     请用本地 pack.ps1 打包，或手动拷贝 cangjie-start/target/cangjie-start.jar 到 app/ 目录" >&2
+if [ ! -f backend/cangjie-start.jar ]; then
+  echo "[02] 错误：未找到 backend/cangjie-start.jar" >&2
+  echo "     请用本地 pack.ps1 / pack.sh 打包，或手动拷贝 cangjie-start/target/cangjie-start.jar 到 backend/ 目录" >&2
   exit 1
 fi
-echo "[02] 后端制品: app/cangjie-start.jar ($(du -h app/cangjie-start.jar | cut -f1))"
+echo "[02] 后端制品: backend/cangjie-start.jar ($(du -h backend/cangjie-start.jar | cut -f1))"
 
 # 3. 校验前端制品
 if [ ! -d frontend/dist/admin ] || [ ! -d frontend/dist/chat ]; then

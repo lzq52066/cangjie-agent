@@ -1,8 +1,8 @@
 # ============================================================
 # CangJie Agent 制品部署编排（服务器上不编译，直接运行 jar + dist）
-# 依赖的构建上下文：
-#   ./app/cangjie-start.jar     后端制品（由 pack.ps1 从 target 拷贝）
-#   ./frontend/dist/            前端制品（admin + chat）
+# 各服务自包含，构建上下文即各自目录：
+#   ./backend/cangjie-start.jar  后端制品（由 pack.ps1 / pack.sh 从 target 拷贝）
+#   ./frontend/dist/             前端制品（admin + chat）
 #   ./postgres、./backend、./frontend  运行时镜像定义
 # 用法：见 README.md / 直接执行 ./deploy-all.sh
 # ============================================================
@@ -148,8 +148,8 @@ services:
   # ---------- 前端 Nginx（托管 dist + 反代后端） ----------
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
     image: cangjie-agent-ui:latest
     container_name: cangjie-frontend
     restart: unless-stopped
