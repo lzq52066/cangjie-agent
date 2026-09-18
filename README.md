@@ -317,8 +317,14 @@ npm run dev
 采用「本地打制品 + 服务器一键启动」模式，服务器无需安装 JDK / Maven / Node，也无需上传源码。
 
 ```powershell
-# 1. 本地（Windows）构建并归集制品到 deploy/
+# 1. 本地构建并归集制品到 deploy/
+#    Windows
 .\deploy\pack.ps1
+```
+
+```bash
+#    macOS / Linux（需 JDK 17 + Maven + Node）
+chmod +x deploy/pack.sh && ./deploy/pack.sh
 ```
 
 ```bash

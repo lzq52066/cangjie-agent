@@ -5,6 +5,13 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# 本脚本仅用于 Linux 服务器（依赖 systemctl / usermod 等）
+if [ "$(uname -s)" = "Darwin" ]; then
+  echo "[01] 当前为 macOS，跳过 Docker 安装：请改为安装 Docker Desktop"
+  echo "     https://www.docker.com/products/docker-desktop/"
+  exit 0
+fi
+
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   echo "[01] Docker 已安装：$(docker --version)，Compose：$(docker compose version --short 2>/dev/null || echo v2)"
   exit 0
