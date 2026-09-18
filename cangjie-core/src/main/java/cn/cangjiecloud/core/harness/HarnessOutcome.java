@@ -43,6 +43,9 @@ public class HarnessOutcome {
     /** status=WAITING_APPROVAL 时非空 */
     private ApprovalRequest pendingApproval;
 
+    /** status=WAITING_LOCAL 时非空 */
+    private LocalToolCall pendingLocalTool;
+
     /**
      * 执行结束时的完整会话消息（含系统提示、工具回填）。
      * <p>
@@ -68,6 +71,7 @@ public class HarnessOutcome {
                 .durationMs(System.currentTimeMillis() - ctx.getStartMs())
                 .errorMessage(ctx.getErrorMessage())
                 .pendingApproval(ctx.getPendingApproval())
+                .pendingLocalTool(ctx.getPendingLocalTool())
                 .conversation(List.copyOf(ctx.messages()))
                 .build();
     }

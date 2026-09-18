@@ -38,6 +38,10 @@ public interface HarnessListener {
     default void onWaitingApproval(ApprovalRequest request) {
     }
 
+    /** run 因等待调用方环境执行本地工具而挂起 */
+    default void onWaitingLocalTool(LocalToolCall call) {
+    }
+
     /** run 结束（任何状态都会回调一次） */
     default void onComplete(HarnessOutcome outcome) {
     }

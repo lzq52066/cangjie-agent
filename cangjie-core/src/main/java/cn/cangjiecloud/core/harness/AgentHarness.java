@@ -32,4 +32,17 @@ public interface AgentHarness {
      */
     HarnessOutcome resume(String runId, boolean approved, String decidedBy, String remark,
                           String resumeToken, HarnessListener listener);
+
+    /**
+     * 回传调用方环境（如浏览器）执行本地工具的结果，从检查点恢复并续跑。
+     *
+     * @param runId       挂起中的 run
+     * @param callId      挂起时下发的 tool_call id
+     * @param resultJson  本地执行结果（JSON 字符串，回填给模型；失败传 {"success":false,...}）
+     * @param failed      本地执行是否失败（失败时 resultJson 作为错误信息）
+     * @param resumeToken 一次性恢复令牌
+     * @param listener    恢复后新产生事件的监听器
+     */
+    HarnessOutcome completeLocalTool(String runId, String callId, String resultJson, boolean failed,
+                                     String resumeToken, HarnessListener listener);
 }

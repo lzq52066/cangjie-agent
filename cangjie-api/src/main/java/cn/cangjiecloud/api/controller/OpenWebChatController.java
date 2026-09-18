@@ -4,6 +4,8 @@ import cn.cangjiecloud.application.api.dto.ApprovalDecisionDTO;
 import cn.cangjiecloud.application.api.dto.ApprovalResumeDTO;
 import cn.cangjiecloud.application.api.dto.ChatRequestDTO;
 import cn.cangjiecloud.application.api.dto.ChatResponseDTO;
+import cn.cangjiecloud.application.api.dto.LocalToolResultDTO;
+import cn.cangjiecloud.application.api.dto.LocalToolResumeDTO;
 import cn.cangjiecloud.application.entity.ApplicationEntity;
 import cn.cangjiecloud.application.service.IApplicationService;
 import cn.cangjiecloud.chat.entity.ChatMessageEntity;
@@ -12,9 +14,11 @@ import cn.cangjiecloud.chat.service.ApprovalResumeService;
 import cn.cangjiecloud.chat.service.IChatMessageService;
 import cn.cangjiecloud.chat.service.IChatService;
 import cn.cangjiecloud.chat.service.IChatSessionService;
+import cn.cangjiecloud.chat.service.LocalToolResumeService;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.core.harness.ApprovalRequest;
+import cn.cangjiecloud.observability.entity.AgentRunEntity;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -54,6 +58,7 @@ public class OpenWebChatController {
     private final IChatSessionService chatSessionService;
     private final IChatMessageService chatMessageService;
     private final ApprovalResumeService approvalResumeService;
+    private final LocalToolResumeService localToolResumeService;
     private final Executor chatExecutor;
 
     /** 是否允许网页匿名聊天（与拦截器开关保持一致） */
@@ -153,6 +158,19 @@ public class OpenWebChatController {
         ApprovalRequest approval = approvalResumeService.requireDecidable(approvalId);
         requirePublishedApplication(approval.getApplicationId());
         return R.data(approvalResumeService.decide(approval, body));
+    }
+
+    /**
+     * 网页聊天：回传浏览器侧本地工具的执行结果并恢复运行
+     * <p>
+     * 免 Key 路径下没有凭证可校验，靠"恢复令牌 + 会话归属"双匹配作为授权，令牌单次生效。
+     */
+    @PostMapping("/chat/local-tool/result")
+    public R<LocalToolResumeDTO> localToolResult(@Valid @RequestBody LocalToolResultDTO body) {
+        ensureWebAnonymousEnabled();
+        AgentRunEntity run = localToolResumeService.requireWaitingRun(body);
+        requirePublishedApplication(run.getAppId());
+        return R.data(localToolResumeService.complete(body));
     }
 
     private void ensureWebAnonymousEnabled() {

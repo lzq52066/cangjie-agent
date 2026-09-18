@@ -23,6 +23,8 @@ public final class ToolConstants {
         public static final String SKILL = "SKILL";
         /** 旧版 Plugin 反射工具 */
         public static final String PLUGIN = "PLUGIN";
+        /** 本地工具：服务端不执行，由调用方环境（如浏览器）执行后回传结果 */
+        public static final String LOCAL = "LOCAL";
     }
 
     /** 工具状态 */

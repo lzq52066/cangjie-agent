@@ -37,6 +37,9 @@ public class HarnessContext {
 
     private ApprovalRequest pendingApproval;
 
+    /** 等待调用方环境执行的本地工具调用（与审批挂起互斥） */
+    private LocalToolCall pendingLocalTool;
+
     /**
      * 已获人工放行的 tool_call id（恢复执行时由引擎重建）。
      * <p>
@@ -174,6 +177,14 @@ public class HarnessContext {
 
     public void setPendingApproval(ApprovalRequest pendingApproval) {
         this.pendingApproval = pendingApproval;
+    }
+
+    public LocalToolCall getPendingLocalTool() {
+        return pendingLocalTool;
+    }
+
+    public void setPendingLocalTool(LocalToolCall pendingLocalTool) {
+        this.pendingLocalTool = pendingLocalTool;
     }
 
     /**

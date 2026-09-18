@@ -389,6 +389,69 @@
         },
         "required": ["token"]
       }
+    },
+    {
+      "id": "local_list_dir",
+      "name": "列出本地文件夹",
+      "description": "列出用户在网页上授权的本地文件夹中的文件与子文件夹。只能访问授权目录，path 必须是相对于授权根目录的相对路径（如 photos/2026），根目录传 \".\" 或空字符串，禁止使用盘符绝对路径（如 D:\\\\）和 .. 越界。返回每项的名称、类型（file/directory）、大小与最后修改时间。",
+      "toolType": "LOCAL",
+      "category": "本地文件",
+      "icon": "FolderOpened",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "description": "相对授权根目录的子目录路径，如 photos/2026；列出根目录传 \".\"" }
+        },
+        "required": []
+      }
+    },
+    {
+      "id": "local_read_file",
+      "name": "读取本地文件",
+      "description": "读取用户授权文件夹内的文件内容。path 必须是相对于授权根目录的相对路径（如 notes/a.txt），禁止盘符绝对路径和 .. 越界。文本文件按 UTF-8 返回文本；图片等二进制文件返回 data URL（base64）及文件大小。",
+      "toolType": "LOCAL",
+      "category": "本地文件",
+      "icon": "Document",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "description": "相对授权根目录的文件路径，如 docs/readme.md" },
+          "encoding": { "type": "string", "description": "文本编码，默认 utf-8；二进制文件可不传，自动返回 base64", "enum": ["utf-8", "base64"] }
+        },
+        "required": ["path"]
+      }
+    },
+    {
+      "id": "local_write_file",
+      "name": "写入本地文件",
+      "description": "在用户授权文件夹内创建或覆盖写入文件，必要时自动创建父目录。path 必须是相对于授权根目录的相对路径（如 report/out.txt），禁止盘符绝对路径和 .. 越界。content 为要写入的文本内容。",
+      "toolType": "LOCAL",
+      "category": "本地文件",
+      "icon": "EditPen",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "description": "相对授权根目录的目标文件路径，如 report/out.txt" },
+          "content": { "type": "string", "description": "要写入的文本内容（UTF-8）" }
+        },
+        "required": ["path", "content"]
+      }
+    },
+    {
+      "id": "local_rename_file",
+      "name": "重命名/移动本地文件",
+      "description": "在用户授权文件夹内重命名或移动文件/文件夹，例如把 a.png 改名为 b.png。fromPath 与 toPath 都必须是相对于授权根目录的相对路径（如 photos/a.png、photos/b.png），禁止盘符绝对路径和 .. 越界。目标已存在时会失败并返回提示，不会覆盖。",
+      "toolType": "LOCAL",
+      "category": "本地文件",
+      "icon": "Switch",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "fromPath": { "type": "string", "description": "相对授权根目录的原路径，如 a.png" },
+          "toPath": { "type": "string", "description": "相对授权根目录的新路径，如 b.png" }
+        },
+        "required": ["fromPath", "toPath"]
+      }
     }
   ]
 }

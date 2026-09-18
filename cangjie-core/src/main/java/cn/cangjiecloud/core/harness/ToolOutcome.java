@@ -68,6 +68,13 @@ public class ToolOutcome {
     }
 
     /**
+     * 本地工具：服务端不执行，run 挂起，由调用方环境执行后回传结果。
+     */
+    public static ToolOutcome waitingLocal() {
+        return ToolOutcome.builder().status(ToolStatus.WAITING_LOCAL).build();
+    }
+
+    /**
      * 回填给模型的 tool 消息正文（沿用平台既有格式，保证模型行为一致性）
      */
     public String toModelContent(ToolInvocation inv) {

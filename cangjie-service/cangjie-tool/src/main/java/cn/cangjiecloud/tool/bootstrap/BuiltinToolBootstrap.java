@@ -145,6 +145,9 @@ public class BuiltinToolBootstrap implements ApplicationRunner {
                 }
                 entity.setConfig(JSON.toJSONString(config));
             }
+            case ToolConstants.ToolType.LOCAL ->
+                // 本地工具服务端不执行，只需下发 function schema，无服务端配置
+                    entity.setConfig(null);
             default -> throw new IllegalArgumentException("内置工具暂不支持的类型: " + toolType);
         }
         return entity;

@@ -13,10 +13,10 @@ import cn.cangjiecloud.core.harness.HarnessListener;
 import cn.cangjiecloud.core.harness.HarnessOutcome;
 import cn.cangjiecloud.core.harness.HarnessRequest;
 import cn.cangjiecloud.core.harness.HarnessTimeoutException;
+import cn.cangjiecloud.core.harness.LocalToolCall;
 import cn.cangjiecloud.core.harness.LoopPolicy;
 import cn.cangjiecloud.core.harness.ModelGateway;
 import cn.cangjiecloud.core.harness.ResumeResolver;
-import cn.cangjiecloud.core.harness.ResumeState;
 import cn.cangjiecloud.core.harness.RunStatus;
 import cn.cangjiecloud.core.harness.ToolGateway;
 import cn.cangjiecloud.core.harness.ToolInvocation;
@@ -85,9 +85,7 @@ public class DefaultAgentHarness implements AgentHarness {
             throw new HarnessException("未配置 ResumeResolver，无法恢复运行: " + runId);
         }
         HarnessRequest request = resumeResolver.resolve(paused, approved, remark);
-        ResumeState state = paused.getState();
-        HarnessContext ctx = HarnessContext.restore(request, state);
-        recordContext(request, ctx.getRunId(), l);
+        HarnessContext ctx = restoreContext(paused, request, l);
         if (!approved) {
             denyPendingCalls(ctx, remark);
         } else {
@@ -100,6 +98,48 @@ public class DefaultAgentHarness implements AgentHarness {
         log.info("恢复 Agent 运行: runId={}, approved={}, 待执行工具={}",
                 runId, approved, ctx.getPendingToolCalls().size() - ctx.getPendingIndex());
         return loop(ctx, l);
+    }
+
+    @Override
+    public HarnessOutcome completeLocalTool(String runId, String callId, String resultJson, boolean failed,
+                                            String resumeToken, HarnessListener listener) {
+        HarnessListener l = listener == null ? HarnessListener.NOOP : listener;
+        AgentRunRecorder.PausedRun paused = recorder.loadPaused(runId, resumeToken);
+        if (paused == null || paused.getState() == null) {
+            throw new HarnessException("运行不存在、已终结或恢复令牌无效: " + runId);
+        }
+        if (resumeResolver == null) {
+            throw new HarnessException("未配置 ResumeResolver，无法恢复运行: " + runId);
+        }
+        HarnessRequest request = resumeResolver.resolve(paused, true, null);
+        HarnessContext ctx = restoreContext(paused, request, l);
+
+        ChatResponse.ToolCall call = ctx.currentPendingCall();
+        ToolInvocation invocation = ToolInvocation.builder()
+                .runId(ctx.getRunId())
+                .callId(call == null ? callId : call.getId())
+                .callName(call == null ? null : call.getName())
+                .argumentsJson(call == null ? null : call.getArguments())
+                .arguments(call == null ? Map.of() : parseArguments(call))
+                .round(ctx.getRound())
+                .stepNo(ctx.nextStepNo())
+                .build();
+        ToolOutcome outcome = failed
+                ? ToolOutcome.failed(resultJson, 0L)
+                : ToolOutcome.success(resultJson == null ? "" : resultJson, 0L);
+        ctx.addToolResult(invocation, outcome);
+        // 挂起那次只留了 waiting_local 步骤，这里补记浏览器侧回传的结果，保证 run 回放完整
+        recordTool(ctx, invocation, outcome, System.currentTimeMillis(), System.currentTimeMillis());
+        ctx.advancePendingIndex();
+        log.info("本地工具结果已回传，恢复 Agent 运行: runId={}, callId={}, failed={}", runId, callId, failed);
+        return loop(ctx, l);
+    }
+
+    private HarnessContext restoreContext(AgentRunRecorder.PausedRun paused, HarnessRequest request,
+                                          HarnessListener listener) {
+        HarnessContext ctx = HarnessContext.restore(request, paused.getState());
+        recordContext(request, ctx.getRunId(), listener);
+        return ctx;
     }
 
     // ==================== 主循环 ====================
@@ -209,6 +249,9 @@ public class DefaultAgentHarness implements AgentHarness {
             if (outcome.getStatus() == ToolStatus.WAITING_APPROVAL) {
                 return suspend(ctx, invocation, outcome, policy, listener);
             }
+            if (outcome.getStatus() == ToolStatus.WAITING_LOCAL) {
+                return suspendLocal(ctx, invocation, listener);
+            }
             ctx.addToolResult(invocation, outcome);
             ctx.advancePendingIndex();
         }
@@ -246,6 +289,31 @@ public class DefaultAgentHarness implements AgentHarness {
         listener.onWaitingApproval(approval);
         log.info("Agent 运行挂起等待审批: runId={}, tool={}, approvalId={}",
                 ctx.getRunId(), invocation.getCallName(), approval.getApprovalId());
+        return result;
+    }
+
+    /**
+     * 本地工具挂起：写检查点，把待执行调用与一次性令牌交给调用方环境（如浏览器）执行，
+     * 不创建审批单、不占用线程。结果由 {@link #completeLocalTool} 回传后续跑。
+     */
+    private HarnessOutcome suspendLocal(HarnessContext ctx, ToolInvocation invocation,
+                                        HarnessListener listener) {
+        String resumeToken = recorder.checkpoint(ctx, RunStatus.WAITING_LOCAL);
+        LocalToolCall call = LocalToolCall.builder()
+                .runId(ctx.getRunId())
+                .sessionId(ctx.getSessionId())
+                .applicationId(ctx.getApplicationId())
+                .toolName(invocation.getCallName())
+                .callId(invocation.getCallId())
+                .arguments(invocation.getArgumentsJson())
+                .resumeToken(resumeToken)
+                .build();
+        ctx.setPendingLocalTool(call);
+        HarnessOutcome result = HarnessOutcome.of(ctx, RunStatus.WAITING_LOCAL);
+        result.setPendingLocalTool(call);
+        listener.onWaitingLocalTool(call);
+        log.info("Agent 运行挂起等待本地工具执行: runId={}, tool={}, callId={}",
+                ctx.getRunId(), invocation.getCallName(), invocation.getCallId());
         return result;
     }
 

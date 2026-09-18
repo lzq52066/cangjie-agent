@@ -364,6 +364,10 @@ public class ChatServiceImpl implements IChatService {
                     + (outcome.getPendingApproval() == null ? "{approvalId}" : outcome.getPendingApproval().getApprovalId())
                     + "/decide 恢复运行: runId=" + outcome.getRunId());
         }
+        if (outcome.getStatus() == RunStatus.WAITING_LOCAL) {
+            throw new ApiException("存在需在浏览器侧执行的本地工具调用，本地工具仅支持网页流式对话: runId="
+                    + outcome.getRunId());
+        }
         if (outcome.getStatus() != RunStatus.COMPLETED) {
             String error = outcome.getErrorMessage() == null ? "模型调用失败" : outcome.getErrorMessage();
             boolean timeout = HarnessTimeoutException.isTimeoutMessage(error);
@@ -443,6 +447,15 @@ public class ChatServiceImpl implements IChatService {
                     outcome.getPendingApproval() == null ? null : outcome.getPendingApproval().getToolName());
             // approval_required 已推送，产出改由 decide 接口同步返回：立即结束本次流，
             // 否则连接要挂到 SSE 超时才释放
+            emitter.complete();
+            return;
+        }
+
+        if (outcome.getStatus() == RunStatus.WAITING_LOCAL) {
+            log.info("流式对话挂起等待本地工具执行: runId={}, session={}, tool={}", outcome.getRunId(),
+                    session.getSessionId(),
+                    outcome.getPendingLocalTool() == null ? null : outcome.getPendingLocalTool().getToolName());
+            // local_tool_required 已推送，浏览器执行完改由结果回传接口同步返回产出：立即结束本次流
             emitter.complete();
             return;
         }

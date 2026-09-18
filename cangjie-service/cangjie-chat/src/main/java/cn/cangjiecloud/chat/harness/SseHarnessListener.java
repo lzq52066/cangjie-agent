@@ -3,6 +3,7 @@ package cn.cangjiecloud.chat.harness;
 import cn.cangjiecloud.core.harness.ApprovalRequest;
 import cn.cangjiecloud.core.harness.HarnessListener;
 import cn.cangjiecloud.core.harness.HarnessOutcome;
+import cn.cangjiecloud.core.harness.LocalToolCall;
 import cn.cangjiecloud.core.harness.RunStatus;
 import cn.cangjiecloud.core.harness.ToolInvocation;
 import cn.cangjiecloud.core.harness.ToolOutcome;
@@ -127,6 +128,19 @@ public class SseHarnessListener implements HarnessListener {
         // 决策接口需要一次性恢复令牌，不下发前端就无法恢复运行
         payload.put("resumeToken", request.getResumeToken());
         send("approval_required", payload, "SSE approval_required 推送失败");
+    }
+
+    @Override
+    public void onWaitingLocalTool(LocalToolCall call) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("event", "local_tool_required");
+        payload.put("runId", call.getRunId());
+        payload.put("callId", call.getCallId());
+        payload.put("tool", call.getToolName());
+        payload.put("arguments", call.getArguments());
+        // 结果回传接口需要一次性恢复令牌，不下发前端就无法恢复运行
+        payload.put("resumeToken", call.getResumeToken());
+        send("local_tool_required", payload, "SSE local_tool_required 推送失败");
     }
 
     /**

@@ -230,7 +230,8 @@ const toolTypes = [
   { code: 'CUSTOM', label: '自定义脚本' },
   { code: 'MCP', label: 'MCP 协议' },
   { code: 'SKILL', label: '技能' },
-  { code: 'PLUGIN', label: '插件' }
+  { code: 'PLUGIN', label: '插件' },
+  { code: 'LOCAL', label: '本地工具（浏览器执行）' }
 ]
 const pluginTypes = [
   { code: 'tool', label: '工具插件' },
@@ -256,6 +257,8 @@ const configPlaceholder = computed(() => {
       return '// Groovy 脚本内容，如：\nreturn "Hello"'
     case 'SKILL':
       return '{\n  "skillName": "my-skill",\n  "config": {}\n}'
+    case 'LOCAL':
+      return '本地工具无需服务端配置，仅由参数 Schema 描述能力，实际在用户浏览器授权目录内执行'
     default:
       return '{}'
   }
@@ -271,6 +274,8 @@ const configHint = computed(() => {
       return '填入 Groovy 脚本，脚本中可通过 params.参数名 获取调用参数'
     case 'SKILL':
       return '填入技能相关配置'
+    case 'LOCAL':
+      return '服务端不执行该工具：网页对话中由浏览器在用户授权的本地文件夹内执行，配置留空即可'
     default:
       return ''
   }
@@ -327,7 +332,7 @@ function label(dict: { code: string; label: string }[], code: string) {
   return dict.find(d => d.code === code)?.label || code || '-'
 }
 function toolTypeTag(code: string): any {
-  return ({ HTTP: 'primary', CUSTOM: 'warning', MCP: 'success', SKILL: 'info', PLUGIN: '' } as any)[code] || ''
+  return ({ HTTP: 'primary', CUSTOM: 'warning', MCP: 'success', SKILL: 'info', PLUGIN: '', LOCAL: 'danger' } as any)[code] || ''
 }
 
 async function loadList() {

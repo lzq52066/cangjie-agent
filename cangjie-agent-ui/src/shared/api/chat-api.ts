@@ -52,6 +52,50 @@ export interface ApprovalResumeResult {
   pendingApproval?: PendingApproval
 }
 
+/** 待浏览器执行的本地工具调用（SSE local_tool_required 帧） */
+export interface PendingLocalTool {
+  runId: string
+  callId: string
+  /** SSE 帧里工具名字段是 tool */
+  tool?: string
+  toolName?: string
+  /** 模型给出的参数（JSON 字符串） */
+  arguments?: string
+  resumeToken: string
+}
+
+/** 本地工具结果回传请求体 */
+export interface LocalToolResult {
+  runId: string
+  callId: string
+  resumeToken: string
+  sessionId?: string
+  failed: boolean
+  /** 成功时的结果（JSON 字符串） */
+  result?: string
+  /** 失败时的错误信息 */
+  errorMessage?: string
+}
+
+/** 本地工具结果回传后恢复执行的产出 */
+export interface LocalToolResumeResult {
+  runId: string
+  sessionId?: string
+  /** completed / waiting_local / waiting_approval / failed / cancelled */
+  status: string
+  message?: string
+  errorMessage?: string
+  finishReason?: string
+  rounds?: number
+  toolCallCount?: number
+  tokens?: number
+  promptTokens?: number
+  completionTokens?: number
+  duration?: number
+  pendingLocalTool?: PendingLocalTool
+  pendingApproval?: PendingApproval
+}
+
 /**
  * 恢复执行以同步方式跑完剩余轮次（多次模型调用 + 工具执行），远超默认 60s 超时
  */
@@ -163,6 +207,16 @@ export const chatApi = {
       baseURL: OPEN_BASE,
       method: 'POST',
       url: `/chat/approval/${approvalId}/decide`,
+      timeout: RESUME_TIMEOUT,
+      data
+    })
+  },
+  /** 网页匿名聊天：回传浏览器侧本地工具执行结果并恢复运行 */
+  webLocalToolResult(data: LocalToolResult) {
+    return request<LocalToolResumeResult>({
+      baseURL: OPEN_BASE,
+      method: 'POST',
+      url: '/chat/local-tool/result',
       timeout: RESUME_TIMEOUT,
       data
     })

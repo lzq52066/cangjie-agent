@@ -18,7 +18,10 @@ public enum RunStatus {
     CANCELLED("cancelled"),
 
     /** 等待人工审批（已持久化检查点，可通过 resume 恢复） */
-    WAITING_APPROVAL("waiting_approval");
+    WAITING_APPROVAL("waiting_approval"),
+
+    /** 等待调用方环境执行本地工具（已持久化检查点，结果回传后通过 resume 恢复） */
+    WAITING_LOCAL("waiting_local");
 
     private final String value;
 

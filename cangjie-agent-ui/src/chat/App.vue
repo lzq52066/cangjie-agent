@@ -60,6 +60,16 @@
           </div>
         </div>
         <div class="header-actions">
+          <button
+            v-if="localFsSupported"
+            class="local-fs-btn"
+            :class="{ active: localFsAuthorized }"
+            :title="localFsAuthorized ? '已授权本地文件夹，点击重新选择' : '授权本地文件夹（用于本地文件工具）'"
+            @click="authorizeLocalDir"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+            <span>{{ localFsAuthorized ? '本地文件夹已授权' : '授权本地文件夹' }}</span>
+          </button>
           <button v-if="!embedded" class="action-btn" @click="newChat" title="新对话">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
           </button>
@@ -177,6 +187,47 @@
           </div>
         </div>
 
+        <!-- 本地工具：引擎挂起，浏览器在授权目录内执行 -->
+        <div v-if="pendingLocalTool" class="message-row assistant">
+          <div class="message-avatar">
+            <div class="avatar local-avatar">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+            </div>
+          </div>
+          <div class="message-content">
+            <div class="message-role">{{ title }}</div>
+            <div class="local-tool-card">
+              <div class="local-tool-head">
+                <span v-if="localToolBusy" class="local-tool-spinner"></span>
+                <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>
+                <span class="local-tool-title">{{ localToolStatusText }}</span>
+              </div>
+              <div class="local-tool-desc">
+                本地工具 <code class="local-tool-name">{{ localToolDisplayName }}</code>
+              </div>
+              <div v-if="pendingLocalTool.arguments" class="local-tool-args">
+                <div class="local-tool-args-label">执行参数（限定在授权文件夹内）</div>
+                <pre class="local-tool-args-body">{{ prettyArgs(pendingLocalTool.arguments) }}</pre>
+              </div>
+              <div v-if="localToolHint" class="local-tool-hint">{{ localToolHint }}</div>
+              <div class="local-tool-actions">
+                <button
+                  v-if="localToolNeedAuth"
+                  class="local-tool-btn primary"
+                  :disabled="localToolBusy"
+                  @click="authorizeAndRunLocal"
+                >授权文件夹并执行</button>
+                <button
+                  v-if="localToolFailed"
+                  class="local-tool-btn primary"
+                  :disabled="localToolBusy"
+                  @click="runPendingLocalTool"
+                >重试</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Typing indicator（仅流式开始前显示） -->
         <div v-if="typing && !streamingStarted" class="message-row assistant">
           <div class="message-avatar">
@@ -228,7 +279,19 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { chatApi, type ApprovalResumeResult, type PendingApproval } from '@shared/api/chat-api'
+import {
+  chatApi,
+  type ApprovalResumeResult,
+  type LocalToolResumeResult,
+  type PendingApproval,
+  type PendingLocalTool
+} from '@shared/api/chat-api'
+import {
+  authorizeDirectory,
+  executeLocalTool,
+  getRootHandle,
+  isLocalFsSupported
+} from './local-fs'
 
 interface Msg {
   role: 'user' | 'assistant'
@@ -417,6 +480,196 @@ async function loadPendingApproval() {
   }
 }
 
+/* ===== 本地文件工具（File System Access API）===== */
+// LOCAL 工具服务端不执行：引擎挂起 run 并推 local_tool_required 帧，
+// 浏览器在用户授权目录内执行，结果回传后端续跑；可能连续挂起多次，用循环串行处理。
+const localFsSupported = isLocalFsSupported()
+const localFsAuthorized = ref(false)
+const pendingLocalTool = ref<PendingLocalTool | null>(null)
+const localToolRunning = ref(false)
+const localToolResumeRunning = ref(false)
+const localToolNeedAuth = ref(false)
+const localToolFailed = ref(false)
+const localToolHint = ref('')
+
+const localToolBusy = computed(() => localToolRunning.value || localToolResumeRunning.value)
+
+const LOCAL_TOOL_NAMES: Record<string, string> = {
+  local_list_dir: '列出本地文件夹',
+  local_read_file: '读取本地文件',
+  local_write_file: '写入本地文件',
+  local_rename_file: '重命名/移动本地文件'
+}
+const localToolDisplayName = computed(() => {
+  const name = pendingLocalTool.value?.toolName || pendingLocalTool.value?.tool || ''
+  return LOCAL_TOOL_NAMES[name] || name || '未知本地工具'
+})
+const localToolStatusText = computed(() => {
+  if (localToolResumeRunning.value) return '正在回传结果并继续生成…'
+  if (localToolRunning.value) return '正在你的电脑上执行文件操作…'
+  if (localToolFailed.value) return '本地工具执行失败'
+  if (localToolNeedAuth.value) return '需要先授权本地文件夹'
+  return '等待执行本地文件操作'
+})
+
+async function refreshLocalFsAuth() {
+  try {
+    localFsAuthorized.value = !!(await getRootHandle(false))
+  } catch {
+    localFsAuthorized.value = false
+  }
+}
+
+async function authorizeLocalDir() {
+  try {
+    await authorizeDirectory({ mode: 'readwrite' })
+    localFsAuthorized.value = true
+    ElMessage.success('本地文件夹授权成功')
+    // 若正有挂起的本地工具在等授权，直接接着执行
+    if (pendingLocalTool.value && localToolNeedAuth.value) {
+      runPendingLocalTool()
+    }
+  } catch (e: any) {
+    // 用户取消选择时浏览器抛 AbortError，不算错误
+    if (e?.name !== 'AbortError') {
+      ElMessage.warning('授权失败：' + (e?.message || '请重试'))
+    }
+  }
+}
+
+/** 授权完成后从卡片触发执行 */
+async function authorizeAndRunLocal() {
+  await authorizeLocalDir()
+}
+
+function setPendingLocalTool(raw: any) {
+  if (!raw || !raw.callId || !raw.resumeToken) return
+  pendingLocalTool.value = {
+    runId: raw.runId,
+    callId: raw.callId,
+    toolName: raw.toolName || raw.tool,
+    tool: raw.tool,
+    arguments: raw.arguments,
+    resumeToken: raw.resumeToken
+  }
+  localToolHint.value = ''
+  localToolFailed.value = false
+  localToolNeedAuth.value = !localFsSupported || !localFsAuthorized.value
+  scroll()
+  // 已授权则自动执行，免去用户再点一次
+  if (!localToolNeedAuth.value) {
+    runPendingLocalTool()
+  }
+}
+
+function clearPendingLocalTool() {
+  pendingLocalTool.value = null
+  localToolHint.value = ''
+  localToolNeedAuth.value = false
+  localToolFailed.value = false
+}
+
+async function runPendingLocalTool() {
+  const target = pendingLocalTool.value
+  if (!target || localToolBusy.value) return
+  localToolRunning.value = true
+  localToolHint.value = ''
+  localToolFailed.value = false
+  try {
+    if (!localFsSupported) {
+      throw new Error('当前浏览器不支持本地文件操作，请使用最新版 Chrome / Edge')
+    }
+    if (!(await getRootHandle(false))) {
+      localToolNeedAuth.value = true
+      localToolHint.value = '该操作需要你先选择并授权一个本地文件夹，文件操作只会在该文件夹内进行。'
+      return
+    }
+    localToolNeedAuth.value = false
+    const toolName = target.toolName || target.tool || ''
+    const output = await executeLocalTool(toolName, target.arguments)
+    if ('error' in output) {
+      localToolFailed.value = true
+      localToolHint.value = /^\{.*"success"\s*:\s*false/.test(output.error)
+        ? safeExtractError(output.error)
+        : output.error
+      return
+    }
+    await submitLocalResult(target, false, output.result, undefined)
+  } catch (e: any) {
+    localToolFailed.value = true
+    localToolHint.value = e?.message || '执行失败'
+  } finally {
+    localToolRunning.value = false
+    scroll()
+  }
+}
+
+/** 从失败 JSON 里抽出 error 字段展示 */
+function safeExtractError(json: string): string {
+  try {
+    const parsed = JSON.parse(json)
+    return parsed?.error || json
+  } catch {
+    return json
+  }
+}
+
+/** 回传本地执行结果并处理恢复产出；连续挂起时循环直到终态 */
+async function submitLocalResult(target: PendingLocalTool, failed: boolean,
+                                 result?: string, errorMessage?: string) {
+  localToolResumeRunning.value = true
+  try {
+    const res = await chatApi.webLocalToolResult({
+      runId: target.runId,
+      callId: target.callId,
+      resumeToken: target.resumeToken,
+      sessionId: sessionId.value || undefined,
+      failed,
+      result,
+      errorMessage
+    })
+    applyLocalResumeResult(res)
+  } catch (e: any) {
+    clearPendingLocalTool()
+    messages.value.push({ role: 'assistant', content: '本地工具结果回传失败：' + (e?.message || '请重新发起对话') })
+  } finally {
+    localToolResumeRunning.value = false
+    scroll()
+  }
+}
+
+function applyLocalResumeResult(res: LocalToolResumeResult) {
+  if (!res) {
+    clearPendingLocalTool()
+    messages.value.push({ role: 'assistant', content: '恢复执行失败：服务未返回结果' })
+    return
+  }
+  // 又一个本地工具：换卡片后继续自动执行
+  if (res.status === 'waiting_local' && res.pendingLocalTool) {
+    setPendingLocalTool(res.pendingLocalTool)
+    return
+  }
+  // 恢复过程中命中审批：交审批卡片处理
+  if (res.status === 'waiting_approval' && res.pendingApproval) {
+    clearPendingLocalTool()
+    setPendingApproval(res.pendingApproval)
+    return
+  }
+  clearPendingLocalTool()
+  if (res.status === 'completed') {
+    messages.value.push({
+      role: 'assistant',
+      content: res.message || '（本轮无文本产出）',
+      tokens: res.tokens,
+      duration: res.duration
+    })
+    loadSessions()
+    return
+  }
+  const reason = res.errorMessage || res.finishReason || res.status || '未知原因'
+  messages.value.push({ role: 'assistant', content: '本地工具恢复执行未成功：' + reason })
+}
+
 function ensureUserId() {
   if (!userId.value) {
     const stored = localStorage.getItem('cangjie_user_id')
@@ -508,6 +761,7 @@ function newChat() {
   messages.value = []
   input.value = ''
   clearPendingApproval()
+  clearPendingLocalTool()
 }
 
 async function send() {
@@ -537,6 +791,11 @@ async function send() {
       // 高风险工具挂起：本轮回答到此为止，产出改由审批决策接口同步返回
       if (event === 'approval_required') {
         setPendingApproval(chunk)
+        break
+      }
+      // 本地工具挂起：由浏览器在授权目录内执行后回传结果续跑
+      if (event === 'local_tool_required') {
+        setPendingLocalTool(chunk)
         break
       }
       if (event === 'done' || event === 'error') {
@@ -598,6 +857,7 @@ async function deleteSession(s: any) {
     if (sessionId.value === s.sessionId) {
       sessionId.value = ''
       messages.value = []
+      clearPendingLocalTool()
     }
     ElMessage.success('对话已删除')
   } catch (e: any) {
@@ -612,6 +872,7 @@ async function openSession(s: any) {
   }
   sessionId.value = s.sessionId
   messages.value = []
+  clearPendingLocalTool()
   try {
     const history = await chatApi.webMessages(s.sessionId)
     messages.value = (history || []).map((m: any) => ({
@@ -646,6 +907,10 @@ onMounted(() => {
   // 大屏默认常驻对话记录，小屏默认折叠
   showHistory.value = !embedded.value && window.innerWidth >= 1024
   window.addEventListener('resize', onWindowResize)
+
+  if (localFsSupported) {
+    refreshLocalFsAuth()
+  }
 
   if (!applicationId.value) {
     configError.value = '缺少 app 参数，请通过后台「智能应用 - 接入方式」获取嵌入地址'
@@ -1332,6 +1597,132 @@ function onWindowResize() {
 }
 @keyframes approvalSpin {
   to { transform: rotate(360deg); }
+}
+
+/* ===== 本地文件夹授权按钮 ===== */
+.local-fs-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--cj-border);
+  background: var(--cj-surface);
+  border-radius: var(--cj-radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--cj-text-secondary);
+  transition: var(--cj-transition);
+  span { white-space: nowrap; }
+  &:hover { border-color: var(--cj-primary); color: var(--cj-primary); }
+  &.active {
+    border-color: #22c55e;
+    color: #16a34a;
+    background: #f0fdf4;
+  }
+}
+
+/* ===== 本地工具卡片 ===== */
+.local-avatar {
+  background: linear-gradient(135deg, #0ea5e9, #2563eb) !important;
+}
+.local-tool-card {
+  max-width: 460px;
+  padding: 14px 16px;
+  background: var(--cj-surface);
+  border: 1px solid #bae6fd;
+  border-left: 3px solid #0ea5e9;
+  border-radius: var(--cj-radius);
+  border-top-left-radius: 4px;
+  box-shadow: var(--cj-shadow-sm);
+}
+.local-tool-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #0369a1;
+}
+.local-tool-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cj-text);
+}
+.local-tool-desc {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--cj-text-secondary);
+}
+.local-tool-name {
+  padding: 1px 5px;
+  background: var(--cj-border-light);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  color: var(--cj-text);
+}
+.local-tool-args {
+  margin-top: 10px;
+  border: 1px solid var(--cj-border);
+  border-radius: var(--cj-radius-sm);
+  overflow: hidden;
+}
+.local-tool-args-label {
+  padding: 6px 10px;
+  background: var(--cj-border-light);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cj-text-secondary);
+}
+.local-tool-args-body {
+  margin: 0;
+  padding: 10px;
+  max-height: 160px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--cj-text);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.local-tool-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #b45309;
+}
+.local-tool-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.local-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--cj-radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--cj-transition);
+  &:disabled { opacity: 0.55; cursor: not-allowed; }
+  &.primary {
+    background: var(--cj-primary);
+    border: 1px solid var(--cj-primary);
+    color: #fff;
+    &:not(:disabled):hover { opacity: 0.9; }
+  }
+}
+.local-tool-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(14, 165, 233, 0.25);
+  border-top-color: #0ea5e9;
+  border-radius: 50%;
+  animation: approvalSpin 0.7s linear infinite;
 }
 
 /* ===== Footer ===== */

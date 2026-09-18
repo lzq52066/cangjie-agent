@@ -18,7 +18,10 @@ public enum ToolStatus {
     TIMEOUT("timeout"),
 
     /** 需人工审批，未执行（run 应挂起等待 resume） */
-    WAITING_APPROVAL("waiting_approval");
+    WAITING_APPROVAL("waiting_approval"),
+
+    /** 需由调用方环境（如浏览器）执行的本地工具，服务端不执行（run 应挂起等待结果回传） */
+    WAITING_LOCAL("waiting_local");
 
     private final String value;
 

@@ -192,8 +192,9 @@ public class AgentRunServiceImpl extends ServiceImpl<AgentRunMapper, AgentRunEnt
                     .set(AgentRunEntity::getErrorMessage, outcome.getErrorMessage())
                     .set(AgentRunEntity::getDuration, outcome.getDurationMs())
                     .set(AgentRunEntity::getEndTime, now);
-            // 非挂起终态清掉检查点，避免误恢复
-            if (outcome.getStatus() != RunStatus.WAITING_APPROVAL) {
+            // 非挂起终态清掉检查点，避免误恢复（审批挂起与本地工具挂起都需保留）
+            if (outcome.getStatus() != RunStatus.WAITING_APPROVAL
+                    && outcome.getStatus() != RunStatus.WAITING_LOCAL) {
                 wrapper.set(AgentRunEntity::getContextSnapshot, null)
                         .set(AgentRunEntity::getResumeToken, null);
             }
@@ -211,7 +212,8 @@ public class AgentRunServiceImpl extends ServiceImpl<AgentRunMapper, AgentRunEnt
         LocalDateTime now = LocalDateTime.now();
         LambdaUpdateWrapper<AgentRunEntity> wrapper = new LambdaUpdateWrapper<AgentRunEntity>()
                 .eq(AgentRunEntity::getId, runId)
-                .eq(AgentRunEntity::getStatus, RunStatus.WAITING_APPROVAL.value())
+                .in(AgentRunEntity::getStatus,
+                        RunStatus.WAITING_APPROVAL.value(), RunStatus.WAITING_LOCAL.value())
                 .set(AgentRunEntity::getStatus, RunStatus.FAILED.value())
                 .set(AgentRunEntity::getFinishReason, finishReason)
                 .set(AgentRunEntity::getErrorMessage, errorMessage)
@@ -233,7 +235,9 @@ public class AgentRunServiceImpl extends ServiceImpl<AgentRunMapper, AgentRunEnt
         if (run == null || !StringUtils.hasText(run.getContextSnapshot())) {
             return null;
         }
-        if (!RunStatus.WAITING_APPROVAL.value().equals(run.getStatus())) {
+        boolean suspended = RunStatus.WAITING_APPROVAL.value().equals(run.getStatus())
+                || RunStatus.WAITING_LOCAL.value().equals(run.getStatus());
+        if (!suspended) {
             return null;
         }
         if (!StringUtils.hasText(run.getResumeToken()) || !run.getResumeToken().equals(resumeToken)) {

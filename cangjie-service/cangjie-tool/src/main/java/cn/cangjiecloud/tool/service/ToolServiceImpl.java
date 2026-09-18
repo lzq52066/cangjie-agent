@@ -95,6 +95,12 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
     public ToolExecuteResultDTO executeTool(String toolId, Map<String, Object> input) {
         ToolEntity entity = getActiveEntity(toolId);
         String resolvedType = resolveToolType(entity);
+        if (ToolConstants.ToolType.LOCAL.equals(resolvedType)) {
+            return ToolExecuteResultDTO.builder()
+                    .success(false)
+                    .error("本地工具不在服务端执行：它由网页在用户浏览器授权目录内执行，请在对话中触发")
+                    .build();
+        }
 
         AbsToolHandler handler = handlerRegistry.get(resolvedType);
         if (handler == null) {
@@ -212,6 +218,10 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
         }
 
         String resolvedType = resolveToolType(entity);
+        if (ToolConstants.ToolType.LOCAL.equals(resolvedType)) {
+            return com.alibaba.fastjson.JSON.toJSONString(Map.of("success", false,
+                    "error", "本地工具不在服务端执行，需由网页在用户浏览器授权目录内执行"));
+        }
         AbsToolHandler handler = handlerRegistry.get(resolvedType);
         if (handler == null) {
             log.warn("不支持的工具类型: toolName={}, toolType={}", toolName, resolvedType);

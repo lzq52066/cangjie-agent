@@ -10,6 +10,7 @@ import cn.cangjiecloud.core.harness.ToolOutcome;
 import cn.cangjiecloud.core.harness.ToolStatus;
 import cn.cangjiecloud.core.tool.ToolSpecification;
 import cn.cangjiecloud.observability.context.TraceContext;
+import cn.cangjiecloud.tool.consts.ToolConstants;
 import cn.cangjiecloud.tool.entity.ToolEntity;
 import cn.cangjiecloud.tool.service.IToolService;
 import cn.cangjiecloud.tool.util.ToolNaming;
@@ -109,6 +110,11 @@ public class ToolGatewayImpl implements ToolGateway {
             resolveMetadata(invocation);
         } else if (!StringUtils.hasText(invocation.getToolType())) {
             invocation.setToolType(route.name());
+        }
+
+        // 本地工具服务端不执行：不走钩子链（无需审批/策略），直接挂起交给调用方环境（浏览器）执行
+        if (ToolConstants.ToolType.LOCAL.equals(invocation.getToolType())) {
+            return ToolOutcome.waitingLocal();
         }
 
         for (ToolCallHook hook : hooks) {
