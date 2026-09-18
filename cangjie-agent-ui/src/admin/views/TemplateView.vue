@@ -1,15 +1,11 @@
 <template>
   <div class="template-view">
     <el-card>
-      <div class="toolbar">
-        <div class="toolbar-left">
-          <el-select v-model="category" placeholder="全部分类" clearable filterable style="width:180px"
-                     @change="reload">
-            <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
-          </el-select>
-          <el-button @click="reload">刷新</el-button>
-        </div>
-        <div>
+      <QueryBar :loading="loading" @search="reload" @reset="resetQuery">
+        <el-select v-model="category" placeholder="全部分类" clearable filterable style="width:180px">
+          <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
+        </el-select>
+        <template #extra>
           <el-button @click="triggerImport">
             <el-icon><Upload /></el-icon> 导入 Bundle
           </el-button>
@@ -18,8 +14,8 @@
           <el-button type="primary" @click="openSaveDialog">
             <el-icon><Star /></el-icon> 从应用另存
           </el-button>
-        </div>
-      </div>
+        </template>
+      </QueryBar>
 
       <div v-loading="loading" class="template-grid">
         <div v-for="t in list" :key="t.id" class="tpl-card">
@@ -91,6 +87,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Upload, Star } from '@element-plus/icons-vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { applicationApi, applicationTemplateApi } from '@admin/api/application-api'
 
 function typeLabel(t?: string) {
@@ -130,6 +127,12 @@ async function loadList() {
 function reload() {
   pageNum.value = 1
   loadList()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  category.value = ''
+  reload()
 }
 
 // 从应用另存

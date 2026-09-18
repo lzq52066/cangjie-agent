@@ -2,17 +2,17 @@
   <div class="knowledge-view">
     <el-card>
       <template #header>
-        <div class="card-header">
-          <div class="header-left">
-            <el-input v-model="keyword" placeholder="搜索知识库..." clearable style="width: 240px"
-                      @clear="reload" @keyup.enter="reload">
-              <template #prefix><el-icon><Search /></el-icon></template>
-            </el-input>
-          </div>
-          <el-button type="primary" @click="showCreate = true">
-            <el-icon><Plus /></el-icon> 新建知识库
-          </el-button>
-        </div>
+        <QueryBar :loading="loading" @search="reload" @reset="resetQuery">
+          <el-input v-model="keyword" placeholder="搜索知识库..." clearable style="width: 240px"
+                    @keyup.enter="reload">
+            <template #prefix><el-icon><Search /></el-icon></template>
+          </el-input>
+          <template #extra>
+            <el-button type="primary" @click="showCreate = true">
+              <el-icon><Plus /></el-icon> 新建知识库
+            </el-button>
+          </template>
+        </QueryBar>
       </template>
 
       <el-table :data="list" v-loading="loading" stripe>
@@ -131,6 +131,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { knowledgeApi } from '@admin/api/knowledge-api'
 
 const router = useRouter()
@@ -178,6 +179,12 @@ async function loadList() {
 function reload() {
   pageNum.value = 1
   loadList()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  keyword.value = ''
+  reload()
 }
 
 function goDetail(id: string) {

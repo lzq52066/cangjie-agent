@@ -1,27 +1,26 @@
 <template>
   <div class="channel-msg-panel">
-    <div class="filters">
+    <QueryBar :loading="loading" @search="onSearch" @reset="resetQuery">
       <el-select v-model="query.channelId" placeholder="全部渠道" clearable filterable
-                 style="width:170px" @change="onSearch">
+                 style="width:170px">
         <el-option v-for="c in channelOptions" :key="c.id" :label="c.name" :value="c.id" />
       </el-select>
-      <el-select v-model="query.channelType" placeholder="全部类型" clearable style="width:140px" @change="onSearch">
+      <el-select v-model="query.channelType" placeholder="全部类型" clearable style="width:140px">
         <el-option v-for="t in channelTypes" :key="t.code" :label="t.label" :value="t.code" />
       </el-select>
       <el-select v-model="query.applicationId" placeholder="全部应用" clearable filterable
-                 style="width:160px" @change="onSearch">
+                 style="width:160px">
         <el-option v-for="a in appOptions" :key="a.id" :label="a.name" :value="a.id" />
       </el-select>
       <el-input v-model="query.openId" placeholder="外部用户 ID" clearable style="width:150px"
                 @keyup.enter="onSearch" />
-      <el-select v-model="query.status" placeholder="全部状态" clearable style="width:120px" @change="onSearch">
+      <el-select v-model="query.status" placeholder="全部状态" clearable style="width:120px">
         <el-option label="处理成功" value="processed" />
         <el-option label="处理失败" value="failed" />
       </el-select>
       <el-input v-model="query.keyword" placeholder="消息/回复内容关键词" clearable style="width:200px"
                 @keyup.enter="onSearch" />
-      <el-button type="primary" @click="onSearch">查询</el-button>
-    </div>
+    </QueryBar>
 
     <el-table :data="list" v-loading="loading" stripe>
       <el-table-column label="时间" prop="createTime" width="165" />
@@ -92,6 +91,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { channelApi } from '@admin/api/channel-api'
 import { applicationApi } from '@admin/api/application-api'
 
@@ -155,6 +155,17 @@ async function loadList() {
 function onSearch() {
   pageNum.value = 1
   loadList()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  query.channelId = ''
+  query.channelType = ''
+  query.applicationId = ''
+  query.openId = ''
+  query.status = ''
+  query.keyword = ''
+  onSearch()
 }
 
 const drawer = ref(false)

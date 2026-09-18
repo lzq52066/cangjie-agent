@@ -3,6 +3,15 @@
   --cj-info: #409eff;
   --cj-warn: #e6a23c;
   --cj-danger: #f56c6c;
+
+  // 统一 Element Plus 主色为品牌绿：主按钮/选中态/高亮与 Logo、侧栏保持一致
+  --el-color-primary: #67c23a;
+  --el-color-primary-light-3: #95d475;
+  --el-color-primary-light-5: #b3e19d;
+  --el-color-primary-light-7: #d1edc4;
+  --el-color-primary-light-8: #e1f3d8;
+  --el-color-primary-light-9: #f0f9eb;
+  --el-color-primary-dark-2: #529b2e;
 }
 body { font-size: 14px; }
 .el-card { border-radius: 12px; }

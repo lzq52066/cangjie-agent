@@ -1,21 +1,21 @@
 <template>
   <el-card class="file-view">
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <el-input v-model="keyword" placeholder="搜索文件名..." clearable style="width:200px"
-                  @clear="reload" @keyup.enter="reload">
-          <template #prefix><el-icon><Search /></el-icon></template>
-        </el-input>
-        <el-select v-model="category" placeholder="全部分类" clearable style="width:150px" @change="reload">
-          <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
-        </el-select>
-      </div>
-      <el-upload :show-file-list="false" :before-upload="handleUpload" :disabled="uploading">
-        <el-button type="primary" :loading="uploading">
-          <el-icon><Upload /></el-icon> 上传文件
-        </el-button>
-      </el-upload>
-    </div>
+    <QueryBar :loading="loading" @search="reload" @reset="resetQuery">
+      <el-input v-model="keyword" placeholder="搜索文件名..." clearable style="width:200px"
+                @keyup.enter="reload">
+        <template #prefix><el-icon><Search /></el-icon></template>
+      </el-input>
+      <el-select v-model="category" placeholder="全部分类" clearable style="width:150px">
+        <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
+      </el-select>
+      <template #extra>
+        <el-upload :show-file-list="false" :before-upload="handleUpload" :disabled="uploading">
+          <el-button type="primary" :loading="uploading">
+            <el-icon><Upload /></el-icon> 上传文件
+          </el-button>
+        </el-upload>
+      </template>
+    </QueryBar>
 
     <el-table :data="list" v-loading="loading" stripe>
       <el-table-column label="文件名" prop="fileName" min-width="220" show-overflow-tooltip />
@@ -68,6 +68,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, Upload } from '@element-plus/icons-vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { fileApi } from '@admin/api/file-api'
 
 const categories = ['document', 'image', 'avatar', 'other']
@@ -159,6 +160,13 @@ async function loadList() {
 function reload() {
   pageNum.value = 1
   loadList()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  keyword.value = ''
+  category.value = ''
+  reload()
 }
 
 async function handleUpload(file: File) {

@@ -3,15 +3,17 @@
     <el-card>
       <el-tabs v-model="activeTab">
         <el-tab-pane label="工作流" name="list">
-          <div class="tab-toolbar">
+          <QueryBar :loading="loading" @search="reload" @reset="resetQuery">
             <el-input v-model="keyword" placeholder="搜索工作流..." clearable style="width: 220px"
-                      @clear="reload" @keyup.enter="reload">
+                      @keyup.enter="reload">
               <template #prefix><el-icon><Search /></el-icon></template>
             </el-input>
-            <el-button type="primary" @click="openCreate">
-              <el-icon><Plus /></el-icon> 新建工作流
-            </el-button>
-          </div>
+            <template #extra>
+              <el-button type="primary" @click="openCreate">
+                <el-icon><Plus /></el-icon> 新建工作流
+              </el-button>
+            </template>
+          </QueryBar>
         </el-tab-pane>
         <el-tab-pane label="执行总览" name="executions" />
       </el-tabs>
@@ -125,6 +127,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { workflowApi } from '@admin/api/workflow-api'
 import { applicationApi } from '@admin/api/application-api'
 import ExecutionDetail from '@admin/components/ExecutionDetail.vue'
@@ -186,6 +189,12 @@ async function loadList() {
 function reload() {
   pageNum.value = 1
   loadList()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  keyword.value = ''
+  reload()
 }
 
 function openCreate() {

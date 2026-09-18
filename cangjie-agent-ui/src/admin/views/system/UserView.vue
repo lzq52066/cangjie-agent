@@ -2,23 +2,22 @@
   <div class="user-view">
     <el-card>
       <template #header>
-        <div class="card-header">
-          <div class="header-left">
-            <el-input v-model="query.keyword" placeholder="用户名/昵称/邮箱/手机" clearable style="width:230px"
-                      @clear="reload" @keyup.enter="reload" />
-            <el-select v-model="query.isActive" placeholder="全部状态" clearable style="width:130px" @change="reload">
-              <el-option label="启用" :value="true" />
-              <el-option label="停用" :value="false" />
-            </el-select>
-            <el-select v-model="query.source" placeholder="全部来源" clearable style="width:130px" @change="reload">
-              <el-option label="本地" value="LOCAL" />
-            </el-select>
-            <el-button @click="reload">搜索</el-button>
-          </div>
-          <el-button type="primary" @click="openCreate">
-            <el-icon><Plus /></el-icon> 新增用户
-          </el-button>
-        </div>
+        <QueryBar :loading="loading" @search="reload" @reset="resetQuery">
+          <el-input v-model="query.keyword" placeholder="用户名/昵称/邮箱/手机" clearable style="width:230px"
+                    @keyup.enter="reload" />
+          <el-select v-model="query.isActive" placeholder="全部状态" clearable style="width:130px">
+            <el-option label="启用" :value="true" />
+            <el-option label="停用" :value="false" />
+          </el-select>
+          <el-select v-model="query.source" placeholder="全部来源" clearable style="width:130px">
+            <el-option label="本地" value="LOCAL" />
+          </el-select>
+          <template #extra>
+            <el-button type="primary" @click="openCreate">
+              <el-icon><Plus /></el-icon> 新增用户
+            </el-button>
+          </template>
+        </QueryBar>
       </template>
 
       <el-table :data="list" v-loading="loading" stripe border>
@@ -101,6 +100,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { userApi, type AdminUser, type UserSaveDTO } from '@admin/api/user-api'
 import { roleApi, type Role } from '@admin/api/role-api'
 
@@ -142,6 +142,14 @@ async function loadList() {
 function reload() {
   pageNum.value = 1
   loadList()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  query.keyword = ''
+  query.isActive = undefined
+  query.source = ''
+  reload()
 }
 function roleNamesOf(userId: string) {
   const names = userRoleMap.value[userId]

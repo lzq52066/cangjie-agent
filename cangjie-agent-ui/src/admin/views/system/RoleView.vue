@@ -2,16 +2,15 @@
   <div class="role-view">
     <el-card>
       <template #header>
-        <div class="card-header">
-          <div class="header-left">
-            <el-input v-model="searchForm.keyword" placeholder="角色名称/编码" clearable style="width: 220px"
-                      @clear="loadList" @keyup.enter="loadList" />
-            <el-button @click="loadList">搜索</el-button>
-          </div>
-          <el-button type="primary" @click="openCreate">
-            <el-icon><Plus /></el-icon> 新增角色
-          </el-button>
-        </div>
+        <QueryBar :loading="loading" @search="reload" @reset="resetQuery">
+          <el-input v-model="searchForm.keyword" placeholder="角色名称/编码" clearable style="width: 220px"
+                    @keyup.enter="reload" />
+          <template #extra>
+            <el-button type="primary" @click="openCreate">
+              <el-icon><Plus /></el-icon> 新增角色
+            </el-button>
+          </template>
+        </QueryBar>
       </template>
 
       <el-table :data="list" v-loading="loading" stripe border>
@@ -130,6 +129,7 @@
 import { nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { roleApi } from '@admin/api/role-api'
 
 // 列表
@@ -177,6 +177,18 @@ async function loadList() {
   } finally {
     loading.value = false
   }
+}
+
+/** 搜索/切换筛选条件时回到第一页，避免停留在无数据的第 N 页 */
+function reload() {
+  page.value = 1
+  loadList()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  searchForm.keyword = ''
+  reload()
 }
 
 function openCreate() {

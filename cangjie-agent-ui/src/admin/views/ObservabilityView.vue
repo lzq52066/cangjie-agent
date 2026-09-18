@@ -21,18 +21,17 @@
 
       <!-- 操作日志 -->
       <template v-if="activeTab === 'logs'">
-        <div class="toolbar">
-          <div class="toolbar-left">
-            <el-input v-model="logQuery.module" placeholder="模块" clearable style="width:150px" @keyup.enter="loadLogs" />
-            <el-input v-model="logQuery.action" placeholder="操作" clearable style="width:150px" @keyup.enter="loadLogs" />
-            <el-select v-model="logQuery.status" placeholder="全部状态" clearable style="width:130px" @change="loadLogs">
-              <el-option label="成功" value="success" />
-              <el-option label="失败" value="fail" />
-            </el-select>
-            <el-button type="primary" @click="loadLogs">查询</el-button>
-          </div>
-          <el-button @click="refresh"><el-icon><Refresh /></el-icon> 刷新面板</el-button>
-        </div>
+        <QueryBar :loading="loading" @search="loadLogs" @reset="resetLogs">
+          <el-input v-model="logQuery.module" placeholder="模块" clearable style="width:150px" @keyup.enter="loadLogs" />
+          <el-input v-model="logQuery.action" placeholder="操作" clearable style="width:150px" @keyup.enter="loadLogs" />
+          <el-select v-model="logQuery.status" placeholder="全部状态" clearable style="width:130px">
+            <el-option label="成功" value="success" />
+            <el-option label="失败" value="fail" />
+          </el-select>
+          <template #extra>
+            <el-button @click="refresh"><el-icon><Refresh /></el-icon> 刷新面板</el-button>
+          </template>
+        </QueryBar>
         <el-table :data="operationLogs" v-loading="loading" stripe>
           <el-table-column label="时间" prop="createTime" width="170" />
           <el-table-column label="模块" prop="module" width="120" />
@@ -63,31 +62,26 @@
 
       <!-- 系统指标 -->
       <template v-else-if="activeTab === 'metrics'">
-        <div class="toolbar">
-          <div class="toolbar-left">
-            <el-select v-model="metricQuery.metricType" placeholder="全部类型" clearable style="width:120px"
-                       @change="loadMetricCharts">
-              <el-option v-for="t in metricTypes" :key="t.value" :label="t.label" :value="t.value" />
-            </el-select>
-            <el-date-picker
-              v-model="metricQuery.dateRange"
-              type="datetimerange"
-              range-separator="至"
-              start-placeholder="开始时间"
-              end-placeholder="结束时间"
-              format="YYYY-MM-DD HH:mm"
-              value-format="YYYY-MM-DDTHH:mm:ss"
-              style="width: 360px"
-              @change="loadMetricCharts"
-            />
-            <el-button type="primary" :loading="loading" @click="loadMetricCharts">查询</el-button>
-          </div>
-          <div class="toolbar-right">
+        <QueryBar :loading="loading" @search="loadMetricCharts" @reset="resetMetrics">
+          <el-select v-model="metricQuery.metricType" placeholder="全部类型" clearable style="width:120px">
+            <el-option v-for="t in metricTypes" :key="t.value" :label="t.label" :value="t.value" />
+          </el-select>
+          <el-date-picker
+            v-model="metricQuery.dateRange"
+            type="datetimerange"
+            range-separator="至"
+            start-placeholder="开始时间"
+            end-placeholder="结束时间"
+            format="YYYY-MM-DD HH:mm"
+            value-format="YYYY-MM-DDTHH:mm:ss"
+            style="width: 360px"
+          />
+          <template #extra>
             <el-button type="success" :loading="collecting" @click="handleCollect">
               <el-icon><Odometer /></el-icon> 立即采集
             </el-button>
-          </div>
-        </div>
+          </template>
+        </QueryBar>
 
         <div v-if="!hasMetricsData && !loading" class="empty-hint">
           <el-empty description="暂无指标数据，请点击【立即采集】或等待自动采集" />
@@ -110,17 +104,14 @@
 
       <!-- 调用追踪 -->
       <template v-else-if="activeTab === 'traces'">
-        <div class="toolbar">
-          <div class="toolbar-left">
-            <el-input v-model="traceQuery.traceId" placeholder="TraceId" clearable style="width:220px"
-                      @keyup.enter="loadTraces" />
-            <el-input v-model="traceQuery.module" placeholder="模块" clearable style="width:150px"
-                      @keyup.enter="loadTraces" />
-            <el-input v-model="traceQuery.action" placeholder="操作" clearable style="width:150px"
-                      @keyup.enter="loadTraces" />
-            <el-button type="primary" @click="loadTraces">查询</el-button>
-          </div>
-        </div>
+        <QueryBar :loading="loading" @search="loadTraces" @reset="resetTraces">
+          <el-input v-model="traceQuery.traceId" placeholder="TraceId" clearable style="width:220px"
+                    @keyup.enter="loadTraces" />
+          <el-input v-model="traceQuery.module" placeholder="模块" clearable style="width:150px"
+                    @keyup.enter="loadTraces" />
+          <el-input v-model="traceQuery.action" placeholder="操作" clearable style="width:150px"
+                    @keyup.enter="loadTraces" />
+        </QueryBar>
         <el-table :data="callTraces" v-loading="loading" stripe>
           <el-table-column label="开始时间" width="180">
             <template #default="{ row }">{{ formatTime(row.startTime) }}</template>
@@ -149,38 +140,34 @@
 
       <!-- LLM 调用追踪 -->
       <template v-else-if="activeTab === 'llm-traces'">
-        <div class="toolbar">
-          <div class="toolbar-left">
-            <el-input v-model="llmTraceQuery.traceId" placeholder="TraceId" clearable style="width:200px"
-                      @keyup.enter="loadLlmTraces" />
-            <el-input v-model="llmTraceQuery.appName" placeholder="应用名称" clearable style="width:150px"
-                      @keyup.enter="loadLlmTraces" />
-            <el-input v-model="llmTraceQuery.modelName" placeholder="模型名称" clearable style="width:150px"
-                      @keyup.enter="loadLlmTraces" />
-            <el-input v-model="llmTraceQuery.sessionId" placeholder="会话ID" clearable style="width:180px"
-                      @keyup.enter="loadLlmTraces" />
-            <el-input v-model="llmTraceQuery.promptKeyword" placeholder="输入关键词" clearable style="width:140px"
-                      @keyup.enter="loadLlmTraces" />
-            <el-input v-model="llmTraceQuery.responseKeyword" placeholder="输出关键词" clearable style="width:140px"
-                      @keyup.enter="loadLlmTraces" />
-            <el-select v-model="llmTraceQuery.status" placeholder="全部状态" clearable style="width:120px" @change="loadLlmTraces">
-              <el-option label="成功" value="success" />
-              <el-option label="失败" value="fail" />
-            </el-select>
-            <el-date-picker
-              v-model="llmTraceQuery.timeRange"
-              type="datetimerange"
-              range-separator="至"
-              start-placeholder="开始时间"
-              end-placeholder="结束时间"
-              format="YYYY-MM-DD HH:mm"
-              value-format="YYYY-MM-DDTHH:mm:ss"
-              style="width: 340px"
-              @change="loadLlmTraces"
-            />
-            <el-button type="primary" @click="loadLlmTraces">查询</el-button>
-          </div>
-        </div>
+        <QueryBar :loading="loading" @search="loadLlmTraces" @reset="resetLlmTraces">
+          <el-input v-model="llmTraceQuery.traceId" placeholder="TraceId" clearable style="width:200px"
+                    @keyup.enter="loadLlmTraces" />
+          <el-input v-model="llmTraceQuery.appName" placeholder="应用名称" clearable style="width:150px"
+                    @keyup.enter="loadLlmTraces" />
+          <el-input v-model="llmTraceQuery.modelName" placeholder="模型名称" clearable style="width:150px"
+                    @keyup.enter="loadLlmTraces" />
+          <el-input v-model="llmTraceQuery.sessionId" placeholder="会话ID" clearable style="width:180px"
+                    @keyup.enter="loadLlmTraces" />
+          <el-input v-model="llmTraceQuery.promptKeyword" placeholder="输入关键词" clearable style="width:140px"
+                    @keyup.enter="loadLlmTraces" />
+          <el-input v-model="llmTraceQuery.responseKeyword" placeholder="输出关键词" clearable style="width:140px"
+                    @keyup.enter="loadLlmTraces" />
+          <el-select v-model="llmTraceQuery.status" placeholder="全部状态" clearable style="width:120px">
+            <el-option label="成功" value="success" />
+            <el-option label="失败" value="fail" />
+          </el-select>
+          <el-date-picker
+            v-model="llmTraceQuery.timeRange"
+            type="datetimerange"
+            range-separator="至"
+            start-placeholder="开始时间"
+            end-placeholder="结束时间"
+            format="YYYY-MM-DD HH:mm"
+            value-format="YYYY-MM-DDTHH:mm:ss"
+            style="width: 340px"
+          />
+        </QueryBar>
         <el-table :data="llmTraces" v-loading="loading" stripe @row-click="showLlmDetail">
           <el-table-column label="开始时间" width="170">
             <template #default="{ row }">{{ formatTime(row.startTime) }}</template>
@@ -289,6 +276,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh, Odometer } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { observabilityApi } from '@admin/api/observability-api'
+import QueryBar from '@admin/components/QueryBar.vue'
 import AgentRunsPanel from '@admin/components/observability/AgentRunsPanel.vue'
 import AgentApprovalsPanel from '@admin/components/observability/AgentApprovalsPanel.vue'
 
@@ -726,6 +714,45 @@ function reload() {
   else if (activeTab.value === 'metrics') loadMetricCharts()
   else if (activeTab.value === 'llm-traces') loadLlmTraces()
   else loadTraces()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetLogs() {
+  logQuery.module = ''
+  logQuery.action = ''
+  logQuery.status = ''
+  pageNum.value = 1
+  loadLogs()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetMetrics() {
+  metricQuery.metricType = ''
+  metricQuery.dateRange = null
+  loadMetricCharts()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetTraces() {
+  traceQuery.traceId = ''
+  traceQuery.module = ''
+  traceQuery.action = ''
+  pageNum.value = 1
+  loadTraces()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetLlmTraces() {
+  llmTraceQuery.traceId = ''
+  llmTraceQuery.appName = ''
+  llmTraceQuery.modelName = ''
+  llmTraceQuery.sessionId = ''
+  llmTraceQuery.promptKeyword = ''
+  llmTraceQuery.responseKeyword = ''
+  llmTraceQuery.status = ''
+  llmTraceQuery.timeRange = null
+  pageNum.value = 1
+  loadLlmTraces()
 }
 
 function onTabChange() {

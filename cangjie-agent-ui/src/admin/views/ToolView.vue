@@ -6,25 +6,23 @@
         <el-tab-pane label="插件" name="plugin" />
       </el-tabs>
 
-      <div class="toolbar">
-        <div class="toolbar-left">
-          <el-input v-model="keyword" placeholder="搜索名称..." clearable style="width: 200px"
-                    @clear="reload" @keyup.enter="reload">
-            <template #prefix><el-icon><Search /></el-icon></template>
-          </el-input>
-          <el-select v-model="filterType" placeholder="全部类型" clearable style="width: 150px" @change="reload">
-            <el-option v-for="t in currentTypes" :key="t.code" :label="t.label" :value="t.code" />
-          </el-select>
-        </div>
-        <div>
+      <QueryBar :loading="loading" @search="reload" @reset="resetQuery">
+        <el-input v-model="keyword" placeholder="搜索名称..." clearable style="width: 200px"
+                  @keyup.enter="reload">
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+        <el-select v-model="filterType" placeholder="全部类型" clearable style="width: 150px">
+          <el-option v-for="t in currentTypes" :key="t.code" :label="t.label" :value="t.code" />
+        </el-select>
+        <template #extra>
           <el-button v-if="activeTab === 'plugin'" :loading="scanning" @click="handleScan">
             <el-icon><Refresh /></el-icon> 扫描插件
           </el-button>
           <el-button type="primary" @click="openCreate">
             <el-icon><Plus /></el-icon> {{ activeTab === 'tool' ? '新建工具' : '注册插件' }}
           </el-button>
-        </div>
-      </div>
+        </template>
+      </QueryBar>
 
       <!-- 工具列表 -->
       <el-table v-if="activeTab === 'tool'" :data="list" v-loading="loading" stripe>
@@ -224,6 +222,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus, Refresh } from '@element-plus/icons-vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { toolApi, pluginApi } from '@admin/api/tool-api'
 
 const toolTypes = [
@@ -347,6 +346,13 @@ async function loadList() {
 function reload() {
   pageNum.value = 1
   loadList()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  keyword.value = ''
+  filterType.value = ''
+  reload()
 }
 
 function onTabChange() {

@@ -9,20 +9,20 @@
       <ChannelMessagesPanel v-if="activeTab === 'messages'" />
 
       <template v-if="activeTab === 'list'">
-      <div class="toolbar">
-        <div class="toolbar-left">
-          <el-input v-model="keyword" placeholder="搜索渠道名称..." clearable style="width: 200px"
-                    @clear="reload" @keyup.enter="reload">
-            <template #prefix><el-icon><Search /></el-icon></template>
-          </el-input>
-          <el-select v-model="filterType" placeholder="全部类型" clearable style="width: 160px" @change="reload">
-            <el-option v-for="t in channelTypes" :key="t.code" :label="t.label" :value="t.code" />
-          </el-select>
-        </div>
-        <el-button type="primary" @click="openCreate">
-          <el-icon><Plus /></el-icon> 新建渠道
-        </el-button>
-      </div>
+      <QueryBar :loading="loading" @search="reload" @reset="resetQuery">
+        <el-input v-model="keyword" placeholder="搜索渠道名称..." clearable style="width: 200px"
+                  @keyup.enter="reload">
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+        <el-select v-model="filterType" placeholder="全部类型" clearable style="width: 160px">
+          <el-option v-for="t in channelTypes" :key="t.code" :label="t.label" :value="t.code" />
+        </el-select>
+        <template #extra>
+          <el-button type="primary" @click="openCreate">
+            <el-icon><Plus /></el-icon> 新建渠道
+          </el-button>
+        </template>
+      </QueryBar>
 
       <el-table :data="list" v-loading="loading" stripe>
         <el-table-column label="渠道名称" prop="name" min-width="160" />
@@ -168,6 +168,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { channelApi } from '@admin/api/channel-api'
 import { applicationApi } from '@admin/api/application-api'
 import ChannelMessagesPanel from '@admin/components/trigger/ChannelMessagesPanel.vue'
@@ -248,6 +249,13 @@ async function loadList() {
 function reload() {
   pageNum.value = 1
   loadList()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  keyword.value = ''
+  filterType.value = ''
+  reload()
 }
 
 function openCreate() {

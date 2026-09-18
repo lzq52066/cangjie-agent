@@ -2,17 +2,17 @@
   <div class="menu-view">
     <el-card>
       <template #header>
-        <div class="card-header">
-          <div class="header-left">
-            <el-input v-model="keyword" placeholder="搜索菜单名称..." clearable style="width: 220px"
-                      @clear="loadList" @keyup.enter="loadList">
-              <template #prefix><el-icon><Search /></el-icon></template>
-            </el-input>
-          </div>
-          <el-button type="primary" @click="openCreate">
-            <el-icon><Plus /></el-icon> 新增菜单
-          </el-button>
-        </div>
+        <QueryBar @search="loadList" @reset="resetQuery">
+          <el-input v-model="keyword" placeholder="搜索菜单名称..." clearable style="width: 220px"
+                    @keyup.enter="loadList">
+            <template #prefix><el-icon><Search /></el-icon></template>
+          </el-input>
+          <template #extra>
+            <el-button type="primary" @click="openCreate">
+              <el-icon><Plus /></el-icon> 新增菜单
+            </el-button>
+          </template>
+        </QueryBar>
       </template>
 
       <el-table :data="treeData" row-key="id" border stripe default-expand-all :tree-props="{ children: 'children' }">
@@ -113,6 +113,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { menuApi } from '@admin/api/menu-api'
 
 const treeData = ref<any[]>([])
@@ -153,6 +154,12 @@ async function loadList() {
   const res = await menuApi.tree()
   treeData.value = res
   menuTreeOptions.value = res
+}
+
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  keyword.value = ''
+  loadList()
 }
 
 function openCreate(row?: any) {

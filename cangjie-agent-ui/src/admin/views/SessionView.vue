@@ -1,24 +1,23 @@
 <template>
   <div class="session-view">
     <el-card>
-      <div class="filters">
+      <QueryBar :loading="loading" @search="reload" @reset="resetQuery">
         <el-input v-model="query.keyword" placeholder="标题 / 会话 ID" clearable style="width:200px"
-                  @clear="reload" @keyup.enter="reload" />
+                  @keyup.enter="reload" />
         <el-select v-model="query.applicationId" placeholder="全部应用" clearable filterable
-                   style="width:180px" @change="reload">
+                   style="width:180px">
           <el-option v-for="a in appOptions" :key="a.id" :label="a.name" :value="a.id" />
         </el-select>
         <el-input v-model="query.userId" placeholder="用户 ID" clearable style="width:150px"
                   @keyup.enter="reload" />
-        <el-select v-model="query.source" placeholder="全部来源" clearable style="width:130px" @change="reload">
+        <el-select v-model="query.source" placeholder="全部来源" clearable style="width:130px">
           <el-option v-for="s in sourceOptions" :key="s" :label="sourceLabel(s)" :value="s" />
         </el-select>
-        <el-select v-model="query.status" placeholder="全部状态" clearable style="width:120px" @change="reload">
+        <el-select v-model="query.status" placeholder="全部状态" clearable style="width:120px">
           <el-option label="进行中" value="active" />
           <el-option label="已关闭" value="closed" />
         </el-select>
-        <el-button type="primary" @click="reload">查询</el-button>
-      </div>
+      </QueryBar>
 
       <el-table :data="list" v-loading="loading" stripe>
         <el-table-column label="开始时间" prop="createTime" width="160" />
@@ -73,23 +72,22 @@
           <el-descriptions-item v-if="current.summary" label="滚动摘要" :span="3">{{ current.summary }}</el-descriptions-item>
         </el-descriptions>
 
-        <div class="msg-filters">
-          <el-select v-model="msgQuery.role" placeholder="全部角色" clearable size="small"
-                     style="width:120px" @change="reloadMessages">
+        <QueryBar :loading="msgLoading" search-text="筛选" @search="reloadMessages" @reset="resetMessageQuery">
+          <el-select v-model="msgQuery.role" placeholder="全部角色" clearable
+                     style="width:120px">
             <el-option label="用户" value="user" />
             <el-option label="助手" value="assistant" />
             <el-option label="系统" value="system" />
           </el-select>
-          <el-select v-model="msgQuery.feedback" placeholder="全部反馈" clearable size="small"
-                     style="width:120px" @change="reloadMessages">
+          <el-select v-model="msgQuery.feedback" placeholder="全部反馈" clearable
+                     style="width:120px">
             <el-option label="点赞" value="like" />
             <el-option label="点踩" value="dislike" />
             <el-option label="未反馈" value="none" />
           </el-select>
-          <el-input v-model="msgQuery.keyword" placeholder="内容关键词" clearable size="small"
-                    style="width:180px" @keyup.enter="reloadMessages" @clear="reloadMessages" />
-          <el-button size="small" type="primary" @click="reloadMessages">筛选</el-button>
-        </div>
+          <el-input v-model="msgQuery.keyword" placeholder="内容关键词" clearable
+                    style="width:180px" @keyup.enter="reloadMessages" />
+        </QueryBar>
 
         <div v-loading="msgLoading" class="msg-list">
           <div v-for="m in messages" :key="m.id" class="msg-item" :class="'msg-' + m.role">
@@ -120,6 +118,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { Pointer, Delete } from '@element-plus/icons-vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { chatSessionApi } from '@admin/api/chat-session-api'
 import { applicationApi } from '@admin/api/application-api'
 
@@ -177,6 +176,16 @@ function reload() {
   loadList()
 }
 
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  query.keyword = ''
+  query.applicationId = ''
+  query.userId = ''
+  query.source = ''
+  query.status = ''
+  reload()
+}
+
 // 消息抽屉
 const drawer = ref(false)
 const current = ref<any>(null)
@@ -207,6 +216,14 @@ async function loadMessages() {
 function reloadMessages() {
   msgPageNum.value = 1
   loadMessages()
+}
+
+/** 重置消息筛选条件并重新查询 */
+function resetMessageQuery() {
+  msgQuery.role = ''
+  msgQuery.feedback = ''
+  msgQuery.keyword = ''
+  reloadMessages()
 }
 function openMessages(row: any) {
   current.value = row

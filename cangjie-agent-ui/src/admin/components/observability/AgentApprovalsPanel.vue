@@ -1,18 +1,17 @@
 <template>
   <div class="agent-approvals-panel">
     <!-- 筛选条 -->
-    <div class="filters">
-      <el-select v-model="query.status" placeholder="全部状态" clearable style="width:140px" @change="onSearch">
+    <QueryBar :loading="loading" @search="onSearch" @reset="resetQuery">
+      <el-select v-model="query.status" placeholder="全部状态" clearable style="width:140px">
         <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
       <el-select v-model="query.appId" placeholder="全部应用" clearable filterable
-                 style="width:180px" @change="onSearch">
+                 style="width:180px">
         <el-option v-for="a in appOptions" :key="a.id" :label="a.name" :value="a.id" />
       </el-select>
       <el-input v-model="query.userId" placeholder="用户 ID" clearable style="width:160px"
                 @keyup.enter="onSearch" />
-      <el-button type="primary" @click="onSearch">查询</el-button>
-    </div>
+    </QueryBar>
 
     <el-table :data="list" v-loading="loading" stripe>
       <el-table-column label="创建时间" prop="createTime" width="170" />
@@ -81,6 +80,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { observabilityApi } from '@admin/api/observability-api'
 import { applicationApi } from '@admin/api/application-api'
 
@@ -154,6 +154,14 @@ async function loadList() {
 function onSearch() {
   pageNum.value = 1
   loadList()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  query.status = ''
+  query.appId = ''
+  query.userId = ''
+  onSearch()
 }
 
 const drawer = ref(false)

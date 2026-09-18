@@ -2,20 +2,20 @@
   <div class="application-view">
     <el-card>
       <template #header>
-        <div class="card-header">
-          <div class="header-left">
-            <el-input v-model="keyword" placeholder="搜索应用..." clearable style="width: 200px"
-                      @clear="reload" @keyup.enter="reload">
-              <template #prefix><el-icon><Search /></el-icon></template>
-            </el-input>
-            <el-select v-model="filterType" placeholder="全部类型" clearable style="width: 140px" @change="reload">
-              <el-option v-for="t in appTypes" :key="t.code" :label="t.label" :value="t.code" />
-            </el-select>
-          </div>
-          <el-button type="primary" @click="openCreate">
-            <el-icon><Plus /></el-icon> 新建应用
-          </el-button>
-        </div>
+        <QueryBar :loading="loading" @search="reload" @reset="resetQuery">
+          <el-input v-model="keyword" placeholder="搜索应用..." clearable style="width: 200px"
+                    @keyup.enter="reload">
+            <template #prefix><el-icon><Search /></el-icon></template>
+          </el-input>
+          <el-select v-model="filterType" placeholder="全部类型" clearable style="width: 140px">
+            <el-option v-for="t in appTypes" :key="t.code" :label="t.label" :value="t.code" />
+          </el-select>
+          <template #extra>
+            <el-button type="primary" @click="openCreate">
+              <el-icon><Plus /></el-icon> 新建应用
+            </el-button>
+          </template>
+        </QueryBar>
       </template>
 
       <el-table :data="list" v-loading="loading" stripe>
@@ -270,6 +270,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus, Delete } from '@element-plus/icons-vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { applicationApi } from '@admin/api/application-api'
 import { modelApi } from '@admin/api/model-api'
 import { knowledgeApi } from '@admin/api/knowledge-api'
@@ -357,6 +358,13 @@ async function loadList() {
 function reload() {
   pageNum.value = 1
   loadList()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  keyword.value = ''
+  filterType.value = ''
+  reload()
 }
 
 function openCreate() {

@@ -9,15 +9,17 @@
       <MemoryManager v-if="activeTab === 'memory'" />
 
       <template v-else>
-      <div class="toolbar">
+      <QueryBar :loading="loading" @search="reload" @reset="resetQuery">
         <el-input v-model="keyword" placeholder="搜索名称..." clearable style="width: 220px"
-                  @clear="reload" @keyup.enter="reload">
+                  @keyup.enter="reload">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
-        <el-button type="primary" @click="openCreate">
-          <el-icon><Plus /></el-icon> 新建{{ currentTab.label }}
-        </el-button>
-      </div>
+        <template #extra>
+          <el-button type="primary" @click="openCreate">
+            <el-icon><Plus /></el-icon> 新建{{ currentTab.label }}
+          </el-button>
+        </template>
+      </QueryBar>
 
       <el-table :data="list" v-loading="loading" stripe>
         <el-table-column v-for="col in columns" :key="col.prop"
@@ -179,6 +181,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { promptApi, type PromptResource } from '@admin/api/prompt-api'
 import MemoryManager from '@admin/components/MemoryManager.vue'
 
@@ -333,6 +336,12 @@ async function loadList() {
 function reload() {
   pageNum.value = 1
   loadList()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  keyword.value = ''
+  reload()
 }
 
 function onTabChange() {

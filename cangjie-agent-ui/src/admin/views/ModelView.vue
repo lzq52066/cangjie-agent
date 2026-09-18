@@ -5,20 +5,20 @@
       <el-tab-pane label="模型管理" name="model">
         <el-card>
           <template #header>
-            <div class="card-header">
-              <div class="header-left">
-                <el-input v-model="keyword" placeholder="搜索模型..." clearable style="width: 200px"
-                          @clear="reload" @keyup.enter="reload">
-                  <template #prefix><el-icon><Search /></el-icon></template>
-                </el-input>
-                <el-select v-model="filterProviderId" placeholder="全部厂商" clearable style="width: 160px" @change="reload">
-                  <el-option v-for="p in providerOptions" :key="p.id" :label="p.name" :value="p.id" />
-                </el-select>
-              </div>
-              <el-button type="primary" @click="openCreate">
-                <el-icon><Plus /></el-icon> 添加模型
-              </el-button>
-            </div>
+            <QueryBar :loading="loading" @search="reload" @reset="resetModelQuery">
+              <el-input v-model="keyword" placeholder="搜索模型..." clearable style="width: 200px"
+                        @keyup.enter="reload">
+                <template #prefix><el-icon><Search /></el-icon></template>
+              </el-input>
+              <el-select v-model="filterProviderId" placeholder="全部厂商" clearable style="width: 160px">
+                <el-option v-for="p in providerOptions" :key="p.id" :label="p.name" :value="p.id" />
+              </el-select>
+              <template #extra>
+                <el-button type="primary" @click="openCreate">
+                  <el-icon><Plus /></el-icon> 添加模型
+                </el-button>
+              </template>
+            </QueryBar>
           </template>
 
           <el-table :data="list" v-loading="loading" stripe>
@@ -72,17 +72,17 @@
       <el-tab-pane label="厂商管理" name="provider">
         <el-card>
           <template #header>
-            <div class="card-header">
-              <div class="header-left">
-                <el-input v-model="providerKeyword" placeholder="搜索厂商..." clearable style="width: 200px"
-                          @clear="reloadProviders" @keyup.enter="reloadProviders">
-                  <template #prefix><el-icon><Search /></el-icon></template>
-                </el-input>
-              </div>
-              <el-button type="primary" @click="openProviderCreate">
-                <el-icon><Plus /></el-icon> 添加厂商
-              </el-button>
-            </div>
+            <QueryBar :loading="providerLoading" @search="reloadProviders" @reset="resetProviderQuery">
+              <el-input v-model="providerKeyword" placeholder="搜索厂商..." clearable style="width: 200px"
+                        @keyup.enter="reloadProviders">
+                <template #prefix><el-icon><Search /></el-icon></template>
+              </el-input>
+              <template #extra>
+                <el-button type="primary" @click="openProviderCreate">
+                  <el-icon><Plus /></el-icon> 添加厂商
+                </el-button>
+              </template>
+            </QueryBar>
           </template>
 
           <el-alert type="info" :closable="false" show-icon class="provider-tip"
@@ -230,6 +230,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { modelApi, modelProviderApi, type ModelProvider } from '@admin/api/model-api'
 
 const activeTab = ref<'model' | 'provider'>('model')
@@ -347,6 +348,19 @@ async function loadList() {
 function reload() {
   pageNum.value = 1
   loadList()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetModelQuery() {
+  keyword.value = ''
+  filterProviderId.value = ''
+  reload()
+}
+
+/** 重置厂商筛选条件并重新查询 */
+function resetProviderQuery() {
+  providerKeyword.value = ''
+  reloadProviders()
 }
 
 function openCreate() {

@@ -1,24 +1,25 @@
 <template>
   <div class="memory-manager">
     <!-- 筛选条 -->
-    <div class="filters">
+    <QueryBar :loading="loading" @search="onSearch" @reset="resetQuery">
       <el-input v-model="query.userId" placeholder="用户 ID（必填）" clearable style="width: 240px"
-                @clear="onSearch" @keyup.enter="onSearch" />
+                @keyup.enter="onSearch" />
       <el-select v-model="query.applicationId" placeholder="全部应用" clearable filterable
-                 style="width: 200px" @change="onSearch">
+                 style="width: 200px">
         <el-option v-for="a in appOptions" :key="a.id" :label="a.name" :value="a.id" />
       </el-select>
-      <el-select v-model="query.dimension" placeholder="全部维度" clearable style="width: 140px" @change="onSearch">
+      <el-select v-model="query.dimension" placeholder="全部维度" clearable style="width: 140px">
         <el-option v-for="d in dimensions" :key="d.code" :label="d.label" :value="d.code" />
       </el-select>
-      <el-select v-model="query.memoryType" placeholder="全部类型" clearable style="width: 140px" @change="onSearch">
+      <el-select v-model="query.memoryType" placeholder="全部类型" clearable style="width: 140px">
         <el-option label="用户画像（跨会话）" value="user" />
         <el-option label="场景事实（会话内）" value="scene" />
       </el-select>
-      <el-checkbox v-model="query.includeInactive" @change="onSearch">含已停用</el-checkbox>
-      <el-button type="primary" @click="onSearch">查询</el-button>
-      <el-button type="success" :disabled="!query.userId" @click="openCreate">录入记忆</el-button>
-    </div>
+      <el-checkbox v-model="query.includeInactive">含已停用</el-checkbox>
+      <template #extra>
+        <el-button type="success" :disabled="!query.userId" @click="openCreate">录入记忆</el-button>
+      </template>
+    </QueryBar>
 
     <el-table :data="list" v-loading="loading" stripe>
       <el-table-column label="内容" prop="memory.content" min-width="240" show-overflow-tooltip />
@@ -111,6 +112,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { memoryApi, type LongTermMemory, type MemoryItem } from '@admin/api/memory-api'
 import { applicationApi } from '@admin/api/application-api'
 
@@ -181,6 +183,16 @@ async function loadList() {
 function onSearch() {
   pageNum.value = 1
   loadList()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  query.userId = ''
+  query.applicationId = ''
+  query.dimension = ''
+  query.memoryType = ''
+  query.includeInactive = false
+  onSearch()
 }
 
 // ===== 新增 / 编辑 =====

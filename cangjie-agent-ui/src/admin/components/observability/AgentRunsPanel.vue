@@ -1,21 +1,21 @@
 <template>
   <div class="agent-runs-panel">
     <!-- 筛选条 -->
-    <div class="filters">
+    <QueryBar :loading="loading" @search="onSearch" @reset="resetQuery">
       <el-input v-model="query.traceId" placeholder="TraceId" clearable style="width:180px"
                 @keyup.enter="onSearch" />
       <el-input v-model="query.sessionId" placeholder="会话 ID" clearable style="width:170px"
                 @keyup.enter="onSearch" />
       <el-select v-model="query.appId" placeholder="全部应用" clearable filterable
-                 style="width:170px" @change="onSearch">
+                 style="width:170px">
         <el-option v-for="a in appOptions" :key="a.id" :label="a.name" :value="a.id" />
       </el-select>
       <el-input v-model="query.userId" placeholder="用户 ID" clearable style="width:140px"
                 @keyup.enter="onSearch" />
-      <el-select v-model="query.status" placeholder="全部状态" clearable style="width:140px" @change="onSearch">
+      <el-select v-model="query.status" placeholder="全部状态" clearable style="width:140px">
         <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
-      <el-select v-model="query.harnessType" placeholder="全部形态" clearable style="width:130px" @change="onSearch">
+      <el-select v-model="query.harnessType" placeholder="全部形态" clearable style="width:130px">
         <el-option v-for="h in harnessOptions" :key="h.value" :label="h.label" :value="h.value" />
       </el-select>
       <el-input v-model="query.modelName" placeholder="模型名称" clearable style="width:140px"
@@ -24,10 +24,9 @@
         v-model="timeRange" type="datetimerange" range-separator="至"
         start-placeholder="开始时间" end-placeholder="结束时间"
         format="YYYY-MM-DD HH:mm" value-format="YYYY-MM-DD HH:mm:ss"
-        style="width:340px" @change="onSearch"
+        style="width:340px"
       />
-      <el-button type="primary" @click="onSearch">查询</el-button>
-    </div>
+    </QueryBar>
 
     <el-table :data="list" v-loading="loading" stripe>
       <el-table-column label="开始时间" prop="startTime" width="160" />
@@ -197,6 +196,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { observabilityApi } from '@admin/api/observability-api'
 import { applicationApi } from '@admin/api/application-api'
 
@@ -312,6 +312,19 @@ async function loadList() {
 function onSearch() {
   pageNum.value = 1
   loadList()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  query.traceId = ''
+  query.sessionId = ''
+  query.appId = ''
+  query.userId = ''
+  query.status = ''
+  query.harnessType = ''
+  query.modelName = ''
+  timeRange.value = null
+  onSearch()
 }
 
 const drawer = ref(false)

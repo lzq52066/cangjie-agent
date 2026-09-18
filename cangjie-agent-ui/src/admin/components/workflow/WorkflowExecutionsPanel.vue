@@ -1,21 +1,20 @@
 <template>
   <div class="wf-exec-panel">
-    <div class="filters">
+    <QueryBar :loading="loading" @search="onSearch" @reset="resetQuery">
       <el-select v-model="query.workflowId" placeholder="全部工作流" clearable filterable
-                 style="width:180px" @change="onSearch">
+                 style="width:180px">
         <el-option v-for="w in workflowOptions" :key="w.id" :label="w.name" :value="w.id" />
       </el-select>
       <el-select v-model="query.applicationId" placeholder="全部应用" clearable filterable
-                 style="width:170px" @change="onSearch">
+                 style="width:170px">
         <el-option v-for="a in appOptions" :key="a.id" :label="a.name" :value="a.id" />
       </el-select>
       <el-input v-model="query.sessionId" placeholder="会话 ID" clearable style="width:170px"
                 @keyup.enter="onSearch" />
-      <el-select v-model="query.status" placeholder="全部状态" clearable style="width:130px" @change="onSearch">
+      <el-select v-model="query.status" placeholder="全部状态" clearable style="width:130px">
         <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
-      <el-button type="primary" @click="onSearch">查询</el-button>
-    </div>
+    </QueryBar>
 
     <el-table :data="list" v-loading="loading" stripe>
       <el-table-column label="开始时间" prop="startTime" width="160" />
@@ -89,6 +88,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import QueryBar from '@admin/components/QueryBar.vue'
 import { workflowApi } from '@admin/api/workflow-api'
 import { applicationApi } from '@admin/api/application-api'
 
@@ -169,6 +169,15 @@ async function loadList() {
 function onSearch() {
   pageNum.value = 1
   loadList()
+}
+
+/** 重置筛选条件并重新查询 */
+function resetQuery() {
+  query.workflowId = ''
+  query.applicationId = ''
+  query.sessionId = ''
+  query.status = ''
+  onSearch()
 }
 
 const drawer = ref(false)
