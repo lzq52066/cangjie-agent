@@ -40,7 +40,7 @@ class LoopNodeTest {
     @Test
     // 覆盖场景：maxIterations 小于列表长度 —— 截断到上限
     void executeShouldTruncateByMaxIterations() {
-        List<Object> five = IntStream.rangeClosed(1, 5).boxed().toList();
+        List<Integer> five = IntStream.rangeClosed(1, 5).boxed().toList();
 
         Map<String, Object> output = node.execute(
                 Map.of("items", five),

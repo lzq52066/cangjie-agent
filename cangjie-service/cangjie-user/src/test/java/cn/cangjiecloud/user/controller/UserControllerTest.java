@@ -3,6 +3,8 @@ package cn.cangjiecloud.user.controller;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.user.entity.UserEntity;
 import cn.cangjiecloud.user.mapper.UserMapper;
+import cn.cangjiecloud.user.mapper.UserRoleMapper;
+import cn.cangjiecloud.user.service.IRoleService;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -29,6 +31,8 @@ import static org.mockito.Mockito.when;
 class UserControllerTest {
 
     private UserMapper userMapper;
+    private UserRoleMapper userRoleMapper;
+    private IRoleService roleService;
     private UserController controller;
 
     @BeforeAll
@@ -43,7 +47,9 @@ class UserControllerTest {
     @BeforeEach
     void setUp() {
         userMapper = mock(UserMapper.class);
-        controller = new UserController(userMapper);
+        userRoleMapper = mock(UserRoleMapper.class);
+        roleService = mock(IRoleService.class);
+        controller = new UserController(userMapper, userRoleMapper, roleService);
     }
 
     private static UserEntity user(String id, String username, String nickname) {

@@ -76,6 +76,10 @@ class WorkflowExecutionEngineTest {
         return dto(id, id, type, null);
     }
 
+    private static WorkflowNodeDTO dto(String id, String type, Map<String, Object> config) {
+        return dto(id, id, type, config);
+    }
+
     private static JSONArray edges(Object... triples) {
         JSONArray array = new JSONArray();
         for (Object t : triples) {
