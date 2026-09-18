@@ -314,9 +314,22 @@ npm run dev
 
 ### Docker 部署
 
-```bash
-docker compose up -d
+采用「本地打制品 + 服务器一键启动」模式，服务器无需安装 JDK / Maven / Node，也无需上传源码。
+
+```powershell
+# 1. 本地（Windows）构建并归集制品到 deploy/
+.\deploy\pack.ps1
 ```
+
+```bash
+# 2. 将整个 deploy 文件夹上传到 Linux 服务器，然后在该目录执行
+chmod +x *.sh
+sudo ./deploy-all.sh
+```
+
+`deploy/` 内含编号脚本（`01-install-docker` → `05-status`），也可按需逐个执行；
+另有 `90-stop.sh` / `91-restart.sh` / `92-logs.sh` / `99-purge.sh` 用于日常运维。
+首次启动需修改 `deploy/.env` 中的 `MINIO_PUBLIC_ENDPOINT` 与各项密钥。
 
 ---
 

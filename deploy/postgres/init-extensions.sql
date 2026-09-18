@@ -1,0 +1,3 @@
+-- 数据卷首次初始化时预装扩展，后续 Flyway 的 CREATE EXTENSION IF NOT EXISTS 幂等通过
+CREATE EXTENSION IF NOT EXISTS "vector";
+CREATE EXTENSION IF NOT EXISTS "pgroonga";
