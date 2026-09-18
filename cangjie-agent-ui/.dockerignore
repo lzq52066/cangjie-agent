@@ -1,9 +1,0 @@
-node_modules/
-dist/
-npm-debug.log*
-.git/
-.vscode/
-.idea/
-Dockerfile
-.dockerignore
-*.md

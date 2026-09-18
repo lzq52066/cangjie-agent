@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { existsSync, renameSync } from 'fs'
 import { resolve } from 'path'
 
 /**
@@ -22,11 +23,28 @@ function chatDevEntry(): Plugin {
   }
 }
 
+/**
+ * 构建产物需落到 index.html，nginx 的 try_files .../index.html 才能命中。
+ * chat 模式的入口源文件名为 chat.html，构建后重命名为 index.html。
+ */
+function renameChatHtml(outDir: string): Plugin {
+  return {
+    name: 'rename-chat-html',
+    closeBundle() {
+      const from = resolve(outDir, 'chat.html')
+      if (existsSync(from)) {
+        renameSync(from, resolve(outDir, 'index.html'))
+      }
+    }
+  }
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const isAdmin = mode !== 'chat'
   const base = env.VITE_BASE || (isAdmin ? '/admin/' : '/chat/')
-  const entry = resolve(__dirname, isAdmin ? 'src/admin/main.ts' : 'src/chat/main.ts')
+  // 入口必须是 html 而非 main.ts：以 ts 作为 rollup input 时 Vite 不产出 index.html
+  const htmlEntry = resolve(__dirname, isAdmin ? 'index.html' : 'chat.html')
   const outDir = resolve(__dirname, isAdmin ? 'dist/admin' : 'dist/chat')
 
   return {
@@ -34,7 +52,7 @@ export default defineConfig(({ mode }) => {
     // admin 与 chat 两个 dev server 入口依赖图不同，必须各自独立缓存，
     // 否则会互相覆盖 node_modules/.vite/deps，导致另一方的动态导入 504/404
     cacheDir: resolve(__dirname, 'node_modules/.vite', isAdmin ? 'admin' : 'chat'),
-    plugins: [vue(), ...(isAdmin ? [] : [chatDevEntry()])],
+    plugins: [vue(), ...(isAdmin ? [] : [chatDevEntry(), renameChatHtml(outDir)])],
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),
@@ -52,7 +70,7 @@ export default defineConfig(({ mode }) => {
       outDir,
       emptyOutDir: true,
       rollupOptions: {
-        input: { index: entry }
+        input: htmlEntry
       }
     },
     server: {
