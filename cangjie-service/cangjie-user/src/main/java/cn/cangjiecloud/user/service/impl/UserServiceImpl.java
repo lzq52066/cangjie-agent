@@ -10,6 +10,8 @@ import cn.cangjiecloud.common.domain.UserIdentity;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.common.props.SystemProperties;
 import cn.cangjiecloud.user.dto.LoginDTO;
+import cn.cangjiecloud.user.dto.PasswordChangeDTO;
+import cn.cangjiecloud.user.dto.ProfileUpdateDTO;
 import cn.cangjiecloud.user.entity.UserEntity;
 import cn.cangjiecloud.user.entity.UserRoleEntity;
 import cn.cangjiecloud.user.mapper.UserMapper;
@@ -21,6 +23,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -84,6 +87,46 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
     @Override
     public UserEntity getByUsername(String username) {
         return getOne(new LambdaQueryWrapper<UserEntity>().eq(UserEntity::getUsername, username));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public UserIdentity updateCurrentProfile(ProfileUpdateDTO dto) {
+        UserEntity user = requireCurrentUser();
+        if (StringUtils.hasText(dto.getNickname())) {
+            user.setNickname(dto.getNickname().trim());
+        }
+        user.setEmail(StringUtils.hasText(dto.getEmail()) ? dto.getEmail().trim() : null);
+        user.setPhone(StringUtils.hasText(dto.getPhone()) ? dto.getPhone().trim() : null);
+        updateById(user);
+        UserContext.clearIdentity();
+        return getCurrentIdentity();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void changeCurrentPassword(PasswordChangeDTO dto) {
+        UserEntity user = requireCurrentUser();
+        if (!PASSWORD_ENCODER.matches(dto.getOldPassword(), user.getPassword())) {
+            throw new ApiException("旧密码不正确");
+        }
+        if (PASSWORD_ENCODER.matches(dto.getNewPassword(), user.getPassword())) {
+            throw new ApiException("新密码不能与旧密码相同");
+        }
+        user.setPassword(PASSWORD_ENCODER.encode(dto.getNewPassword()));
+        updateById(user);
+    }
+
+    private UserEntity requireCurrentUser() {
+        String uid = UserContext.getUserId();
+        if (uid == null) {
+            throw new ApiException(ResultCode.UN_AUTHORIZED, "未登录或登录已过期");
+        }
+        UserEntity user = getById(uid);
+        if (user == null || Boolean.FALSE.equals(user.getIsActive())) {
+            throw new ApiException(ResultCode.UN_AUTHORIZED, "用户不存在或已被禁用");
+        }
+        return user;
     }
 
     private UserIdentity buildIdentityWithPermission(UserEntity user) {

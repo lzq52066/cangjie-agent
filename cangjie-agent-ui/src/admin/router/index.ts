@@ -18,6 +18,7 @@ const routes: RouteRecordRaw[] = [
     path: '/',
     component: () => import('../layouts/MainLayout.vue'),
     children: [
+      { path: 'profile', component: () => import('../views/ProfileView.vue'), meta: { title: '个人信息' } },
       { path: 'dashboard', component: () => import('../views/DashboardView.vue'), meta: { title: '工作台' } },
       { path: 'model', component: () => import('../views/ModelView.vue'), meta: { title: '模型管理' } },
       { path: 'knowledge', component: () => import('../views/KnowledgeView.vue'), meta: { title: '知识库' } },

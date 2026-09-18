@@ -117,7 +117,7 @@ async function onSubmit() {
 }
 .login-bg { position: absolute; inset: 0; overflow: hidden; }
 .glow { position: absolute; border-radius: 50%; filter: blur(80px); opacity: .6; }
-.g1 { width: 500px; height: 500px; background: #67c23a; top: -120px; left: -80px; }
+.g1 { width: 500px; height: 500px; background: var(--cj-primary); top: -120px; left: -80px; }
 .g2 { width: 600px; height: 600px; background: #409eff; bottom: -180px; right: -120px; opacity: .45; }
 .g3 { width: 300px; height: 300px; background: #e6a23c; top: 40%; left: 40%; opacity: .25; }
 
@@ -143,17 +143,17 @@ async function onSubmit() {
 .logo { display: flex; align-items: center; justify-content: center; gap: 12px; }
 .logo-icon {
   width: 52px; height: 52px; border-radius: 14px;
-  background: linear-gradient(135deg, #67c23a, #409eff);
+  background: linear-gradient(135deg, var(--cj-primary), #409eff);
   color: #fff; display: flex; align-items: center; justify-content: center;
   font-weight: 700; font-size: 26px;
-  box-shadow: 0 8px 20px rgba(103,194,58,0.4);
+  box-shadow: 0 8px 20px rgba(var(--cj-primary-rgb), 0.4);
 }
 .logo-title { font-size: 22px; font-weight: 700; color: #1f2d3d; }
 .logo-subtitle { font-size: 12px; color: #909399; margin-top: 2px; }
 .slogan {
   margin: 14px 0 0; color: #606266; font-size: 13px;
   padding: 6px 14px; display: inline-block;
-  background: #f0f9eb; border-radius: 12px; color: #67c23a;
+  background: var(--el-color-primary-light-9); border-radius: 12px; color: var(--cj-primary);
 }
 .submit-btn { width: 100%; height: 44px; font-size: 15px; letter-spacing: 4px; }
 .captcha-row { display: flex; gap: 12px; margin-bottom: 18px; }

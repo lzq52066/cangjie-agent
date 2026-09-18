@@ -228,12 +228,20 @@ public class HarnessContext {
     /**
      * 追加一轮模型输出对应的 assistant 消息。
      * <p>
-     * 与既有实现保持一致：仅落文本，工具调用通过后续 tool 消息的 toolCallId 关联，
-     * 消息到厂商协议的映射由 ModelGateway 实现负责。
+     * 除文本外，若本轮发起了工具调用，还需把 tool_calls（id/name/arguments）一并落到消息里：
+     * 后续 tool 结果消息必须紧跟在带 tool_calls 的 assistant 消息之后，厂商才会接受；
+     * 断点续跑（本地工具/人工审批）跨请求重建上下文时尤其依赖这里持久化的 tool_calls。
      */
     public void addAssistant(AssistantTurn turn) {
+        java.util.List<cn.cangjiecloud.core.model.ChatMessage.ToolCallRef> refs = null;
+        if (turn.hasToolCalls()) {
+            refs = turn.getToolCalls().stream()
+                    .map(tc -> cn.cangjiecloud.core.model.ChatMessage.ToolCallRef.of(
+                            tc.getId(), tc.getName(), tc.getArguments()))
+                    .toList();
+        }
         messages.add(cn.cangjiecloud.core.model.ChatMessage
-                .assistant(turn.getContent() == null ? "" : turn.getContent()));
+                .assistant(turn.getContent() == null ? "" : turn.getContent(), refs));
         inputTokens += turn.getInputTokens();
         outputTokens += turn.getOutputTokens();
         totalTokens += turn.tokensOrZero();

@@ -393,14 +393,14 @@
     {
       "id": "local_list_dir",
       "name": "列出本地文件夹",
-      "description": "列出用户在网页上授权的本地文件夹中的文件与子文件夹。只能访问授权目录，path 必须是相对于授权根目录的相对路径（如 photos/2026），根目录传 \".\" 或空字符串，禁止使用盘符绝对路径（如 D:\\\\）和 .. 越界。返回每项的名称、类型（file/directory）、大小与最后修改时间。",
+      "description": "列出用户在网页上授权的本地文件夹中的文件与子文件夹。只能访问授权目录，根目录传 \".\" 或空字符串。path 优先传相对于授权根目录的相对路径（如 photos/2026）；若用户给出的是盘符绝对路径或中间目录不确定，也可直接传入，系统会自动在授权文件夹内按尾部路径和文件夹名定位。禁止 .. 越界。返回每项的名称、类型（file/directory）、大小与最后修改时间。",
       "toolType": "LOCAL",
       "category": "本地文件",
       "icon": "FolderOpened",
       "parameters": {
         "type": "object",
         "properties": {
-          "path": { "type": "string", "description": "相对授权根目录的子目录路径，如 photos/2026；列出根目录传 \".\"" }
+          "path": { "type": "string", "description": "相对授权根目录的子目录路径，如 photos/2026；列出根目录传 \".\"；也支持用户提供的绝对路径，会在授权文件夹内自动定位" }
         },
         "required": []
       }
@@ -408,14 +408,14 @@
     {
       "id": "local_read_file",
       "name": "读取本地文件",
-      "description": "读取用户授权文件夹内的文件内容。path 必须是相对于授权根目录的相对路径（如 notes/a.txt），禁止盘符绝对路径和 .. 越界。文本文件按 UTF-8 返回文本；图片等二进制文件返回 data URL（base64）及文件大小。",
+      "description": "读取用户授权文件夹内的文件内容。path 优先传相对于授权根目录的相对路径（如 notes/a.txt）；若用户给出盘符绝对路径或只提供文件名，也可直接传入，系统会在授权文件夹内自动定位（按尾部路径精确匹配，再按文件名模糊匹配），并在返回的 note 中给出应使用的相对路径。只能读到授权文件夹内的文件，禁止 .. 越界。文本文件按 UTF-8 返回文本；图片等二进制文件返回 data URL（base64）及文件大小。",
       "toolType": "LOCAL",
       "category": "本地文件",
       "icon": "Document",
       "parameters": {
         "type": "object",
         "properties": {
-          "path": { "type": "string", "description": "相对授权根目录的文件路径，如 docs/readme.md" },
+          "path": { "type": "string", "description": "相对授权根目录的文件路径，如 docs/readme.md；也支持用户提供的绝对路径或文件名，会在授权文件夹内自动定位" },
           "encoding": { "type": "string", "description": "文本编码，默认 utf-8；二进制文件可不传，自动返回 base64", "enum": ["utf-8", "base64"] }
         },
         "required": ["path"]
@@ -424,7 +424,7 @@
     {
       "id": "local_write_file",
       "name": "写入本地文件",
-      "description": "在用户授权文件夹内创建或覆盖写入文件，必要时自动创建父目录。path 必须是相对于授权根目录的相对路径（如 report/out.txt），禁止盘符绝对路径和 .. 越界。content 为要写入的文本内容。",
+      "description": "在用户授权文件夹内【新建】文件并写入内容，或【覆盖】已存在文件的内容，必要时自动创建父目录。凡是用户说“创建/新建/写入/生成/保存/往某文件里写内容/把内容存成文件”，一律用本工具，而不是重命名工具；即使文件名在历史对话里出现过，只要本次意图是产生新内容就用本工具。path 必须是相对授权根目录的相对路径（如 notes/a.txt；用户说“在 a 盘/某目录下新建”时，取其文件名与子目录即可，盘符由用户授权的文件夹决定），不支持盘符绝对路径和 .. 越界。content 为要写入的文本内容。",
       "toolType": "LOCAL",
       "category": "本地文件",
       "icon": "EditPen",
@@ -440,17 +440,32 @@
     {
       "id": "local_rename_file",
       "name": "重命名/移动本地文件",
-      "description": "在用户授权文件夹内重命名或移动文件/文件夹，例如把 a.png 改名为 b.png。fromPath 与 toPath 都必须是相对于授权根目录的相对路径（如 photos/a.png、photos/b.png），禁止盘符绝对路径和 .. 越界。目标已存在时会失败并返回提示，不会覆盖。",
+      "description": "仅用于把一个【已存在】的文件/文件夹改名或移动到新位置，不改变、也不能生成文件内容。适用：用户明确说“重命名/改名/把 X 移到 Y/移动文件”，且源文件已存在。切勿用于“创建/新建/写入/生成/保存文件”这类需要产生新内容的需求——那应使用写入本地文件工具；也不要仅因历史对话操作过某文件（如之前改过 a.png），就把本次针对其他文件的新建/写入请求套用成本工具。fromPath 支持相对路径，也支持用户给出的绝对路径或文件名，系统会在授权文件夹内自动定位源；toPath 必须是相对于授权根目录的相对路径，不支持盘符绝对路径。禁止 .. 越界。目标已存在时会失败，不会覆盖。",
       "toolType": "LOCAL",
       "category": "本地文件",
       "icon": "Switch",
       "parameters": {
         "type": "object",
         "properties": {
-          "fromPath": { "type": "string", "description": "相对授权根目录的原路径，如 a.png" },
-          "toPath": { "type": "string", "description": "相对授权根目录的新路径，如 b.png" }
+          "fromPath": { "type": "string", "description": "原路径，相对授权根目录（如 a.png），也支持绝对路径/文件名自动定位" },
+          "toPath": { "type": "string", "description": "新路径，必须是相对授权根目录的相对路径，如 b.png" }
         },
         "required": ["fromPath", "toPath"]
+      }
+    },
+    {
+      "id": "local_delete_file",
+      "name": "删除本地文件",
+      "description": "永久删除用户授权文件夹内的一个文件或文件夹（文件夹会连同其下全部内容一并递归删除），不进回收站、不可恢复。仅当用户明确要求“删除/删掉/移除/清掉某文件或文件夹”时使用；不要用于新建、写入、改名、移动等意图。path 支持相对授权根目录的相对路径，也支持用户给出的绝对路径或文件名，系统会在授权文件夹内自动定位，禁止 .. 越界，也不允许删除授权根目录本身。该操作在浏览器侧会要求用户二次强确认后才真正执行，用户拒绝时会返回失败结果。",
+      "toolType": "LOCAL",
+      "category": "本地文件",
+      "icon": "Delete",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "description": "要删除的文件或文件夹路径，相对授权根目录（如 photos/old/a.png），也支持绝对路径/文件名自动定位" }
+        },
+        "required": ["path"]
       }
     }
   ]

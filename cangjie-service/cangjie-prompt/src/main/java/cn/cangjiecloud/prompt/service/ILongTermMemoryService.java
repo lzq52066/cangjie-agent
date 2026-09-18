@@ -2,10 +2,43 @@ package cn.cangjiecloud.prompt.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import cn.cangjiecloud.prompt.entity.LongTermMemoryEntity;
+import cn.cangjiecloud.prompt.entity.MemorySimilarity;
 
 import java.util.List;
 
 public interface ILongTermMemoryService extends IService<LongTermMemoryEntity> {
+
+    /**
+     * 为记忆内容生成向量；向量能力不可用（未配置 Embedding）或调用失败时返回 null（降级，不影响记忆主流程）
+     */
+    float[] embed(String content);
+
+    /**
+     * 向量近邻查询：在同一用户+应用+记忆类型（scene 再限定同一会话）下取语义最相似的激活记忆，
+     * embedding 为 null 时返回空列表
+     */
+    List<MemorySimilarity> findSimilar(float[] embedding, LongTermMemoryEntity probe, int limit);
+
+    /**
+     * 新增一条记忆并回写向量（embedding 为 null 时仅入库）
+     */
+    LongTermMemoryEntity insertNew(LongTermMemoryEntity entity, float[] embedding);
+
+    /**
+     * 强化已有记忆：语义/精确重复时递增置信度（封顶 1.0），不改变内容；
+     * source 为 explicit 时把来源升级为人工
+     */
+    LongTermMemoryEntity reinforce(String id, String source);
+
+    /**
+     * 合并记忆：用归并后的内容覆盖目标记忆，刷新向量，并按较高置信度小幅强化
+     */
+    LongTermMemoryEntity mergeInto(String targetId, String mergedContent, double incomingConfidence, float[] embedding);
+
+    /**
+     * 手工编辑记忆：可改内容/置信度/维度，内容变更时重算向量
+     */
+    void editMemory(String id, String content, Double confidence, String dimension);
 
     /**
      * 按用户 + 应用 + 维度查询激活记忆

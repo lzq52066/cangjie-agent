@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.cangjiecloud.prompt.mapper.LongTermMemoryMapper">
+
+    <!-- 向量近邻检索（余弦距离）。
+         先以等值条件（用户/应用/类型/激活/同维度）收敛行集合再计算距离，
+         scene 类型额外限定同一会话；不带 ANN 索引，顺序计算，记忆量级下足够。 -->
+    <select id="searchSimilar" resultType="cn.cangjiecloud.prompt.entity.MemorySimilarity">
+        SELECT id,
+               content,
+               1 - (embedding &lt;=&gt; #{vector}::vector) AS similarity
+        FROM memory
+        WHERE deleted = 0
+          AND is_active = TRUE
+          AND embedding IS NOT NULL
+          AND embedding_dim = #{dim}
+          AND user_id = #{userId}
+          AND application_id = #{applicationId}
+          AND memory_type = #{memoryType}
+          AND dimension = #{dimension}
+        <if test="memoryType == 'scene' and sessionId != null and sessionId != ''">
+            AND session_id = #{sessionId}
+        </if>
+        ORDER BY embedding &lt;=&gt; #{vector}::vector
+        LIMIT #{limit}
+    </select>
+
+    <!-- 注：dimension 为记忆维度（preference/background/convention/goal），
+         不同维度的相似表述属于不同记忆，必须同维度才可判重/合并。 -->
+
+    <!-- 回写记忆向量 -->
+    <update id="updateEmbedding">
+        UPDATE memory
+        SET embedding = #{vector}::vector,
+            embedding_dim = #{dim}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

@@ -244,7 +244,7 @@ onMounted(async () => {
 .tpl-header { display: flex; gap: 12px; align-items: center; }
 .tpl-icon {
   width: 42px; height: 42px; border-radius: 10px; flex-shrink: 0;
-  background: linear-gradient(135deg, #409eff, #67c23a);
+  background: linear-gradient(135deg, #409eff, var(--cj-primary));
   color: #fff; font-size: 20px; font-weight: 600;
   display: flex; align-items: center; justify-content: center;
 }

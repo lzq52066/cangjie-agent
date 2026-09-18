@@ -86,6 +86,8 @@ public class DefaultAgentHarness implements AgentHarness {
         }
         HarnessRequest request = resumeResolver.resolve(paused, approved, remark);
         HarnessContext ctx = restoreContext(paused, request, l);
+        LoopPolicy policy = request.getLoopPolicy() == null
+                ? LoopPolicy.builder().build() : request.getLoopPolicy();
         if (!approved) {
             denyPendingCalls(ctx, remark);
         } else {
@@ -93,6 +95,13 @@ public class DefaultAgentHarness implements AgentHarness {
             ChatResponse.ToolCall call = ctx.currentPendingCall();
             if (call != null) {
                 ctx.approve(call.getId());
+            }
+            // 先续跑挂起点之后的工具：检查点里最后一条是带 tool_calls 的 assistant 消息，
+            // 必须补齐对应的 tool 结果再请求模型，否则消息序列非法。
+            // 若续跑中又遇审批/本地工具挂起，直接返回新的挂起态。
+            HarnessOutcome suspended = executePendingTools(ctx, policy, l);
+            if (suspended != null) {
+                return suspended;
             }
         }
         log.info("恢复 Agent 运行: runId={}, approved={}, 待执行工具={}",
@@ -131,6 +140,14 @@ public class DefaultAgentHarness implements AgentHarness {
         // 挂起那次只留了 waiting_local 步骤，这里补记浏览器侧回传的结果，保证 run 回放完整
         recordTool(ctx, invocation, outcome, System.currentTimeMillis(), System.currentTimeMillis());
         ctx.advancePendingIndex();
+        // 续跑同一轮剩余的工具调用（模型一轮可能返回多个 tool_call）：
+        // 直接 loop 会在仍缺这些 tool 结果时请求模型，导致非法消息序列。
+        LoopPolicy policy = request.getLoopPolicy() == null
+                ? LoopPolicy.builder().build() : request.getLoopPolicy();
+        HarnessOutcome suspended = executePendingTools(ctx, policy, l);
+        if (suspended != null) {
+            return suspended;
+        }
         log.info("本地工具结果已回传，恢复 Agent 运行: runId={}, callId={}, failed={}", runId, callId, failed);
         return loop(ctx, l);
     }
@@ -214,15 +231,18 @@ public class DefaultAgentHarness implements AgentHarness {
             }
         } catch (HarnessTimeoutException e) {
             ctx.setErrorMessage(e.getMessage());
+            preservePartial(ctx, e);
             recordError(ctx, e);
             log.warn("Agent 运行超时: runId={}, {}", ctx.getRunId(), e.getMessage());
             return finish(ctx, RunStatus.FAILED, listener);
         } catch (Exception e) {
             if (ctx.isCancelled()) {
                 log.info("Agent 运行被取消: runId={}", ctx.getRunId());
+                preservePartial(ctx, e);
                 return finish(ctx, RunStatus.CANCELLED, listener);
             }
             ctx.setErrorMessage(describe(e));
+            preservePartial(ctx, e);
             recordError(ctx, e);
             log.error("Agent 运行失败: runId={}", ctx.getRunId(), e);
             return finish(ctx, RunStatus.FAILED, listener);
@@ -337,6 +357,23 @@ public class DefaultAgentHarness implements AgentHarness {
         recorder.finishRun(ctx.getRunId(), outcome);
         listener.onComplete(outcome);
         return outcome;
+    }
+
+    /**
+     * 失败/超时前保留已流式产出的部分正文：
+     * 优先取异常携带的部分内容，其次取最后一轮助手输出，供业务侧落库与前端展示。
+     */
+    private void preservePartial(HarnessContext ctx, Exception e) {
+        if (ctx.getFinalText() != null) {
+            return;
+        }
+        String partial = null;
+        if (e instanceof HarnessException he) {
+            partial = he.getPartialContent();
+        }
+        if (partial != null && !partial.isBlank()) {
+            ctx.setFinalText(partial);
+        }
     }
 
     private void recordContext(HarnessRequest request, String runId, HarnessListener listener) {

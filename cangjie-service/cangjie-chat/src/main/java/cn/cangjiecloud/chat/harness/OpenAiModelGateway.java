@@ -84,7 +84,7 @@ public class OpenAiModelGateway implements ModelGateway {
         try (Stream<ChatChunk> stream = client.streamChat(chatRequest, request.getCancelFlag())) {
             stream.forEach(chunk -> {
                 if (request.isCancelled()) {
-                    throw new HarnessException(CANCELLED_MESSAGE);
+                    throw new HarnessException(CANCELLED_MESSAGE, partialOf(content), null);
                 }
                 if (chunk.getError() != null) {
                     error.set(chunk.getError());
@@ -116,14 +116,17 @@ public class OpenAiModelGateway implements ModelGateway {
                 sink.onDelta(chunk.getDelta());
             });
         } catch (HarnessException e) {
+            // 取消等内部中断不携带部分内容（取消分支由 harness 自行保留现场）
             throw e;
         } catch (Exception e) {
             log.error("流式对话异常: {}", e.getMessage(), e);
-            throw new HarnessException(e.getMessage() == null ? "模型流式调用失败" : e.getMessage(), e);
+            String msg = e.getMessage() == null ? "模型流式调用失败" : e.getMessage();
+            throw new HarnessException(msg, partialOf(content), e);
         }
 
         if (error.get() != null) {
-            throw new HarnessException(error.get());
+            // 服务端在 chunk 中返回错误（如余额不足、限流），此前可能已吐出部分正文，一并保留
+            throw new HarnessException(error.get(), partialOf(content), null);
         }
 
         return AssistantTurn.builder()
@@ -177,5 +180,14 @@ public class OpenAiModelGateway implements ModelGateway {
 
     private long valueOrZero(Long value) {
         return value == null ? 0L : value;
+    }
+
+    /** 已累积正文非空白时返回，供失败场景保留部分回答 */
+    private static String partialOf(StringBuilder content) {
+        if (content == null || content.length() == 0) {
+            return null;
+        }
+        String text = content.toString().trim();
+        return text.isEmpty() ? null : content.toString();
     }
 }

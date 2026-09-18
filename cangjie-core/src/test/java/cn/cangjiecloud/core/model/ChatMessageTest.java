@@ -41,11 +41,13 @@ class ChatMessageTest {
         }
 
         @Test
-        void allArgsConstructorShouldSetFieldsInDeclarationOrder() {
-            ChatMessage message = new ChatMessage("tool", "result", "call-9", "search");
+        void builderShouldPopulateToolFields() {
+            ChatMessage message = ChatMessage.builder()
+                    .role("tool").content("result").toolCallId("call-9").toolName("search").build();
 
             assertThat(message).isEqualTo(ChatMessage.builder()
                     .role("tool").content("result").toolCallId("call-9").toolName("search").build());
+            assertThat(message.getToolCalls()).isNull();
         }
     }
 
@@ -76,6 +78,24 @@ class ChatMessageTest {
 
             assertThat(message.getRole()).isEqualTo("assistant");
             assertThat(message.getContent()).isEmpty();
+        }
+
+        @Test
+        void assistantShouldCarryToolCalls() {
+            ChatMessage.ToolCallRef ref = ChatMessage.ToolCallRef.of("call-1", "search", "{\"q\":\"x\"}");
+            ChatMessage message = ChatMessage.assistant("", List.of(ref));
+
+            assertThat(message.getRole()).isEqualTo("assistant");
+            assertThat(message.getToolCalls()).hasSize(1);
+            assertThat(message.getToolCalls().get(0).getId()).isEqualTo("call-1");
+            assertThat(message.getToolCalls().get(0).getName()).isEqualTo("search");
+            assertThat(message.getToolCalls().get(0).getArguments()).isEqualTo("{\"q\":\"x\"}");
+        }
+
+        @Test
+        void assistantShouldDropEmptyToolCalls() {
+            ChatMessage message = ChatMessage.assistant("hi", List.of());
+            assertThat(message.getToolCalls()).isNull();
         }
 
         @Test

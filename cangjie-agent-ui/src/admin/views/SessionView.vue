@@ -248,13 +248,13 @@ function openMessages(row: any) {
 .msg-item {
   border: 1px solid #ebeef5; border-radius: 8px; padding: 10px 12px; background: #fafafa;
 }
-.msg-user { border-left: 3px solid #67c23a; }
+.msg-user { border-left: 3px solid var(--cj-primary); }
 .msg-assistant { border-left: 3px solid #409eff; }
 .msg-system { border-left: 3px solid #909399; background: #f4f4f5; }
 .msg-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .msg-time { font-size: 12px; color: #909399; }
 .msg-extra { font-size: 12px; color: #c0c4cc; }
-.fb-like { color: #67c23a; }
+.fb-like { color: var(--cj-primary); }
 .fb-dislike { color: #f56c6c; }
 .msg-content {
   font-size: 13px; line-height: 1.8; white-space: pre-wrap; word-break: break-all; color: #303133;

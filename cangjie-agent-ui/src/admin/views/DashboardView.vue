@@ -76,7 +76,7 @@ const cards = computed(() => [
 ])
 
 const modules = [
-  { title: '大模型接入',    icon: markRaw(Connection), bg: 'linear-gradient(135deg,#67c23a,#85ce61)', desc: 'OpenAI / 通义 / 文心 / 通义 / Llama 统一 Provider SPI' },
+  { title: '大模型接入',    icon: markRaw(Connection), bg: 'linear-gradient(135deg,var(--cj-primary),var(--el-color-primary-light-3))', desc: 'OpenAI / 通义 / 文心 / 通义 / Llama 统一 Provider SPI' },
   { title: 'RAG 知识库',   icon: markRaw(Files),      bg: 'linear-gradient(135deg,#409eff,#66b1ff)', desc: 'PDF/Word/Markdown 切片 + pgvector + 混合检索 + 重排' },
   { title: '工具插件',     icon: markRaw(Tools),      bg: 'linear-gradient(135deg,#e6a23c,#f0c78a)', desc: 'deepseek-harness 万物即插件，统一 Tool/Plugin SPI' },
   { title: '提示词/Skill', icon: markRaw(EditPen),    bg: 'linear-gradient(135deg,#f56c6c,#f89898)', desc: '变量模板、Skill 复用、规则/命令/记忆' },
@@ -110,7 +110,7 @@ onMounted(async () => {
   display: flex; align-items: center; justify-content: center;
   color: #fff;
 }
-.c0 .stat-icon { background: linear-gradient(135deg,#67c23a,#85ce61); }
+.c0 .stat-icon { background: linear-gradient(135deg,var(--cj-primary),var(--el-color-primary-light-3)); }
 .c1 .stat-icon { background: linear-gradient(135deg,#409eff,#66b1ff); }
 .c2 .stat-icon { background: linear-gradient(135deg,#e6a23c,#f0c78a); }
 .c3 .stat-icon { background: linear-gradient(135deg,#f56c6c,#f89898); }

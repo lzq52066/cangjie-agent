@@ -8,6 +8,8 @@ import cn.cangjiecloud.core.model.ChatResponse;
 import cn.cangjiecloud.model.provider.OpenAICompatibleClient;
 import cn.cangjiecloud.model.service.IModelService;
 import cn.cangjiecloud.prompt.entity.LongTermMemoryEntity;
+import cn.cangjiecloud.prompt.entity.MemorySimilarity;
+import cn.cangjiecloud.prompt.memory.MemoryDedupProperties;
 import cn.cangjiecloud.prompt.service.ILongTermMemoryService;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -26,6 +28,9 @@ import java.util.List;
  * 独立 Bean 而非 ChatServiceImpl 的私有方法，原因：
  * 1. Spring @Async 只能通过代理对外部 Bean 生效，同类自调用会绕过代理；
  * 2. 异步线程中 Sa-Token ThreadLocal 上下文不可用，因此 userId 必须在调用方显式传入。
+ *
+ * 入库时做语义去重：向量近邻命中已有记忆时，重复则强化置信度，
+ * 高度相关则调 LLM 判断能否合并为一条，避免同一事实反复产生措辞不同的重复记忆。
  */
 @Slf4j
 @Service
@@ -34,6 +39,8 @@ public class LongTermMemoryExtractService {
 
     private final IModelService modelService;
     private final ILongTermMemoryService longTermMemoryService;
+    private final MemoryMergeService memoryMergeService;
+    private final MemoryDedupProperties dedupProperties;
 
     @Async
     public void extract(String userId, ApplicationEntity application, String sessionId,
@@ -66,7 +73,7 @@ public class LongTermMemoryExtractService {
                 return;
             }
 
-            parseAndSaveMemories(userId, application.getId(), sessionId, response.getContent());
+            parseAndSaveMemories(userId, application, sessionId, client, response.getContent());
         } catch (Exception e) {
             log.warn("异步长期记忆提取失败: userId={}, appId={}", userId, application.getId(), e);
         }
@@ -102,7 +109,8 @@ public class LongTermMemoryExtractService {
                 """.formatted(userInput, aiReply);
     }
 
-    private void parseAndSaveMemories(String userId, String appId, String sessionId, String llmOutput) {
+    private void parseAndSaveMemories(String userId, ApplicationEntity application, String sessionId,
+                                      OpenAICompatibleClient client, String llmOutput) {
         try {
             // 提取 JSON 数组
             String jsonStr = llmOutput.trim();
@@ -119,9 +127,7 @@ public class LongTermMemoryExtractService {
                 return;
             }
 
-            LocalDateTime now = LocalDateTime.now();
             int savedCount = 0;
-
             for (JSONObject item : items) {
                 String dimension = item.getString("dimension");
                 String content = item.getString("content");
@@ -137,27 +143,72 @@ public class LongTermMemoryExtractService {
 
                 LongTermMemoryEntity entity = new LongTermMemoryEntity();
                 entity.setUserId(userId);
-                entity.setApplicationId(appId);
+                entity.setApplicationId(application.getId());
                 entity.setDimension(dimension);
                 entity.setContent(content);
                 entity.setConfidence(confidence);
                 entity.setSource("inferred");
                 entity.setTriggerCount(0);
                 entity.setIsActive(true);
-                entity.setLastTriggeredAt(now);
+                entity.setLastTriggeredAt(LocalDateTime.now());
                 entity.setMemoryType(isScene ? "scene" : "user");
                 entity.setSessionId(isScene ? sessionId : null);
 
-                longTermMemoryService.upsert(entity);
-                savedCount++;
+                if (storeMemory(entity, client, application.getTemperature())) {
+                    savedCount++;
+                }
             }
 
             if (savedCount > 0) {
-                log.info("记忆提取完成: userId={}, appId={}, session={}, 保存了 {} 条",
-                        userId, appId, sessionId, savedCount);
+                log.info("记忆提取完成: userId={}, appId={}, session={}, 入库/更新 {} 条",
+                        userId, application.getId(), sessionId, savedCount);
             }
         } catch (Exception e) {
             log.warn("解析长期记忆失败: userId={}, output={}", userId, llmOutput, e);
         }
+    }
+
+    /**
+     * 单条提取记忆的语义感知入库，返回是否产生了写入（新增/强化/合并）。
+     */
+    private boolean storeMemory(LongTermMemoryEntity entity, OpenAICompatibleClient client, Double temperature) {
+        float[] embedding = longTermMemoryService.embed(entity.getContent());
+        if (embedding == null) {
+            // 向量不可用：直接走精确去重 upsert（内含降级逻辑）
+            longTermMemoryService.upsert(entity);
+            return true;
+        }
+
+        List<MemorySimilarity> neighbors =
+                longTermMemoryService.findSimilar(embedding, entity, dedupProperties.getCandidateLimit());
+        if (neighbors.isEmpty()) {
+            longTermMemoryService.insertNew(entity, embedding);
+            return true;
+        }
+
+        MemorySimilarity best = neighbors.get(0);
+        double sim = best.getSimilarity() != null ? best.getSimilarity() : 0;
+        double confidence = entity.getConfidence() != null ? entity.getConfidence() : 0.8;
+
+        // 1) 高度一致：同一条记忆，只强化置信度，不新增
+        if (sim >= dedupProperties.getDuplicateThreshold()) {
+            longTermMemoryService.reinforce(best.getId(), entity.getSource());
+            return true;
+        }
+
+        // 2) 中度相似：可能是同一事实的不同表述/互补信息，交 LLM 判定是否合并
+        if (sim >= dedupProperties.getMergeThreshold()) {
+            String merged = memoryMergeService.decideMergedContent(
+                    client, temperature, best.getContent(), entity.getContent());
+            if (StringUtils.hasText(merged)) {
+                float[] mergedVector = longTermMemoryService.embed(merged);
+                longTermMemoryService.mergeInto(best.getId(), merged, confidence, mergedVector);
+                return true;
+            }
+        }
+
+        // 3) 不相似或判定不应合并：作为新记忆保留
+        longTermMemoryService.insertNew(entity, embedding);
+        return true;
     }
 }

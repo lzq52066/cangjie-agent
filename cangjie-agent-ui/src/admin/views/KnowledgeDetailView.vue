@@ -353,7 +353,7 @@ onMounted(() => {
 }
 .result-item:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
 .result-meta { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12px; }
-.rank { font-weight: 700; color: #67c23a; }
+.rank { font-weight: 700; color: var(--cj-primary); }
 .score { color: #409eff; font-weight: 600; }
 .score-sub { color: #909399; }
 .result-content { color: #303133; line-height: 1.8; white-space: pre-wrap; }

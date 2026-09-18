@@ -122,6 +122,16 @@ cangjie:
       half-life-days: 30
       # 单用户单应用激活记忆容量上限（0 表示不限制）
       capacity-per-user: 100
+    # 语义去重/合并（依赖 embedding 向量能力，未配置 embedding 时自动降级为精确去重）
+    dedup:
+      # 向量近邻候选条数
+      candidate-limit: 5
+      # 相似度 ≥ 该值视为同一条记忆：只增加置信度，不新增（0~1）
+      duplicate-threshold: 0.92
+      # 相似度落在 [merge-threshold, duplicate-threshold) 时，自动提取链路调 LLM 判断是否合并
+      merge-threshold: 0.82
+      # 重复/合并确认时置信度的强化步长（累加封顶 1.0）
+      reinforce-step: 0.1
   openapi:
     # 对外接口路径前缀
     prefix: /api/open

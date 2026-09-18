@@ -1,5 +1,7 @@
 :root {
+  /* 默认主题色（用户可在顶栏切换，运行时由 utils/theme.ts 覆盖） */
   --cj-primary: #67c23a;
+  --cj-primary-rgb: 103, 194, 58;
   --cj-info: #409eff;
   --cj-warn: #e6a23c;
   --cj-danger: #f56c6c;
@@ -15,6 +17,23 @@
 }
 body { font-size: 14px; }
 .el-card { border-radius: 12px; }
+
+/* ============ 筛选控件宽度标准 ============ */
+/* 日期时间范围选择器：标准宽度 260px（约占筛选行 1/4，两个输入框均可完整显示
+   “YYYY-MM-DD HH:mm”）。Element Plus 用 CSS 变量 --el-date-editor-width 控制
+   宽度（datetimerange 默认 400px），这里同时覆盖变量与 width，并用足够高的
+   特异性确保压过组件默认样式 */
+.el-range-editor.el-date-editor.cj-daterange {
+  --el-date-editor-width: 260px;
+  width: 260px !important;
+  flex: 0 0 auto;
+}
+@media (max-width: 768px) {
+  .el-range-editor.el-date-editor.cj-daterange {
+    --el-date-editor-width: 100%;
+    width: 100% !important;
+  }
+}
 
 /* ============ 全局响应式适配 ============ */
 
@@ -130,7 +149,7 @@ body { font-size: 14px; }
   color: #e4e7ed;
 }
 .el-menu--vertical .el-menu-item.is-active {
-  background: rgba(103,194,58,0.15);
-  color: #67c23a;
+  background: rgba(var(--cj-primary-rgb), 0.15);
+  color: var(--cj-primary);
 }
 

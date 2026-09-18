@@ -60,16 +60,6 @@
           </div>
         </div>
         <div class="header-actions">
-          <button
-            v-if="localFsSupported"
-            class="local-fs-btn"
-            :class="{ active: localFsAuthorized }"
-            :title="localFsAuthorized ? '已授权本地文件夹，点击重新选择' : '授权本地文件夹（用于本地文件工具）'"
-            @click="authorizeLocalDir"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-            <span>{{ localFsAuthorized ? '本地文件夹已授权' : '授权本地文件夹' }}</span>
-          </button>
           <button v-if="!embedded" class="action-btn" @click="newChat" title="新对话">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
           </button>
@@ -113,6 +103,10 @@
             <div class="message-role">{{ m.role === 'user' ? '你' : title }}</div>
             <div class="message-bubble" :class="{ 'user-bubble': m.role === 'user' }">
               <div class="message-text" v-html="renderMarkdown(m.content)"></div>
+              <div v-if="m.error" class="message-error">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <span>{{ m.error }}</span>
+              </div>
             </div>
             <!-- Sources (默认折叠) -->
             <div v-if="m.sources?.length" class="sources-card">
@@ -203,25 +197,63 @@
                 <span class="local-tool-title">{{ localToolStatusText }}</span>
               </div>
               <div class="local-tool-desc">
-                本地工具 <code class="local-tool-name">{{ localToolDisplayName }}</code>
+                需要在你的电脑上执行本地操作
+                <code class="local-tool-name">{{ localToolDisplayName }}</code>
               </div>
-              <div v-if="pendingLocalTool.arguments" class="local-tool-args">
-                <div class="local-tool-args-label">执行参数（限定在授权文件夹内）</div>
+              <div v-if="localToolTargetPath" class="local-tool-target">
+                <span class="local-tool-target-label">目标：</span>
+                <code class="local-tool-target-path">{{ localToolTargetPath }}</code>
+              </div>
+              <details v-if="pendingLocalTool.arguments" class="local-tool-args">
+                <summary class="local-tool-args-label">查看完整参数</summary>
                 <pre class="local-tool-args-body">{{ prettyArgs(pendingLocalTool.arguments) }}</pre>
+              </details>
+              <!-- 写/改/删二次确认区 -->
+              <div
+                v-if="localToolConfirm"
+                class="local-confirm"
+                :class="localToolConfirm.riskLevel === 'high' ? 'danger' : 'normal'"
+              >
+                <div class="local-confirm-title">
+                  <svg v-if="localToolConfirm.riskLevel === 'high'" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  <span>{{ localToolConfirm.title }}</span>
+                </div>
+                <ul class="local-confirm-warnings">
+                  <li v-for="(w, i) in localToolConfirm.warnings" :key="i">{{ w }}</li>
+                </ul>
+                <div class="local-tool-actions">
+                  <button
+                    class="local-tool-btn"
+                    :class="localToolConfirm.riskLevel === 'high' ? 'danger' : 'primary'"
+                    :disabled="localToolBusy"
+                    @click="confirmLocalTool"
+                  >{{ localToolConfirm.confirmText }}</button>
+                  <button
+                    class="local-tool-btn ghost"
+                    :disabled="localToolBusy"
+                    @click="rejectLocalTool"
+                  >取消</button>
+                </div>
               </div>
               <div v-if="localToolHint" class="local-tool-hint">{{ localToolHint }}</div>
               <div class="local-tool-actions">
                 <button
-                  v-if="localToolNeedAuth"
+                  v-if="localToolNeedAuth && localFsSupported"
                   class="local-tool-btn primary"
                   :disabled="localToolBusy"
                   @click="authorizeAndRunLocal"
-                >授权文件夹并执行</button>
+                >选择文件夹并执行</button>
                 <button
-                  v-if="localToolFailed"
+                  v-if="localToolFailed && localToolNotFound && localFsSupported"
                   class="local-tool-btn primary"
                   :disabled="localToolBusy"
-                  @click="runPendingLocalTool"
+                  @click="reauthorizeAndRunLocal"
+                >重新选择文件夹并执行</button>
+                <button
+                  v-if="localToolFailed && !localToolNotFound"
+                  class="local-tool-btn primary"
+                  :disabled="localToolBusy"
+                  @click="prepareLocalTool"
                 >重试</button>
               </div>
             </div>
@@ -250,7 +282,7 @@
 
       <!-- Footer Input -->
       <div class="chat-footer">
-        <div class="input-wrapper">
+        <div class="input-wrapper" @click="focusInput">
           <textarea
             v-model="input"
             class="chat-input"
@@ -290,8 +322,62 @@ import {
   authorizeDirectory,
   executeLocalTool,
   getRootHandle,
-  isLocalFsSupported
+  isLocalFsSupported,
+  isMutatingLocalTool,
+  planLocalTool,
+  type LocalToolConfirmPlan
 } from './local-fs'
+import { Marked } from 'marked'
+import { markedHighlight } from 'marked-highlight'
+import hljs from 'highlight.js/lib/core'
+// 按需注册常用语言，避免引入全量包（全量约 1MB）
+import java from 'highlight.js/lib/languages/java'
+import javascript from 'highlight.js/lib/languages/javascript'
+import typescript from 'highlight.js/lib/languages/typescript'
+import xml from 'highlight.js/lib/languages/xml'
+import css from 'highlight.js/lib/languages/css'
+import scss from 'highlight.js/lib/languages/scss'
+import json from 'highlight.js/lib/languages/json'
+import bash from 'highlight.js/lib/languages/bash'
+import shell from 'highlight.js/lib/languages/shell'
+import sql from 'highlight.js/lib/languages/sql'
+import python from 'highlight.js/lib/languages/python'
+import go from 'highlight.js/lib/languages/go'
+import yaml from 'highlight.js/lib/languages/yaml'
+import markdown from 'highlight.js/lib/languages/markdown'
+import ini from 'highlight.js/lib/languages/ini'
+import properties from 'highlight.js/lib/languages/properties'
+import dockerfile from 'highlight.js/lib/languages/dockerfile'
+import diff from 'highlight.js/lib/languages/diff'
+import plaintext from 'highlight.js/lib/languages/plaintext'
+import DOMPurify from 'dompurify'
+import 'highlight.js/styles/atom-one-dark.css'
+
+const REGISTERED: Record<string, Parameters<typeof hljs.registerLanguage>[1]> = {
+  java, javascript, js: javascript, typescript, ts: typescript,
+  xml, html: xml, vue: xml, css, scss, json, bash, sh: bash, shell,
+  sql, python, py: python, go, golang: go, yaml, yml: yaml,
+  markdown, md: markdown, ini, properties, dockerfile, diff, plaintext, text: plaintext
+}
+Object.entries(REGISTERED).forEach(([name, lang]) => hljs.registerLanguage(name, lang))
+
+const marked = new Marked(
+  markedHighlight({
+    langPrefix: 'hljs language-',
+    highlight(code, lang) {
+      const language = hljs.getLanguage(lang) ? lang : 'plaintext'
+      return hljs.highlight(code, { language, ignoreIllegals: true }).value
+    }
+  })
+)
+marked.setOptions({ gfm: true, breaks: true })
+
+// DOMPurify 默认允许 class 属性；明确放行 hljs 生成的标签与 code 语言类
+const PURIFY_CONFIG = { ADD_ATTR: ['target', 'rel'] }
+function safeMarkdown(text: string): string {
+  const rawHtml = marked.parse(text, { async: false }) as string
+  return DOMPurify.sanitize(rawHtml, PURIFY_CONFIG)
+}
 
 interface Msg {
   role: 'user' | 'assistant'
@@ -300,6 +386,8 @@ interface Msg {
   _sourcesCollapsed?: boolean
   tokens?: number
   duration?: number
+  /** 流式中断时的错误信息：内容照常渲染，错误以独立提示块展示在下方 */
+  error?: string
 }
 
 const messages = ref<Msg[]>([])
@@ -490,24 +578,47 @@ const localToolRunning = ref(false)
 const localToolResumeRunning = ref(false)
 const localToolNeedAuth = ref(false)
 const localToolFailed = ref(false)
+const localToolNotFound = ref(false)
 const localToolHint = ref('')
+/** 变更类工具（写/改名/删除）预检后的二次确认方案；非空表示正在等待用户允许/拒绝 */
+const localToolConfirm = ref<LocalToolConfirmPlan | null>(null)
+/** 预检阶段标记，避免与执行中 spinner 混淆 */
+const localToolPlanning = ref(false)
 
-const localToolBusy = computed(() => localToolRunning.value || localToolResumeRunning.value)
+const localToolBusy = computed(() =>
+  localToolRunning.value || localToolResumeRunning.value || localToolPlanning.value
+)
 
 const LOCAL_TOOL_NAMES: Record<string, string> = {
   local_list_dir: '列出本地文件夹',
   local_read_file: '读取本地文件',
   local_write_file: '写入本地文件',
-  local_rename_file: '重命名/移动本地文件'
+  local_rename_file: '重命名/移动本地文件',
+  local_delete_file: '删除本地文件/文件夹'
 }
 const localToolDisplayName = computed(() => {
   const name = pendingLocalTool.value?.toolName || pendingLocalTool.value?.tool || ''
   return LOCAL_TOOL_NAMES[name] || name || '未知本地工具'
 })
+/** 从工具参数里提取模型想操作的目标路径，用于授权卡片给出明确上下文 */
+const localToolTargetPath = computed(() => {
+  const raw = pendingLocalTool.value?.arguments
+  if (!raw) return ''
+  try {
+    const args = JSON.parse(raw)
+    return String(args.path || args.fromPath || '').trim()
+  } catch {
+    return ''
+  }
+})
 const localToolStatusText = computed(() => {
   if (localToolResumeRunning.value) return '正在回传结果并继续生成…'
   if (localToolRunning.value) return '正在你的电脑上执行文件操作…'
   if (localToolFailed.value) return '本地工具执行失败'
+  if (localToolConfirm.value) {
+    return localToolConfirm.value.riskLevel === 'high' ? '高风险操作，请确认' : '等待你确认'
+  }
+  if (localToolPlanning.value) return '正在检查操作…'
   if (localToolNeedAuth.value) return '需要先授权本地文件夹'
   return '等待执行本地文件操作'
 })
@@ -525,9 +636,9 @@ async function authorizeLocalDir() {
     await authorizeDirectory({ mode: 'readwrite' })
     localFsAuthorized.value = true
     ElMessage.success('本地文件夹授权成功')
-    // 若正有挂起的本地工具在等授权，直接接着执行
+    // 若正有挂起的本地工具在等授权，接着进入预检/执行分流
     if (pendingLocalTool.value && localToolNeedAuth.value) {
-      runPendingLocalTool()
+      prepareLocalTool()
     }
   } catch (e: any) {
     // 用户取消选择时浏览器抛 AbortError，不算错误
@@ -539,6 +650,11 @@ async function authorizeLocalDir() {
 
 /** 授权完成后从卡片触发执行 */
 async function authorizeAndRunLocal() {
+  await authorizeLocalDir()
+}
+
+/** 授权目录内找不到目标时，改选另一个文件夹后再执行 */
+async function reauthorizeAndRunLocal() {
   await authorizeLocalDir()
 }
 
@@ -554,11 +670,28 @@ function setPendingLocalTool(raw: any) {
   }
   localToolHint.value = ''
   localToolFailed.value = false
+  localToolNotFound.value = false
+  localToolConfirm.value = null
   localToolNeedAuth.value = !localFsSupported || !localFsAuthorized.value
+  if (!localFsSupported) {
+    localToolHint.value = '当前浏览器不支持本地文件操作，请使用最新版 Chrome / Edge。'
+  } else if (localToolNeedAuth.value) {
+    localToolHint.value =
+      '浏览器需要你的一次性授权才能读写本地文件。请点击下方按钮，选择包含目标文件的文件夹；文件操作只会在该文件夹内进行。'
+  }
   scroll()
-  // 已授权则自动执行，免去用户再点一次
+  // 已授权则进入预检/执行分流（只读自动执行，写改删先弹二次确认）。
+  // 必须延后到下一个宏任务：一轮多个本地工具时，本函数可能由上一个工具的
+  // submitLocalResult 响应链式触发，此时 localToolResumeRunning/localToolRunning
+  // 尚未被外层 finally 复位，同步调用会被 prepareLocalTool 的忙等守卫直接早退，
+  // 导致第二张卡片成为无按钮、不执行的死卡片。
   if (!localToolNeedAuth.value) {
-    runPendingLocalTool()
+    setTimeout(() => {
+      // 延迟期间卡片可能已被终态清理，确认仍是当前挂起工具再预检
+      if (pendingLocalTool.value?.callId === raw.callId) {
+        prepareLocalTool()
+      }
+    }, 0)
   }
 }
 
@@ -567,14 +700,30 @@ function clearPendingLocalTool() {
   localToolHint.value = ''
   localToolNeedAuth.value = false
   localToolFailed.value = false
+  localToolNotFound.value = false
+  localToolConfirm.value = null
 }
 
-async function runPendingLocalTool() {
+/** 标记本地工具失败；若为授权目录内找不到目标，提示用户改选包含目标的文件夹 */
+function markLocalFailure(message: string) {
+  localToolFailed.value = true
+  localToolConfirm.value = null
+  localToolHint.value = message
+  localToolNotFound.value = /找不到(文件|文件夹)/.test(message)
+}
+
+/**
+ * 已授权后的统一入口：
+ * - 只读工具（列目录/读取）直接执行；
+ * - 变更类工具（写/改名/删除）先预检，生成二次确认卡片等待用户允许/拒绝。
+ */
+async function prepareLocalTool() {
   const target = pendingLocalTool.value
   if (!target || localToolBusy.value) return
-  localToolRunning.value = true
   localToolHint.value = ''
   localToolFailed.value = false
+  localToolNotFound.value = false
+  localToolConfirm.value = null
   try {
     if (!localFsSupported) {
       throw new Error('当前浏览器不支持本地文件操作，请使用最新版 Chrome / Edge')
@@ -586,18 +735,82 @@ async function runPendingLocalTool() {
     }
     localToolNeedAuth.value = false
     const toolName = target.toolName || target.tool || ''
+
+    // 只读：直接执行
+    if (!isMutatingLocalTool(toolName)) {
+      await runPendingLocalTool()
+      return
+    }
+
+    // 变更类：先预检生成确认方案
+    localToolPlanning.value = true
+    try {
+      const plan = await planLocalTool(toolName, target.arguments)
+      if (plan) {
+        localToolConfirm.value = plan
+        scroll()
+        return
+      }
+    } finally {
+      localToolPlanning.value = false
+    }
+    // 预检未给出确认方案（理论上变更类都会给出），退化为直接执行
+    await runPendingLocalTool()
+  } catch (e: any) {
+    markLocalFailure(e?.message || '预检失败')
+  } finally {
+    localToolPlanning.value = false
+    scroll()
+  }
+}
+
+/** 用户在二次确认卡片点"允许"：真正执行变更类工具 */
+async function confirmLocalTool() {
+  await runPendingLocalTool()
+}
+
+/** 用户在二次确认卡片点"拒绝"：以失败结果回喂模型，让其改道或告知用户 */
+async function rejectLocalTool() {
+  const target = pendingLocalTool.value
+  if (!target || localToolBusy.value) return
+  const plan = localToolConfirm.value
+  const reason = plan
+    ? `用户拒绝了「${plan.title}」操作（未对本地文件做任何改动）。请停止该操作，并据此回复用户；如确有必要，可在向用户说明风险后由用户重新发起。`
+    : '用户拒绝了该本地文件操作，未做任何改动。'
+  localToolConfirm.value = null
+  localToolResumeRunning.value = true
+  try {
+    await submitLocalResult(target, true, undefined, reason)
+  } finally {
+    localToolResumeRunning.value = false
+    scroll()
+  }
+}
+
+async function runPendingLocalTool() {
+  const target = pendingLocalTool.value
+  if (!target || localToolBusy.value) return
+  localToolRunning.value = true
+  localToolHint.value = ''
+  localToolFailed.value = false
+  localToolNotFound.value = false
+  localToolConfirm.value = null
+  try {
+    if (!localFsSupported) {
+      throw new Error('当前浏览器不支持本地文件操作，请使用最新版 Chrome / Edge')
+    }
+    const toolName = target.toolName || target.tool || ''
     const output = await executeLocalTool(toolName, target.arguments)
     if ('error' in output) {
-      localToolFailed.value = true
-      localToolHint.value = /^\{.*"success"\s*:\s*false/.test(output.error)
+      const msg = /^\{.*"success"\s*:\s*false/.test(output.error)
         ? safeExtractError(output.error)
         : output.error
+      markLocalFailure(msg)
       return
     }
     await submitLocalResult(target, false, output.result, undefined)
   } catch (e: any) {
-    localToolFailed.value = true
-    localToolHint.value = e?.message || '执行失败'
+    markLocalFailure(e?.message || '执行失败')
   } finally {
     localToolRunning.value = false
     scroll()
@@ -729,18 +942,20 @@ function formatTime(t: string) {
   }
 }
 
+/** 流式输出时每个 token 都会重新渲染，缓存同内容的 HTML 结果避免重复解析 */
+const mdCache = new Map<string, string>()
+const MD_CACHE_MAX = 200
+
 function renderMarkdown(text: string): string {
   if (!text) return ''
-  let html = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-  // Bold
-  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>')
-  // Line breaks
-  html = html.replace(/\n/g, '<br>')
+  const cached = mdCache.get(text)
+  if (cached !== undefined) return cached
+  // 流式过程中代码围栏可能尚未闭合，补齐后再解析，保证代码块实时渲染
+  const fenceCount = (text.match(/```/g) || []).length
+  const source = fenceCount % 2 === 1 ? text + '\n```' : text
+  const html = safeMarkdown(source)
+  if (mdCache.size >= MD_CACHE_MAX) mdCache.clear()
+  mdCache.set(text, html)
   return html
 }
 
@@ -749,6 +964,14 @@ function autoResize() {
   if (!el) return
   el.style.height = 'auto'
   el.style.height = Math.min(el.scrollHeight, 160) + 'px'
+}
+
+/** 点击输入框容器任意空白处都聚焦到文本框（发送按钮自行处理点击，不拦截） */
+function focusInput(e: MouseEvent) {
+  if ((e.target as HTMLElement).closest('.send-btn')) return
+  if (!inputRef.value?.disabled) {
+    inputRef.value?.focus()
+  }
 }
 
 function useSuggestion(s: { text: string }) {
@@ -801,10 +1024,11 @@ async function send() {
       if (event === 'done' || event === 'error') {
         if (chunk?.error) {
           if (assistantMsg) {
-            assistantMsg.content += chunk.error
+            // 已有部分流式内容：保留内容，错误单独展示（后端也会把部分内容落库）
+            assistantMsg.error = chunk.error
           } else {
-            // 流未产生任何内容就报错（如余额不足），追加错误提示
-            messages.value.push({ role: 'assistant', content: '回复失败：' + chunk.error })
+            // 流未产生任何内容就报错（如余额不足）
+            messages.value.push({ role: 'assistant', content: '', error: chunk.error })
           }
         }
         break
@@ -821,8 +1045,11 @@ async function send() {
     }
     loadSessions()
   } catch (e: any) {
-    if (!messages.value.some(m => m.role === 'assistant' && m.content)) {
-      messages.value.push({ role: 'assistant', content: '回复失败：' + (e?.message || '请稍后重试') })
+    const last = messages.value[messages.value.length - 1]
+    if (last?.role === 'assistant') {
+      last.error = e?.message || '网络异常，请稍后重试'
+    } else {
+      messages.value.push({ role: 'assistant', content: '', error: '回复失败：' + (e?.message || '请稍后重试') })
     }
   } finally {
     typing.value = false
@@ -1337,18 +1564,127 @@ function onWindowResize() {
   border-radius: var(--cj-radius);
   border-top-right-radius: 4px;
 }
+.message-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(245, 108, 108, 0.1);
+  border: 1px solid rgba(245, 108, 108, 0.35);
+  color: #d94848;
+  font-size: 13px;
+  line-height: 1.5;
+  svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  &:only-child,
+  .message-text:empty + & {
+    margin-top: 0;
+  }
+}
 .message-text {
   font-size: 14px;
+  line-height: 1.7;
   word-break: break-word;
+
+  :deep(p) {
+    margin: 0 0 8px;
+    &:last-child { margin-bottom: 0; }
+  }
+  :deep(h1), :deep(h2), :deep(h3), :deep(h4) {
+    margin: 16px 0 8px;
+    line-height: 1.4;
+    font-weight: 600;
+    &:first-child { margin-top: 0; }
+  }
+  :deep(h1) { font-size: 20px; }
+  :deep(h2) { font-size: 18px; }
+  :deep(h3) { font-size: 16px; }
+  :deep(h4) { font-size: 15px; }
+
+  :deep(ul), :deep(ol) {
+    margin: 8px 0;
+    padding-left: 22px;
+    li { margin: 4px 0; }
+  }
+  :deep(blockquote) {
+    margin: 8px 0;
+    padding: 4px 12px;
+    border-left: 3px solid var(--border-color, #d9d9d9);
+    color: var(--text-secondary, #666);
+  }
+
+  :deep(a) {
+    color: #4f7cff;
+    text-decoration: none;
+    &:hover { text-decoration: underline; }
+  }
+
+  :deep(hr) {
+    border: none;
+    border-top: 1px solid var(--border-color, #e8e8e8);
+    margin: 12px 0;
+  }
+
+  :deep(table) {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8px 0;
+    font-size: 13px;
+    display: block;
+    overflow-x: auto;
+  }
+  :deep(th), :deep(td) {
+    border: 1px solid var(--border-color, #e0e0e0);
+    padding: 6px 10px;
+    text-align: left;
+  }
+  :deep(th) {
+    background: rgba(0,0,0,0.03);
+    font-weight: 600;
+  }
+
   :deep(code) {
     background: rgba(0,0,0,0.06);
     padding: 2px 6px;
     border-radius: 4px;
     font-size: 13px;
-    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+  }
+  :deep(pre) {
+    margin: 10px 0;
+    padding: 0;
+    border-radius: 8px;
+    background: #282c34;
+    overflow: hidden;
+    code {
+      display: block;
+      padding: 12px 14px;
+      overflow-x: auto;
+      background: #282c34;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.6;
+      font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+    }
   }
   :deep(strong) { font-weight: 600; }
-  .user-bubble & :deep(code) { background: rgba(255,255,255,0.2); }
+  .user-bubble & {
+    :deep(code) { background: rgba(255,255,255,0.2); }
+    :deep(pre),
+    :deep(pre code) {
+      background: rgba(0,0,0,0.28);
+    }
+    :deep(a) { color: #fff; text-decoration: underline; }
+    :deep(th) { background: rgba(255,255,255,0.12); }
+    :deep(blockquote) {
+      border-color: rgba(255,255,255,0.4);
+      color: rgba(255,255,255,0.85);
+    }
+  }
 }
 
 /* ===== Sources ===== */
@@ -1599,29 +1935,6 @@ function onWindowResize() {
   to { transform: rotate(360deg); }
 }
 
-/* ===== 本地文件夹授权按钮 ===== */
-.local-fs-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 12px;
-  border: 1px solid var(--cj-border);
-  background: var(--cj-surface);
-  border-radius: var(--cj-radius-sm);
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--cj-text-secondary);
-  transition: var(--cj-transition);
-  span { white-space: nowrap; }
-  &:hover { border-color: var(--cj-primary); color: var(--cj-primary); }
-  &.active {
-    border-color: #22c55e;
-    color: #16a34a;
-    background: #f0fdf4;
-  }
-}
-
 /* ===== 本地工具卡片 ===== */
 .local-avatar {
   background: linear-gradient(135deg, #0ea5e9, #2563eb) !important;
@@ -1661,6 +1974,25 @@ function onWindowResize() {
   font-size: 12px;
   color: var(--cj-text);
 }
+.local-tool-target {
+  margin-top: 8px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--cj-text-secondary);
+  min-width: 0;
+}
+.local-tool-target-label { flex-shrink: 0; }
+.local-tool-target-path {
+  padding: 2px 6px;
+  background: var(--cj-border-light);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  color: var(--cj-text);
+  word-break: break-all;
+}
 .local-tool-args {
   margin-top: 10px;
   border: 1px solid var(--cj-border);
@@ -1673,6 +2005,8 @@ function onWindowResize() {
   font-size: 11px;
   font-weight: 600;
   color: var(--cj-text-secondary);
+  cursor: pointer;
+  user-select: none;
 }
 .local-tool-args-body {
   margin: 0;
@@ -1715,7 +2049,56 @@ function onWindowResize() {
     color: #fff;
     &:not(:disabled):hover { opacity: 0.9; }
   }
+  &.ghost {
+    background: transparent;
+    border: 1px solid var(--cj-border);
+    color: var(--cj-text-secondary);
+    &:not(:disabled):hover {
+      border-color: var(--cj-text-secondary);
+      color: var(--cj-text);
+    }
+  }
+  &.danger {
+    background: #dc2626;
+    border: 1px solid #dc2626;
+    color: #fff;
+    &:not(:disabled):hover { background: #b91c1c; border-color: #b91c1c; }
+  }
 }
+
+/* ===== 变更类本地操作二次确认 ===== */
+.local-confirm {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--cj-radius-sm);
+  border: 1px solid;
+  &.normal {
+    background: var(--cj-primary-rgb, rgba(59, 130, 246, 0.06));
+    border-color: color-mix(in srgb, var(--cj-primary) 35%, transparent);
+  }
+  &.danger {
+    background: #fef2f2;
+    border-color: #fecaca;
+  }
+}
+.local-confirm-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  .local-confirm.danger & { color: #b91c1c; }
+  .local-confirm.normal & { color: var(--cj-text); }
+}
+.local-confirm-warnings {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--cj-text-secondary);
+  .local-confirm.danger & { color: #991b1b; }
+}
+.local-confirm .local-tool-actions { margin-top: 10px; margin-bottom: 0; }
 .local-tool-spinner {
   width: 14px;
   height: 14px;
@@ -1757,7 +2140,8 @@ function onWindowResize() {
   resize: none;
   outline: none;
   font-family: inherit;
-  min-height: 24px;
+  /* 与发送按钮等高，单行时输入框内部不留点击空白带 */
+  min-height: 40px;
   max-height: 160px;
   &::placeholder { color: var(--cj-text-muted); }
   &:disabled { opacity: 0.6; }

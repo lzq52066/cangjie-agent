@@ -74,7 +74,7 @@
             end-placeholder="结束时间"
             format="YYYY-MM-DD HH:mm"
             value-format="YYYY-MM-DDTHH:mm:ss"
-            style="width: 360px"
+            class="cj-daterange"
           />
           <template #extra>
             <el-button type="success" :loading="collecting" @click="handleCollect">
@@ -165,7 +165,7 @@
             end-placeholder="结束时间"
             format="YYYY-MM-DD HH:mm"
             value-format="YYYY-MM-DDTHH:mm:ss"
-            style="width: 340px"
+            class="cj-daterange"
           />
         </QueryBar>
         <el-table :data="llmTraces" v-loading="loading" stripe @row-click="showLlmDetail">
@@ -271,7 +271,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Odometer } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
@@ -279,6 +279,9 @@ import { observabilityApi } from '@admin/api/observability-api'
 import QueryBar from '@admin/components/QueryBar.vue'
 import AgentRunsPanel from '@admin/components/observability/AgentRunsPanel.vue'
 import AgentApprovalsPanel from '@admin/components/observability/AgentApprovalsPanel.vue'
+import { useTheme, getChartPalette } from '@admin/utils/theme'
+
+const { themeColor } = useTheme()
 
 const metricTypes = [
   { label: 'CPU', value: 'cpu' },
@@ -302,7 +305,7 @@ const total = ref(0)
 const dashboard = ref<Record<string, any>>({})
 const stats = computed(() => [
   { key: 'chat', label: '今日对话', value: dashboard.value.todayChatCount ?? 0, unit: '次', color: '#409eff' },
-  { key: 'model', label: '模型调用', value: dashboard.value.todayModelCallCount ?? 0, unit: '次', color: '#67c23a' },
+  { key: 'model', label: '模型调用', value: dashboard.value.todayModelCallCount ?? 0, unit: '次', color: themeColor.value },
   { key: 'error', label: '今日错误', value: dashboard.value.todayErrorCount ?? 0, unit: '条', color: '#f56c6c' },
   { key: 'avg', label: '平均耗时', value: formatNumber(dashboard.value.avgDuration), unit: 'ms', color: '#e6a23c' },
   { key: 'log', label: '操作日志', value: dashboard.value.todayLogCount ?? 0, unit: '条', color: '#909399' },
@@ -544,6 +547,8 @@ function renderChart(key: string, data: ChartGroup) {
   chartInstances[key] = chart
   const multiDay = data.multiDay || false
   chart.setOption({
+    // 调色板首色跟随用户选择的主题色
+    color: getChartPalette(),
     tooltip: {
       trigger: 'axis',
       // 挂到 body 上，避免被 .chart-card 的 overflow: hidden 裁剪，浮于最上层
@@ -823,6 +828,16 @@ onMounted(() => {
   loadDashboard()
   loadLogs()
   window.addEventListener('resize', handleResize)
+})
+
+// ECharts 为 canvas 渲染，无法随 CSS 变量自动变色：主题色变化时仅在指标页重绘已渲染的图表
+watch(themeColor, () => {
+  if (activeTab.value !== 'metrics') return
+  nextTick(() => {
+    for (const key of Object.keys(chartInstances)) {
+      chartInstances[key]?.setOption({ color: getChartPalette() })
+    }
+  })
 })
 
 onBeforeUnmount(() => {

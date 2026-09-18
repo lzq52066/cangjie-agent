@@ -6,6 +6,7 @@ import cn.cangjiecloud.core.model.ChatRequest;
 import cn.cangjiecloud.core.model.ChatResponse;
 import cn.cangjiecloud.model.circuitbreaker.ModelCircuitBreaker;
 import cn.cangjiecloud.model.entity.ModelEntity;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -334,15 +335,34 @@ public class OpenAICompatibleClient {
             switch (msg.getRole()) {
                 case "system" -> result.add(SystemMessage.from(msg.getContent()));
                 case "user" -> result.add(UserMessage.from(msg.getContent()));
-                case "assistant" -> result.add(AiMessage.from(msg.getContent()));
+                case "assistant" -> result.add(toAiMessage(msg));
                 case "tool" -> result.add(dev.langchain4j.data.message.ToolExecutionResultMessage.from(
-                        msg.getToolName() != null ? msg.getToolName() : "",
                         msg.getToolCallId() != null ? msg.getToolCallId() : "",
+                        msg.getToolName() != null ? msg.getToolName() : "",
                         msg.getContent()));
                 default -> result.add(UserMessage.from(msg.getContent()));
             }
         }
         return result;
+    }
+
+    /**
+     * assistant 消息转换：若携带工具调用，必须连同 tool_calls（id/name/arguments）一起回传，
+     * 否则紧随其后的 tool 结果消息会被厂商判为非法序列。
+     */
+    private AiMessage toAiMessage(ChatMessage msg) {
+        List<ChatMessage.ToolCallRef> calls = msg.getToolCalls();
+        if (calls == null || calls.isEmpty()) {
+            return AiMessage.from(msg.getContent() == null ? "" : msg.getContent());
+        }
+        List<ToolExecutionRequest> requests = calls.stream()
+                .map(tc -> ToolExecutionRequest.builder()
+                        .id(tc.getId())
+                        .name(tc.getName())
+                        .arguments(tc.getArguments() == null ? "{}" : tc.getArguments())
+                        .build())
+                .toList();
+        return new AiMessage(msg.getContent() == null ? "" : msg.getContent(), requests);
     }
 
     @SuppressWarnings("unchecked")

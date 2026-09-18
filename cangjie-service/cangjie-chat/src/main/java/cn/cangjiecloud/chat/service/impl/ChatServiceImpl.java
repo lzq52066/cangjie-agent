@@ -462,8 +462,22 @@ public class ChatServiceImpl implements IChatService {
 
         List<ChatMessage> messages = outcome.getConversation();
         if (outcome.getStatus() != RunStatus.COMPLETED) {
-            // 错误帧已由 listener 推送；仅记录失败 trace，不保存空消息、不更新会话统计
             String error = outcome.getErrorMessage() == null ? "对话处理失败" : outcome.getErrorMessage();
+            // 流式中断前可能已吐出部分正文：保留落库，页面与历史记录都能看到已产出的内容
+            String partial = outcome.getFinalText();
+            if (partial != null && !partial.isBlank()) {
+                long partialDuration = System.currentTimeMillis() - chatStart;
+                ChatMessageEntity partialMessage = saveAiMessage(session, application,
+                        ChatResponse.builder()
+                                .content(partial)
+                                .totalTokens((int) outcome.getTotalTokens())
+                                .finishReason(null)
+                                .build(),
+                        retrievalSources, partialDuration);
+                updateSessionStats(session, partialMessage);
+                addApplicationTokens(application.getId(), outcome.getTotalTokens());
+            }
+            // 错误帧已由 listener 推送；记录失败 trace
             if (traceCollector != null) {
                 recordTrace("chat", "llm_call", traceId,
                         System.currentTimeMillis() - llmStart, "fail", "模型调用失败: " + error);
@@ -475,6 +489,7 @@ public class ChatServiceImpl implements IChatService {
                     .modelId(application.getModelId())
                     .modelName(modelName)
                     .promptContent(JSON.toJSONString(messages))
+                    .responseContent(partial)
                     .duration(System.currentTimeMillis() - llmStart)
                     .startTimeMs(llmStart)
                     .build(), error);

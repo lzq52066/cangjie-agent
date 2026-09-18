@@ -34,6 +34,11 @@ public class UserContext {
         StpUtil.getSession().set("workspaceId", identity.getWorkspaceId());
     }
 
+    /** 清除会话中缓存的身份信息，下次获取时按最新用户数据重建 */
+    public static void clearIdentity() {
+        StpUtil.getSession().delete(IDENTITY_KEY);
+    }
+
     public static void setUserId(String userId) {
         StpUtil.login(userId);
     }

@@ -563,7 +563,7 @@ onMounted(async () => {
 .app-name { display: flex; align-items: center; gap: 10px; }
 .app-avatar {
   width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
-  background: linear-gradient(135deg, #409eff, #67c23a);
+  background: linear-gradient(135deg, #409eff, var(--cj-primary));
   color: #fff; font-weight: 600;
   display: flex; align-items: center; justify-content: center;
 }

@@ -123,22 +123,13 @@ public class MemoryController {
     }
 
     /**
-     * 编辑记忆内容/置信度
+     * 编辑记忆内容/置信度/维度（内容变更时同步重算向量）
      */
     @PutMapping("/{id}")
     public R<LongTermMemoryEntity> update(@PathVariable String id, @RequestBody LongTermMemoryEntity patch) {
         LongTermMemoryEntity entity = requireOwnedMemory(id);
-        if (StringUtils.hasText(patch.getContent())) {
-            entity.setContent(patch.getContent());
-        }
-        if (patch.getConfidence() != null) {
-            entity.setConfidence(patch.getConfidence());
-        }
-        if (StringUtils.hasText(patch.getDimension())) {
-            entity.setDimension(patch.getDimension());
-        }
-        longTermMemoryService.updateById(entity);
-        return R.data(entity);
+        longTermMemoryService.editMemory(id, patch.getContent(), patch.getConfidence(), patch.getDimension());
+        return R.data(longTermMemoryService.getById(id));
     }
 
     /**

@@ -7,6 +7,10 @@ import App from './App.vue'
 import router from './router'
 import './styles/index.scss'
 import { hasPerm } from '@shared/utils/permission'
+import { initTheme } from './utils/theme'
+
+// 在挂载前应用用户保存的主题色，避免默认色闪烁
+initTheme()
 
 const app = createApp(App)
 

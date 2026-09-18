@@ -17,7 +17,7 @@
         router
         background-color="transparent"
         text-color="#e4e7ed"
-        active-text-color="#67c23a"
+        :active-text-color="themeColor"
       >
         <MenuTreeNode v-for="item in menus" :key="item.id || item.path" :node="item" />
       </el-menu>
@@ -32,9 +32,38 @@
           </el-icon>
         </div>
         <div class="header-right">
+          <!-- 主题色：预设色板 + 自定义取色，选择后全站生效并持久化 -->
+          <el-popover placement="bottom-end" :width="232" trigger="click">
+            <template #reference>
+              <el-icon class="theme-btn" title="主题色"><Brush /></el-icon>
+            </template>
+            <div class="theme-panel">
+              <div class="theme-panel-title">选择主题色</div>
+              <div class="theme-swatches">
+                <span
+                  v-for="p in themePresets"
+                  :key="p.color"
+                  class="swatch"
+                  :class="{ active: themeColor.toLowerCase() === p.color.toLowerCase() }"
+                  :style="{ background: p.color }"
+                  :title="p.name"
+                  @click="setThemeColor(p.color)"
+                />
+              </div>
+              <div class="theme-custom">
+                <el-color-picker
+                  :model-value="themeColor"
+                  color-format="hex"
+                  @change="(c: string | null) => c && setThemeColor(c)"
+                />
+                <span>自定义颜色</span>
+                <el-button link type="primary" @click="resetTheme">恢复默认</el-button>
+              </div>
+            </div>
+          </el-popover>
           <el-dropdown @command="handleCmd">
             <span class="user-info">
-              <el-avatar :size="32" style="background:#67c23a">{{ nickname }}</el-avatar>
+              <el-avatar :size="32" :style="{ background: themeColor }">{{ nickname }}</el-avatar>
               <span class="username">{{ user?.nickname || user?.username }}</span>
               <el-icon><ArrowDown /></el-icon>
             </span>
@@ -67,6 +96,10 @@ import type { MenuNode } from '@shared/types'
 import { ElMessageBox } from 'element-plus'
 import { ArrowDown, Fold, Expand } from '@element-plus/icons-vue'
 import MenuTreeNode from './MenuTreeNode.vue'
+import { THEME_PRESETS, useTheme } from '../utils/theme'
+
+const { themeColor, setThemeColor, resetTheme } = useTheme()
+const themePresets = THEME_PRESETS
 
 const route = useRoute()
 const router = useRouter()
@@ -95,13 +128,6 @@ watch(collapsed, v => {
   if (!v && window.innerWidth >= 992) autoCollapsed.value = false
 })
 
-const activeMenu = computed(() => {
-  if (route.path.startsWith('/system/role')) return '/system/role'
-  if (route.path.startsWith('/system/menu')) return '/system/menu'
-  if (route.path.startsWith('/observability/eval')) return '/observability/eval'
-  const segments = route.path.split('/').filter(Boolean)
-  return '/' + (segments[0] || 'dashboard')
-})
 const user = computed(() => userStore.userInfo)
 const nickname = computed(() => user.value?.nickname?.slice(0, 1) || 'U')
 
@@ -144,6 +170,24 @@ const menus = computed(() => {
   return buildMenuTree(items.filter(m => m.type !== 'button'))
 })
 
+// 当前激活菜单：在菜单树中找与当前路由精确匹配的最深节点（如 /system/setting），
+// 找不到再向上取一级路径（如 /system），保证二级菜单能正确高亮且父分组保持展开
+const activeMenu = computed(() => {
+  let matched: string | undefined
+  const walk = (nodes: MenuNode[]) => {
+    for (const n of nodes) {
+      if (n.path && route.path === n.path && (!matched || n.path.length > matched.length)) {
+        matched = n.path
+      }
+      if (n.children && n.children.length) walk(n.children)
+    }
+  }
+  walk(menus.value)
+  if (matched) return matched
+  const segments = route.path.split('/').filter(Boolean)
+  return '/' + (segments[0] || 'dashboard')
+})
+
 // 当前激活菜单所在分组的 index 列表（用于自动展开对应二级菜单）
 const openMenus = computed(() => {
   const result: string[] = []
@@ -161,6 +205,10 @@ const openMenus = computed(() => {
 const openKey = computed(() => openMenus.value.join('_') || 'root')
 
 async function handleCmd(cmd: string) {
+  if (cmd === 'profile') {
+    router.push('/profile')
+    return
+  }
   if (cmd === 'logout') {
     await ElMessageBox.confirm('确定退出登录吗？', '提示', { type: 'warning' })
     await userStore.logout()
@@ -191,7 +239,7 @@ async function handleCmd(cmd: string) {
 .brand-text { white-space: nowrap; overflow: hidden; }
 .logo-icon {
   width: 40px; height: 40px; border-radius: 10px;
-  background: linear-gradient(135deg, #67c23a, #409eff);
+  background: linear-gradient(135deg, var(--cj-primary), #409eff);
   display: flex; align-items: center; justify-content: center;
   color: #fff; font-weight: 700; font-size: 20px;
 }
@@ -205,7 +253,7 @@ async function handleCmd(cmd: string) {
 }
 :deep(.el-menu--collapse .el-menu-item) { margin: 4px auto; justify-content: center; }
 :deep(.el-menu-item:hover) { background: rgba(255,255,255,0.08); }
-:deep(.el-menu-item.is-active) { background: rgba(103,194,58,0.15); }
+:deep(.el-menu-item.is-active) { background: rgba(var(--cj-primary-rgb), 0.15); }
 .header {
   background: #fff;
   display: flex;
@@ -220,7 +268,43 @@ async function handleCmd(cmd: string) {
   color: #606266;
   cursor: pointer;
 }
-.collapse-btn:hover { color: var(--cj-primary, #67c23a); }
+.collapse-btn:hover { color: var(--cj-primary); }
+.theme-btn {
+  font-size: 19px;
+  color: #606266;
+  cursor: pointer;
+  margin-right: 18px;
+}
+.theme-btn:hover { color: var(--cj-primary); }
+.theme-panel-title { font-size: 13px; font-weight: 600; color: #303133; margin-bottom: 12px; }
+.theme-swatches {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  justify-items: center;
+}
+.swatch {
+  width: 26px; height: 26px; border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.08);
+  transition: transform .15s;
+}
+.swatch:hover { transform: scale(1.12); }
+.swatch.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px var(--el-color-primary);
+}
+.theme-custom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 13px;
+  color: #606266;
+}
 .user-info {
   display: flex;
   align-items: center;

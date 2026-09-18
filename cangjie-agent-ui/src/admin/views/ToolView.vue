@@ -231,7 +231,7 @@ const toolTypes = [
   { code: 'MCP', label: 'MCP 协议' },
   { code: 'SKILL', label: '技能' },
   { code: 'PLUGIN', label: '插件' },
-  { code: 'LOCAL', label: '本地工具（浏览器执行）' }
+  { code: 'LOCAL', label: '本地工具' }
 ]
 const pluginTypes = [
   { code: 'tool', label: '工具插件' },
