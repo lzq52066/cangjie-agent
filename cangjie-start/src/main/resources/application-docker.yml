@@ -25,6 +25,28 @@ spring:
     baseline-on-migrate: true
     validate-on-migrate: false
 
+# 文件存储与向量 Embedding（环境变量默认值与 dev 保持一致，可被容器环境变量覆盖）
+cangjie:
+  oss:
+    # 存储类型：local | minio（容器部署默认 minio）
+    type: ${OSS_TYPE:minio}
+    local-path: ${OSS_LOCAL_PATH:/app/uploads}
+    minio:
+      endpoint: ${OSS_MINIO_ENDPOINT:http://minio:9000}
+      region: ${OSS_MINIO_REGION:}
+      access-key: ${OSS_MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${OSS_MINIO_SECRET_KEY:minioadmin123}
+      bucket: ${OSS_MINIO_BUCKET:cangjie-files}
+      # 浏览器访问预签名 URL 的对外地址，部署到服务器需改成 http://<服务器IP或域名>:9000
+      public-endpoint: ${OSS_MINIO_PUBLIC_ENDPOINT:http://localhost:9000}
+  embedding:
+    api-key: ${EMBEDDING_API_KEY:}
+    base-url: ${EMBEDDING_BASE_URL:}
+    model: ${EMBEDDING_MODEL:bge-m3}
+    dimension-enabled: ${EMBEDDING_DIMENSION_ENABLED:true}
+    # 数据库 embedding 列为 vector(1024)，维度必须与模型一致
+    dimension: ${EMBEDDING_DIMENSION:1024}
+
 management:
   endpoints:
     web:
