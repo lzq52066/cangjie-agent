@@ -96,8 +96,8 @@ services:
   # ---------- 后端（运行已编译 jar） ----------
   backend:
     build:
-      context: .
-      dockerfile: backend/Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile
     image: cangjie-agent:latest
     container_name: cangjie-agent
     restart: unless-stopped
