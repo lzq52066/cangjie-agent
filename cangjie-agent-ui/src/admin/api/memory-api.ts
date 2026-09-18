@@ -31,7 +31,8 @@ export interface MemoryItem {
 }
 
 export interface MemoryQuery {
-  userId: string
+  /** 管理员不传时查全部用户；普通用户后端强制限定为本人 */
+  userId?: string
   applicationId?: string
   dimension?: string
   memoryType?: string

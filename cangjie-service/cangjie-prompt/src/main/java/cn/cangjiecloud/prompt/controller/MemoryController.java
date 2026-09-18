@@ -47,19 +47,28 @@ public class MemoryController {
      */
     @GetMapping
     public R<PageResult<Map<String, Object>>> list(
-            @RequestParam String userId,
+            @RequestParam(required = false) String userId,
             @RequestParam(required = false) String applicationId,
             @RequestParam(required = false) String dimension,
             @RequestParam(required = false) String memoryType,
             @RequestParam(required = false) Boolean includeInactive,
             @RequestParam(defaultValue = "1") Integer pageNum,
             @RequestParam(defaultValue = "10") Integer pageSize) {
-        if (!StringUtils.hasText(userId)) {
-            throw new ApiException("userId 不能为空");
+        boolean admin = isAdmin();
+        if (StringUtils.hasText(userId)) {
+            requireOwnerOrAdmin(userId);
+        } else if (!admin) {
+            // 非管理员不传 userId 时，强制限定为本人记忆
+            userId = UserContext.getUserId();
+            if (!StringUtils.hasText(userId)) {
+                throw new ApiException("userId 不能为空");
+            }
         }
-        requireOwnerOrAdmin(userId);
-        LambdaQueryWrapper<LongTermMemoryEntity> wrapper = new LambdaQueryWrapper<LongTermMemoryEntity>()
-                .eq(LongTermMemoryEntity::getUserId, userId);
+        LambdaQueryWrapper<LongTermMemoryEntity> wrapper = new LambdaQueryWrapper<>();
+        if (StringUtils.hasText(userId)) {
+            // 管理员传了 userId 则只查该用户，不传则查全部
+            wrapper.eq(LongTermMemoryEntity::getUserId, userId);
+        }
         if (StringUtils.hasText(applicationId)) {
             wrapper.eq(LongTermMemoryEntity::getApplicationId, applicationId);
         }

@@ -2,7 +2,8 @@
   <div class="memory-manager">
     <!-- 筛选条 -->
     <QueryBar :loading="loading" @search="onSearch" @reset="resetQuery">
-      <el-input v-model="query.userId" placeholder="用户 ID（必填）" clearable style="width: 240px"
+      <el-input v-model="query.userId" :disabled="!isAdmin" clearable style="width: 240px"
+                :placeholder="isAdmin ? '用户 ID（留空查全部）' : '用户 ID'"
                 @keyup.enter="onSearch" />
       <el-select v-model="query.applicationId" placeholder="全部应用" clearable filterable
                  style="width: 200px">
@@ -17,11 +18,12 @@
       </el-select>
       <el-checkbox v-model="query.includeInactive">含已停用</el-checkbox>
       <template #extra>
-        <el-button type="success" :disabled="!query.userId" @click="openCreate">录入记忆</el-button>
+        <el-button type="success" @click="openCreate">录入记忆</el-button>
       </template>
     </QueryBar>
 
     <el-table :data="list" v-loading="loading" stripe>
+      <el-table-column v-if="isAdmin" label="用户" prop="memory.userId" width="140" show-overflow-tooltip />
       <el-table-column label="内容" prop="memory.content" min-width="240" show-overflow-tooltip />
       <el-table-column label="维度" width="100" align="center">
         <template #default="{ row }">{{ dimLabel(row.memory.dimension) }}</template>
@@ -68,7 +70,7 @@
         </template>
       </el-table-column>
       <template #empty>
-        <el-empty :description="query.userId ? '暂无记忆数据' : '请输入用户 ID 后查询'" :image-size="70" />
+        <el-empty description="暂无记忆数据" :image-size="70" />
       </template>
     </el-table>
 
@@ -80,7 +82,7 @@
     <el-dialog v-model="showDialog" :title="editing ? '编辑记忆' : '录入记忆'" width="560px" destroy-on-close>
       <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
         <el-form-item label="用户 ID" prop="userId">
-          <el-input v-model="form.userId" :disabled="editing" placeholder="记忆归属用户" />
+          <el-input v-model="form.userId" :disabled="editing || !isAdmin" placeholder="记忆归属用户" />
         </el-form-item>
         <el-form-item label="应用" prop="applicationId">
           <el-select v-model="form.applicationId" filterable allow-create style="width:100%"
@@ -110,11 +112,15 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import QueryBar from '@admin/components/QueryBar.vue'
 import { memoryApi, type LongTermMemory, type MemoryItem } from '@admin/api/memory-api'
 import { applicationApi } from '@admin/api/application-api'
+import { useUserStore } from '@admin/store/user'
+
+const userStore = useUserStore()
+const isAdmin = computed(() => (userStore.userInfo?.role || '').toUpperCase() === 'ADMIN')
 
 const dimensions = [
   { code: 'preference', label: '偏好' },
@@ -136,11 +142,16 @@ function fmt(v?: number | null) {
 
 const appOptions = ref<any[]>([])
 onMounted(async () => {
+  // 普通用户固定查询本人记忆，输入框禁用；管理员留空即查全部
+  if (!isAdmin.value) {
+    query.userId = userStore.userInfo?.userId || ''
+  }
   try {
     appOptions.value = await applicationApi.options()
   } catch {
     appOptions.value = []
   }
+  loadList()
 })
 
 const query = reactive({
@@ -157,15 +168,10 @@ const pageSize = ref(10)
 const total = ref(0)
 
 async function loadList() {
-  if (!query.userId) {
-    list.value = []
-    total.value = 0
-    return
-  }
   loading.value = true
   try {
     const page = await memoryApi.list({
-      userId: query.userId,
+      userId: query.userId || undefined,
       applicationId: query.applicationId || undefined,
       dimension: query.dimension || undefined,
       memoryType: query.memoryType || undefined,
@@ -187,7 +193,8 @@ function onSearch() {
 
 /** 重置筛选条件并重新查询 */
 function resetQuery() {
-  query.userId = ''
+  // 普通用户固定查本人记忆，userId 输入框禁用，重置时保留
+  if (isAdmin.value) query.userId = ''
   query.applicationId = ''
   query.dimension = ''
   query.memoryType = ''
@@ -214,7 +221,7 @@ function openCreate() {
   editing.value = false
   Object.assign(form, {
     id: undefined,
-    userId: query.userId,
+    userId: isAdmin.value ? query.userId : (userStore.userInfo?.userId || ''),
     applicationId: query.applicationId || 'global',
     dimension: 'preference',
     content: '',
