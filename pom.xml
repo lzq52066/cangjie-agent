@@ -195,6 +195,12 @@
                 <artifactId>hutool-http</artifactId>
                 <version>${hutool.version}</version>
             </dependency>
+            <!-- sa-token-jwt 的 SaJwtUtil 运行时强依赖 hutool-json，此处仅用于版本对齐，应用代码请使用 Jackson -->
+            <dependency>
+                <groupId>cn.hutool</groupId>
+                <artifactId>hutool-json</artifactId>
+                <version>${hutool.version}</version>
+            </dependency>
             <dependency>
                 <groupId>com.github.ben-manes.caffeine</groupId>
                 <artifactId>caffeine</artifactId>
@@ -277,10 +283,6 @@
                     <exclusion>
                         <groupId>cn.hutool</groupId>
                         <artifactId>hutool-core</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>cn.hutool</groupId>
-                        <artifactId>hutool-json</artifactId>
                     </exclusion>
                 </exclusions>
             </dependency>

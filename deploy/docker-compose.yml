@@ -15,7 +15,8 @@
 # 端口策略：对外只暴露前端 Nginx 的 80 / 443 端口（由 WEB_PORT / WEB_SSL_PORT 控制）。
 #   443 仅在 ./frontend/certs/ 放好 server.crt + server.key 后才监听，此时 80 的请求 301 跳到 443；
 #   未放证书时只有 80 提供 HTTP 服务。
-#   PostgreSQL / Redis / MinIO 均不发布到宿主机，只在 cangjie-net 内网互通；
+#   PostgreSQL（宿主机 15432）/ Redis（宿主机 16379）供本地调试直连，公网暴露时
+#   必须在云安全组限制来源 IP；MinIO 不发布到宿主机，三者容器间均走 cangjie-net 内网；
 #   MinIO 文件（预签名 URL）走 Nginx 的 /<桶名>/，控制台走 /minio-console/。
 # 用法：见 README.md / 直接执行 ./deploy-all.sh
 # ============================================================
@@ -46,7 +47,9 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    # 数据库仅供容器内网访问，不发布到宿主机（需要备份直接用 ./data/postgres）
+    # 宿主机 15432 -> 容器 5432，供本地 GUI 直连（公网暴露，务必在云安全组限制来源 IP）
+    ports:
+      - "15432:5432"
 
   # ---------- Redis 7 ----------
   redis:
@@ -71,7 +74,9 @@ services:
       timeout: 3s
       retries: 10
       start_period: 10s
-    # Redis 仅供容器内网访问，不发布到宿主机
+    # 宿主机 16379 -> 容器 6379，供本地调试直连（公网暴露，务必在云安全组限制来源 IP）
+    ports:
+      - "16379:6379"
 
   # ---------- MinIO 对象存储 ----------
   minio:

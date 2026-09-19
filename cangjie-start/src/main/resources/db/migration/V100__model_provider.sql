@@ -49,6 +49,5 @@ VALUES
     ('prov_qwen',     '通义千问',       'qwen',     'https://dashscope.aliyuncs.com/compatible-mode/v1', NULL, 'active', '内置厂商', 'system', 'system', now(), now(), 0),
     ('prov_zhipu',    '智谱清言',       'zhipu',    'https://open.bigmodel.cn/api/paas/v4',              NULL, 'active', '内置厂商', 'system', 'system', now(), now(), 0),
     ('prov_wenxin',   '文心一言',       'wenxin',   'https://qianfan.baidubce.com/v2',                   NULL, 'active', '内置厂商', 'system', 'system', now(), now(), 0),
-    ('prov_ollama',   'Ollama',        'ollama',   'http://localhost:11434/v1',                         NULL, 'active', '内置厂商', 'system', 'system', now(), now(), 0),
-    ('prov_custom',   '自定义',         'custom',   NULL,                                                NULL, 'active', '内置厂商', 'system', 'system', now(), now(), 0)
+    ('prov_ollama',   'Ollama',        'ollama',   'http://localhost:11434/v1',                         NULL, 'active', '内置厂商', 'system', 'system', now(), now(), 0)
 ON CONFLICT ("id") DO NOTHING;
