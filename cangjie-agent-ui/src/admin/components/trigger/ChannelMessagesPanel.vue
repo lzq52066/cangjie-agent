@@ -54,9 +54,8 @@
       </el-table-column>
     </el-table>
 
-    <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                   :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
-                   :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+    <DataPager v-model:current-page="pageNum" v-model:page-size="pageSize"
+               :total="total" @change="loadList" />
 
     <el-drawer v-model="drawer" title="渠道消息明细" size="600px" destroy-on-close>
       <template v-if="current">
@@ -92,6 +91,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
 import { channelApi } from '@admin/api/channel-api'
 import { applicationApi } from '@admin/api/application-api'
 
@@ -178,7 +178,6 @@ function showDetail(row: any) {
 
 <style lang="scss" scoped>
 .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
-.pager { margin-top: 16px; justify-content: flex-end; }
 .bubble {
   border-radius: 10px; padding: 10px 14px; font-size: 13px; line-height: 1.8;
   white-space: pre-wrap; word-break: break-all;

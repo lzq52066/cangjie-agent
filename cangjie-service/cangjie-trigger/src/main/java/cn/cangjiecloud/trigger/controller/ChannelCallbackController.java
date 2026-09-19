@@ -5,8 +5,9 @@ import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.trigger.api.dto.ChannelReplyDTO;
 import cn.cangjiecloud.trigger.entity.ChannelEntity;
 import cn.cangjiecloud.trigger.service.IChannelService;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import cn.cangjiecloud.common.util.JsonUtils;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
@@ -126,19 +127,19 @@ public class ChannelCallbackController {
         if (!StringUtils.hasText(body)) {
             return "success";
         }
-        JSONObject obj = JSON.parseObject(body);
+        ObjectNode obj = JsonUtils.parseObject(body);
         if (obj == null) {
             return "success";
         }
         // 加密报文：TODO 生产环境使用 AES 解密 encrypt 字段后解析明文消息
-        if (obj.containsKey("encrypt")) {
+        if (obj.has("encrypt")) {
             log.info("钉钉回调为加密报文，当前跳过解密处理: channel={}", channel.getId());
             return "success";
         }
-        String msgType = obj.getString("msgtype");
-        String content = obj.getJSONObject("text") != null
-                ? obj.getJSONObject("text").getString("content") : null;
-        String senderId = obj.getString("senderId");
+        String msgType = textOrNull(obj, "msgtype");
+        ObjectNode text = objectField(obj, "text");
+        String content = text != null ? textOrNull(text, "content") : null;
+        String senderId = textOrNull(obj, "senderId");
         log.info("钉钉回调收到消息: channel={}, senderId={}, msgType={}", channel.getId(), senderId, msgType);
 
         ChannelReplyDTO dto = new ChannelReplyDTO();
@@ -158,15 +159,15 @@ public class ChannelCallbackController {
         if (!StringUtils.hasText(body)) {
             return "success";
         }
-        JSONObject obj = JSON.parseObject(body);
+        ObjectNode obj = JsonUtils.parseObject(body);
         if (obj == null) {
             return "success";
         }
         // URL 验证：返回 challenge
-        if ("url_verification".equals(obj.getString("type")) && obj.containsKey("challenge")) {
-            JSONObject resp = new JSONObject();
-            resp.put("challenge", obj.getString("challenge"));
-            return resp.toJSONString();
+        if ("url_verification".equals(textOrNull(obj, "type")) && obj.has("challenge")) {
+            ObjectNode resp = JsonUtils.newObject();
+            resp.put("challenge", textOrNull(obj, "challenge"));
+            return resp.toString();
         }
         // 简化验证：请求参数 token 与渠道配置 token 比对
         // TODO 生产环境应校验飞书请求头 X-Lark-Signature（HMAC-SHA256(timestamp + nonce + body, encryptKey)）
@@ -176,25 +177,29 @@ public class ChannelCallbackController {
             return "fail";
         }
         // 事件消息
-        JSONObject event = obj.getJSONObject("event");
+        ObjectNode event = objectField(obj, "event");
         if (event == null) {
             return "success";
         }
-        JSONObject message = event.getJSONObject("message");
-        String msgType = message != null ? message.getString("message_type") : null;
+        ObjectNode message = objectField(event, "message");
+        String msgType = message != null ? textOrNull(message, "message_type") : null;
         String content = null;
-        if (message != null && StringUtils.hasText(message.getString("content"))) {
+        String rawContent = message != null ? textOrNull(message, "content") : null;
+        if (message != null && StringUtils.hasText(rawContent)) {
             try {
-                JSONObject contentObj = JSON.parseObject(message.getString("content"));
-                content = contentObj != null ? contentObj.getString("text") : null;
+                ObjectNode contentObj = JsonUtils.parseObject(rawContent);
+                content = contentObj != null ? textOrNull(contentObj, "text") : null;
             } catch (Exception e) {
-                content = message.getString("content");
+                content = rawContent;
             }
         }
         String openId = null;
-        JSONObject sender = event.getJSONObject("sender");
-        if (sender != null && sender.getJSONObject("sender_id") != null) {
-            openId = sender.getJSONObject("sender_id").getString("open_id");
+        ObjectNode sender = objectField(event, "sender");
+        if (sender != null) {
+            ObjectNode senderId = objectField(sender, "sender_id");
+            if (senderId != null) {
+                openId = textOrNull(senderId, "open_id");
+            }
         }
         log.info("飞书回调收到消息: channel={}, openId={}, msgType={}", channel.getId(), openId, msgType);
 
@@ -237,5 +242,17 @@ public class ChannelCallbackController {
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    /** 取出对象字段：不存在、为 null 或不是 JSON 对象时返回 null */
+    private static ObjectNode objectField(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        return value instanceof ObjectNode object ? object : null;
+    }
+
+    /** 取出文本字段：不存在或为 null 时返回 null（数值等其它类型取字面量） */
+    private static String textOrNull(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? null : value.asText();
     }
 }

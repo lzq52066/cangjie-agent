@@ -7,6 +7,7 @@ import cn.cangjiecloud.core.harness.context.ContextFragment;
 import cn.cangjiecloud.core.harness.context.ContextRequest;
 import cn.cangjiecloud.core.harness.context.ContextSlot;
 import cn.cangjiecloud.core.model.ChatMessage;
+import cn.cangjiecloud.core.model.TokenEstimator;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -103,6 +104,6 @@ public class HistoryContributor implements ContextContributor {
     }
 
     private int estimateTokens(String content) {
-        return content == null ? 0 : (int) (content.length() * 0.75);
+        return TokenEstimator.count(content);
     }
 }

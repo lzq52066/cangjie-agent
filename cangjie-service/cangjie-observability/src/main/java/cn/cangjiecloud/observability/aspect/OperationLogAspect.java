@@ -6,8 +6,16 @@ import cn.cangjiecloud.common.domain.UserIdentity;
 import cn.cangjiecloud.observability.context.TraceContext;
 import cn.cangjiecloud.observability.entity.OperationLogEntity;
 import cn.cangjiecloud.observability.service.IOperationLogService;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.serializer.ValueFilter;
+import cn.cangjiecloud.common.util.JsonUtils;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.databind.BeanDescription;
+import com.fasterxml.jackson.databind.JsonSerializer;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationConfig;
+import com.fasterxml.jackson.databind.SerializerProvider;
+import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.fasterxml.jackson.databind.ser.BeanPropertyWriter;
+import com.fasterxml.jackson.databind.ser.BeanSerializerModifier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -21,9 +29,11 @@ import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -51,6 +61,36 @@ public class OperationLogAspect {
 
     /** 缓存各 Class 中标注了 @Sensitive 的字段名，避免重复反射 */
     private static final Map<Class<?>, Set<String>> SENSITIVE_FIELD_CACHE = new ConcurrentHashMap<>();
+
+    /**
+     * 带敏感字段掩码的 ObjectMapper：通过 BeanSerializerModifier 对每个 bean class
+     * 即时解析其 @Sensitive 字段（含任意嵌套层级），序列化时统一输出 ******。
+     */
+    private static final ObjectMapper MASKED_MAPPER = JsonUtils.mapper().copy()
+            .registerModule(new SimpleModule().setSerializerModifier(new BeanSerializerModifier() {
+                @Override
+                public List<BeanPropertyWriter> changeProperties(SerializationConfig config,
+                                                                  BeanDescription beanDesc,
+                                                                  List<BeanPropertyWriter> writers) {
+                    Set<String> sensitiveFields =
+                            SENSITIVE_FIELD_CACHE.computeIfAbsent(beanDesc.getBeanClass(),
+                                    OperationLogAspect::resolveSensitiveFieldsStatic);
+                    if (!sensitiveFields.isEmpty()) {
+                        for (BeanPropertyWriter writer : writers) {
+                            if (sensitiveFields.contains(writer.getName())) {
+                                writer.assignSerializer(new JsonSerializer<>() {
+                                    @Override
+                                    public void serialize(Object value, JsonGenerator gen,
+                                                          SerializerProvider serializers) throws IOException {
+                                        gen.writeString(MASK);
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    return writers;
+                }
+            }));
 
     private final IOperationLogService operationLogService;
 
@@ -162,7 +202,8 @@ public class OperationLogAspect {
             String json = Arrays.stream(args)
                     .filter(a -> !(a instanceof HttpServletRequest || a instanceof HttpServletResponse
                             || a instanceof MultipartFile))
-                    .map(a -> truncate(JSON.toJSONString(a, buildFilter(a.getClass()))))
+                    .map(this::toMaskedJson)
+                    .map(this::truncate)
                     .collect(Collectors.joining(","));
             return truncate(json);
         } catch (Exception e) {
@@ -175,27 +216,27 @@ public class OperationLogAspect {
             return null;
         }
         try {
-            return truncate(JSON.toJSONString(result, buildFilter(result.getClass())));
+            return truncate(toMaskedJson(result));
         } catch (Exception e) {
             return null;
         }
     }
 
     /**
-     * 为指定 Class 构建 ValueFilter：标注了 @Sensitive 的字段值替换为 ******。
+     * 使用带敏感字段掩码的 ObjectMapper 序列化对象，@Sensitive 字段值替换为 ******。
      */
-    private ValueFilter buildFilter(Class<?> clazz) {
-        Set<String> fields = SENSITIVE_FIELD_CACHE.computeIfAbsent(clazz, this::resolveSensitiveFields);
-        if (fields.isEmpty()) {
-            return (object, name, value) -> value;
+    private String toMaskedJson(Object value) {
+        try {
+            return MASKED_MAPPER.writeValueAsString(value);
+        } catch (Exception e) {
+            return null;
         }
-        return (object, name, value) -> fields.contains(name) ? MASK : value;
     }
 
     /**
      * 反射扫描类中标注了 @Sensitive 的字段名。
      */
-    private Set<String> resolveSensitiveFields(Class<?> clazz) {
+    private static Set<String> resolveSensitiveFieldsStatic(Class<?> clazz) {
         String[] names = Arrays.stream(clazz.getDeclaredFields())
                 .filter(f -> f.isAnnotationPresent(Sensitive.class))
                 .map(Field::getName)

@@ -889,7 +889,11 @@ function ensureUserId() {
     if (stored) {
       userId.value = stored
     } else {
-      userId.value = crypto.randomUUID()
+      // crypto.randomUUID 仅在安全上下文（HTTPS / localhost）可用，
+      // 通过 http://<IP> 访问时不存在，需回退到普通随机串
+      userId.value = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID()
+        : 'u-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)
       localStorage.setItem('cangjie_user_id', userId.value)
     }
   }

@@ -62,9 +62,8 @@
             </el-table-column>
           </el-table>
 
-          <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                         :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
-                         :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+          <DataPager v-model:current-page="pageNum" v-model:page-size="pageSize"
+                     :total="total" @change="loadList" />
         </el-card>
       </el-tab-pane>
 
@@ -123,10 +122,8 @@
             </el-table-column>
           </el-table>
 
-          <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                         :total="providerTotal" v-model:current-page="providerPageNum"
-                         v-model:page-size="providerPageSize"
-                         :page-sizes="[10, 20, 50]" @size-change="loadProviders" @current-change="loadProviders" />
+          <DataPager v-model:current-page="providerPageNum" v-model:page-size="providerPageSize"
+                     :total="providerTotal" @change="loadProviders" />
         </el-card>
       </el-tab-pane>
     </el-tabs>
@@ -231,6 +228,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
 import { modelApi, modelProviderApi, type ModelProvider } from '@admin/api/model-api'
 
 const activeTab = ref<'model' | 'provider'>('model')
@@ -510,7 +508,6 @@ onMounted(async () => {
 <style lang="scss" scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .header-left { display: flex; gap: 12px; }
-.pager { margin-top: 16px; justify-content: flex-end; }
 .form-hint { margin-left: 8px; color: #909399; font-size: 12px; }
 .text-muted { color: #909399; font-size: 12px; }
 .provider-tip { margin-bottom: 12px; }

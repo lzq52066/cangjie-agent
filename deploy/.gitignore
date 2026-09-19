@@ -2,3 +2,5 @@
 # 注：frontend/dist 已被根 .gitignore 的 dist/ 规则忽略，无需在此重复声明
 backend/*.jar
 .env
+# 宿主机持久化数据目录（数据库/对象存储/日志），不入库
+data/

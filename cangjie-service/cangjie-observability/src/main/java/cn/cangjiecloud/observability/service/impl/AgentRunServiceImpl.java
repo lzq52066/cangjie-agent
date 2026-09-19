@@ -17,7 +17,7 @@ import cn.cangjiecloud.observability.mapper.AgentRunMapper;
 import cn.cangjiecloud.observability.mapper.AgentRunStepMapper;
 import cn.cangjiecloud.observability.service.IAgentRunService;
 import cn.hutool.core.util.IdUtil;
-import com.alibaba.fastjson.JSON;
+import cn.cangjiecloud.common.util.JsonUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -129,7 +129,7 @@ public class AgentRunServiceImpl extends ServiceImpl<AgentRunMapper, AgentRunEnt
             try {
                 update(new LambdaUpdateWrapper<AgentRunEntity>()
                         .eq(AgentRunEntity::getId, runId)
-                        .set(AgentRunEntity::getContextUsage, JSON.toJSONString(usage)));
+                        .set(AgentRunEntity::getContextUsage, JsonUtils.toJSONString(usage)));
             } catch (Exception ex) {
                 log.warn("agent_run 上下文留痕失败: {}", ex.getMessage());
             }
@@ -158,7 +158,7 @@ public class AgentRunServiceImpl extends ServiceImpl<AgentRunMapper, AgentRunEnt
             update(new LambdaUpdateWrapper<AgentRunEntity>()
                     .eq(AgentRunEntity::getId, context.getRunId())
                     .set(AgentRunEntity::getStatus, status.value())
-                    .set(AgentRunEntity::getContextSnapshot, JSON.toJSONString(snapshot))
+                    .set(AgentRunEntity::getContextSnapshot, JsonUtils.toJSONString(snapshot))
                     .set(AgentRunEntity::getResumeToken, token)
                     .set(AgentRunEntity::getRounds, snapshot.getRound())
                     .set(AgentRunEntity::getToolCallCount, snapshot.getToolCallCount())
@@ -244,7 +244,7 @@ public class AgentRunServiceImpl extends ServiceImpl<AgentRunMapper, AgentRunEnt
             log.warn("agent_run 恢复令牌校验失败: runId={}", runId);
             return null;
         }
-        ResumeState state = JSON.parseObject(run.getContextSnapshot(), ResumeState.class);
+        ResumeState state = JsonUtils.parseObject(run.getContextSnapshot(), ResumeState.class);
         if (state == null) {
             return null;
         }

@@ -210,10 +210,9 @@
       <!-- Agent 审批单 -->
       <AgentApprovalsPanel v-else-if="activeTab === 'agent-approvals'" />
 
-      <el-pagination v-if="activeTab !== 'metrics' && activeTab !== 'agent-runs' && activeTab !== 'agent-approvals'"
-                     class="pager" background layout="total, sizes, prev, pager, next"
-                     :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
-                     :page-sizes="[10, 20, 50, 100]" @size-change="reload" @current-change="reload" />
+      <DataPager v-if="activeTab !== 'metrics' && activeTab !== 'agent-runs' && activeTab !== 'agent-approvals'"
+                 v-model:current-page="pageNum" v-model:page-size="pageSize"
+                 :total="total" :page-sizes="[10, 20, 50, 100]" @change="reload" />
     </el-card>
 
     <!-- 日志详情 -->
@@ -231,9 +230,9 @@
                 :title="currentLog.errorMessage" style="margin-top:12px" />
       <template v-if="currentLog">
         <el-divider>请求参数</el-divider>
-        <pre class="code-block">{{ pretty(currentLog.params) }}</pre>
+        <pre class="code-block">{{ prettyJson(currentLog.params) }}</pre>
         <el-divider>响应结果</el-divider>
-        <pre class="code-block">{{ pretty(currentLog.result) }}</pre>
+        <pre class="code-block">{{ prettyJson(currentLog.result) }}</pre>
       </template>
     </el-dialog>
 
@@ -277,6 +276,8 @@ import { Refresh, Odometer } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { observabilityApi } from '@admin/api/observability-api'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
+import { prettyJson } from '@admin/utils/format'
 import AgentRunsPanel from '@admin/components/observability/AgentRunsPanel.vue'
 import AgentApprovalsPanel from '@admin/components/observability/AgentApprovalsPanel.vue'
 import { useTheme, getChartPalette } from '@admin/utils/theme'
@@ -624,15 +625,6 @@ function formatTime(value?: string) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
-function pretty(text?: string) {
-  if (!text) return '-'
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2)
-  } catch {
-    return text
-  }
-}
-
 async function loadDashboard() {
   try {
     dashboard.value = await observabilityApi.dashboard()
@@ -864,7 +856,6 @@ function handleResize() {
 .stat-unit { font-size: 12px; color: #c0c4cc; }
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .toolbar-left { display: flex; gap: 12px; flex-wrap: wrap; }
-.pager { margin-top: 16px; justify-content: flex-end; }
 .chart-card {
   background: #fff; border: 1px solid #e8eaef; border-radius: 10px;
   padding: 0; overflow: hidden; min-height: 320px;
@@ -920,6 +911,5 @@ function handleResize() {
   .stat-value { font-size: 22px; }
   .chart-card { min-height: auto; }
   .chart-box { height: 240px; }
-  .pager { justify-content: center; }
 }
 </style>

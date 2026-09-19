@@ -1,6 +1,7 @@
 package cn.cangjiecloud.core.harness.context;
 
 import cn.cangjiecloud.core.model.ChatMessage;
+import cn.cangjiecloud.core.model.TokenEstimator;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -119,7 +120,7 @@ public class ContextBudget {
             // 从片段头部开始丢弃：消息按时间正序，越旧的信息价值越低；始终保留最新一条
             while (total > budget && kept.size() > 1) {
                 ChatMessage first = kept.remove(0);
-                int est = first.getContent() == null ? 0 : (int) Math.ceil(first.getContent().length() * 0.75);
+                int est = TokenEstimator.count(first);
                 total -= est;
                 dropped += est;
             }

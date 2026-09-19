@@ -14,8 +14,8 @@ import cn.cangjiecloud.tool.consts.ToolConstants;
 import cn.cangjiecloud.tool.entity.ToolEntity;
 import cn.cangjiecloud.tool.service.IToolService;
 import cn.cangjiecloud.tool.util.ToolNaming;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import cn.cangjiecloud.common.util.JsonUtils;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -265,10 +265,10 @@ public class ToolGatewayImpl implements ToolGateway {
         String text = raw == null ? "" : raw;
         ToolStatus status = ToolStatus.SUCCESS;
         String error = null;
-        JSONObject json = asJsonObject(text);
-        if (json != null && json.containsKey("success") && !json.getBooleanValue("success")) {
+        ObjectNode json = asJsonObject(text);
+        if (json != null && json.has("success") && !json.path("success").asBoolean(false)) {
             status = ToolStatus.FAILED;
-            error = json.getString("error");
+            error = json.path("error").asText(null);
         }
         int originalLength = text.length();
         boolean truncated = false;
@@ -290,12 +290,12 @@ public class ToolGatewayImpl implements ToolGateway {
         return outcome;
     }
 
-    private JSONObject asJsonObject(String text) {
+    private ObjectNode asJsonObject(String text) {
         if (text == null || !text.startsWith("{")) {
             return null;
         }
         try {
-            return JSON.parseObject(text);
+            return JsonUtils.parseObject(text);
         } catch (Exception e) {
             return null;
         }

@@ -4,8 +4,8 @@ import cn.cangjiecloud.application.entity.ApplicationEntity;
 import cn.cangjiecloud.core.tool.ToolSpecification;
 import cn.cangjiecloud.knowledge.rag.RetrievalToolService;
 import cn.cangjiecloud.tool.service.IToolService;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONArray;
+import cn.cangjiecloud.common.util.JsonUtils;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -15,7 +15,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * 工具规格装配器：把散落在同步/流式两条路径中的三处工具装配收敛为一处。
@@ -94,11 +93,14 @@ public class ToolSpecAssembler {
             return new ArrayList<>();
         }
         try {
-            JSONArray array = JSON.parseArray(json);
-            return array.stream()
-                    .map(Object::toString)
-                    .filter(StringUtils::hasText)
-                    .collect(Collectors.toList());
+            List<String> result = new ArrayList<>();
+            for (JsonNode node : JsonUtils.parseArray(json)) {
+                String value = node == null || node.isNull() ? null : node.asText();
+                if (StringUtils.hasText(value)) {
+                    result.add(value);
+                }
+            }
+            return result;
         } catch (Exception e) {
             log.warn("解析 JSON 数组失败: {}, json={}", e.getMessage(), json);
             return new ArrayList<>();

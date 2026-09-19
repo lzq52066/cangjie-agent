@@ -237,7 +237,7 @@ public class ChatController {
             return new java.util.ArrayList<>();
         }
         try {
-            return com.alibaba.fastjson.JSON.parseArray(json, String.class);
+            return cn.cangjiecloud.common.util.JsonUtils.parseList(json, String.class);
         } catch (Exception e) {
             return new java.util.ArrayList<>();
         }

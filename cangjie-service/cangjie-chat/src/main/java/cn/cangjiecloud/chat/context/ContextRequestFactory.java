@@ -5,8 +5,8 @@ import cn.cangjiecloud.application.entity.ApplicationEntity;
 import cn.cangjiecloud.chat.harness.HarnessConfigResolver;
 import cn.cangjiecloud.core.harness.context.ContextRequest;
 import cn.cangjiecloud.core.model.ChatMessage;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONArray;
+import cn.cangjiecloud.common.util.JsonUtils;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -87,10 +87,9 @@ public class ContextRequestFactory {
             return new ArrayList<>();
         }
         try {
-            JSONArray array = JSON.parseArray(json);
             List<String> result = new ArrayList<>();
-            for (Object item : array) {
-                String value = item == null ? null : item.toString();
+            for (JsonNode node : JsonUtils.parseArray(json)) {
+                String value = node == null || node.isNull() ? null : node.asText();
                 if (StringUtils.hasText(value)) {
                     result.add(value);
                 }

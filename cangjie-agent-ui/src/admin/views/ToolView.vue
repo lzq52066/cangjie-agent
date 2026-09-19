@@ -97,9 +97,8 @@
       </el-table>
 
       <!-- 分页：工具与插件两个表格互斥渲染，共用同一组分页状态 -->
-      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                     :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
-                     :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+      <DataPager v-model:current-page="pageNum" v-model:page-size="pageSize"
+                 :total="total" @change="loadList" />
     </el-card>
 
     <!-- 工具编辑 -->
@@ -223,6 +222,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus, Refresh } from '@element-plus/icons-vue'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
 import { toolApi, pluginApi } from '@admin/api/tool-api'
 
 const toolTypes = [
@@ -605,7 +605,6 @@ onMounted(loadList)
 <style lang="scss" scoped>
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .toolbar-left { display: flex; gap: 12px; }
-.pager { margin-top: 16px; justify-content: flex-end; }
 .exec-output {
   margin-top: 12px; background: #f9fafc; border: 1px solid #ebeef5;
   border-radius: 8px; padding: 14px; max-height: 280px; overflow: auto;

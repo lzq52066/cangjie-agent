@@ -1,7 +1,7 @@
 package cn.cangjiecloud.application.service.impl;
 
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.hutool.core.util.RandomUtil;
-import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -134,6 +134,6 @@ public class ApplicationServiceImpl extends ServiceImpl<ApplicationMapper, Appli
         if (ids == null || ids.isEmpty()) {
             return "[]";
         }
-        return JSON.toJSONString(ids);
+        return JsonUtils.toJSONString(ids);
     }
 }

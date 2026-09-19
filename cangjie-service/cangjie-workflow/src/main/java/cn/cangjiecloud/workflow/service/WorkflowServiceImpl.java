@@ -1,12 +1,7 @@
 package cn.cangjiecloud.workflow.service;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONArray;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.core.observability.TraceCollector;
 import cn.cangjiecloud.core.workflow.WorkflowContext;
 import cn.cangjiecloud.workflow.api.dto.WorkflowNodeDTO;
@@ -14,6 +9,11 @@ import cn.cangjiecloud.workflow.entity.WorkflowEntity;
 import cn.cangjiecloud.workflow.entity.WorkflowExecutionEntity;
 import cn.cangjiecloud.workflow.entity.WorkflowExecutionEventEntity;
 import cn.cangjiecloud.workflow.mapper.WorkflowMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -160,7 +160,7 @@ public class WorkflowServiceImpl extends ServiceImpl<WorkflowMapper, WorkflowEnt
         WorkflowExecutionEntity execution = new WorkflowExecutionEntity();
         execution.setWorkflowId(workflow.getId());
         execution.setApplicationId(workflow.getApplicationId());
-        execution.setInputs(JSON.toJSONString(safeInputs));
+        execution.setInputs(JsonUtils.toJSONString(safeInputs));
         execution.setStatus("running");
         execution.setStartTime(LocalDateTime.now());
         workflowExecutionService.save(execution);
@@ -176,10 +176,10 @@ public class WorkflowServiceImpl extends ServiceImpl<WorkflowMapper, WorkflowEnt
         long start = System.currentTimeMillis();
         try {
             // 解析节点和边
-            List<WorkflowNodeDTO> nodes = JSON.parseArray(workflow.getNodes(), WorkflowNodeDTO.class);
-            JSONArray edgesArray = StringUtils.hasText(workflow.getEdges())
-                    ? JSON.parseArray(workflow.getEdges())
-                    : new JSONArray();
+            List<WorkflowNodeDTO> nodes = JsonUtils.parseList(workflow.getNodes(), WorkflowNodeDTO.class);
+            ArrayNode edgesArray = StringUtils.hasText(workflow.getEdges())
+                    ? JsonUtils.parseArray(workflow.getEdges())
+                    : JsonUtils.newArray();
 
             if (nodes == null || nodes.isEmpty()) {
                 throw new ApiException("工作流节点为空");
@@ -197,7 +197,7 @@ public class WorkflowServiceImpl extends ServiceImpl<WorkflowMapper, WorkflowEnt
             context.setOutputs(result);
 
             execution.setCurrentNode("end");
-            execution.setOutputs(JSON.toJSONString(context.getOutputs()));
+            execution.setOutputs(JsonUtils.toJSONString(context.getOutputs()));
             execution.setStatus("completed");
             execution.setEndTime(LocalDateTime.now());
             execution.setDuration(System.currentTimeMillis() - start);
@@ -238,7 +238,7 @@ public class WorkflowServiceImpl extends ServiceImpl<WorkflowMapper, WorkflowEnt
             event.setNodeId(nodeId);
             event.setNodeType(nodeType);
             event.setStatus(status);
-            event.setOutputs(truncate(outputs != null ? JSON.toJSONString(outputs) : null));
+            event.setOutputs(truncate(outputs != null ? JsonUtils.toJSONString(outputs) : null));
             event.setErrorMessage(errorMessage);
             event.setDuration(durationMs);
             event.setEndTime(LocalDateTime.now());

@@ -78,9 +78,8 @@
         </el-table-column>
       </el-table>
 
-      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                     :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
-                     :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+      <DataPager v-model:current-page="pageNum" v-model:page-size="pageSize"
+                 :total="total" @change="loadList" />
     </el-card>
 
     <!-- 创建/编辑 -->
@@ -271,6 +270,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus, Delete } from '@element-plus/icons-vue'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
+import { copyText } from '@admin/utils/clipboard'
 import { applicationApi } from '@admin/api/application-api'
 import { modelApi } from '@admin/api/model-api'
 import { knowledgeApi } from '@admin/api/knowledge-api'
@@ -531,14 +532,8 @@ function openChat(row: any) {
   window.open(url, '_blank')
 }
 
-async function copy(text?: string) {
-  if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('已复制')
-  } catch {
-    ElMessage.warning('复制失败，请手动选择复制')
-  }
+function copy(text?: string) {
+  return copyText(text, '复制失败，请手动选择复制')
 }
 
 onMounted(async () => {
@@ -577,5 +572,4 @@ onMounted(async () => {
 .suggestion-editor { width: 100%; }
 .suggestion-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
 .form-hint { font-size: 12px; color: #909399; margin-top: 6px; }
-.pager { margin-top: 16px; justify-content: flex-end; }
 </style>

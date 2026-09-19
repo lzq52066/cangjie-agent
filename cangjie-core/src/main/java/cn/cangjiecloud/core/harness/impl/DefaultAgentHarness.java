@@ -458,7 +458,7 @@ public class DefaultAgentHarness implements AgentHarness {
 
     private Map<String, Object> parseArguments(ChatResponse.ToolCall call) {
         try {
-            Map<String, Object> parsed = com.alibaba.fastjson.JSON.parseObject(call.getArguments());
+            Map<String, Object> parsed = cn.cangjiecloud.common.util.JsonUtils.parseMap(call.getArguments());
             return parsed == null ? Map.of() : parsed;
         } catch (Exception e) {
             log.warn("工具参数解析失败，按空参数处理: name={}, arguments={}, {}",

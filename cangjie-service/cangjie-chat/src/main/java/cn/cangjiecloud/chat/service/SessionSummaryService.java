@@ -5,6 +5,8 @@ import cn.cangjiecloud.chat.entity.ChatSessionEntity;
 import cn.cangjiecloud.core.model.ChatMessage;
 import cn.cangjiecloud.core.model.ChatRequest;
 import cn.cangjiecloud.core.model.ChatResponse;
+import cn.cangjiecloud.core.model.ChatTraceContext;
+import cn.cangjiecloud.model.entity.ModelEntity;
 import cn.cangjiecloud.model.provider.OpenAICompatibleClient;
 import cn.cangjiecloud.model.service.IModelService;
 import lombok.RequiredArgsConstructor;
@@ -101,7 +103,13 @@ public class SessionSummaryService {
                     .append(truncate(message.getContent(), 500)).append("\n");
         }
 
-        OpenAICompatibleClient client = resolveClient(session, fallbackModelId);
+        String modelId = resolveModelId(session, fallbackModelId);
+        // 走默认模型时回填其 ID/名称，避免 trace 缺失模型归属导致成本无法归集
+        ModelEntity model = StringUtils.hasText(modelId)
+                ? modelService.getById(modelId) : modelService.getDefaultModel();
+        String effectiveModelId = model != null ? model.getId() : modelId;
+        OpenAICompatibleClient client = StringUtils.hasText(effectiveModelId)
+                ? modelService.getClient(effectiveModelId) : modelService.getDefaultClient();
         ChatRequest request = ChatRequest.builder()
                 .messages(List.of(
                         ChatMessage.system("你是会话记录助手，负责把对话历史压缩为简洁摘要。"),
@@ -113,6 +121,16 @@ public class SessionSummaryService {
                                 
                                 """ + transcript)))
                 .temperature(0.3)
+                // trace 由 ChatModelListener 统一落库，这里只负责把业务归属挂上
+                .traceContext(ChatTraceContext.builder()
+                        .requestId(StringUtils.hasText(session.getSessionId())
+                                ? "session-summary-" + session.getSessionId() : "session-summary")
+                        .appId(session.getApplicationId())
+                        .sessionId(session.getSessionId())
+                        .userId(session.getUserId())
+                        .modelId(effectiveModelId)
+                        .modelName(model != null ? model.getName() : null)
+                        .build())
                 .build();
         ChatResponse response = client.chat(request);
         if (response == null || !StringUtils.hasText(response.getContent())) {
@@ -125,12 +143,15 @@ public class SessionSummaryService {
         log.info("会话摘要已更新: sessionId={}, messageCount={}", session.getSessionId(), session.getSummaryMsgCount());
     }
 
-    private OpenAICompatibleClient resolveClient(ChatSessionEntity session, String fallbackModelId) {
+    /**
+     * 解析摘要实际使用的模型 ID（优先级：配置的摘要模型 > 会话模型 > 兜底模型）。
+     */
+    private String resolveModelId(ChatSessionEntity session, String fallbackModelId) {
         if (StringUtils.hasText(summaryModelId)) {
-            return modelService.getClient(summaryModelId);
+            return summaryModelId;
         }
         String modelId = StringUtils.hasText(session.getModelId()) ? session.getModelId() : fallbackModelId;
-        return StringUtils.hasText(modelId) ? modelService.getClient(modelId) : modelService.getDefaultClient();
+        return StringUtils.hasText(modelId) ? modelId : null;
     }
 
     private String truncate(String content, int max) {

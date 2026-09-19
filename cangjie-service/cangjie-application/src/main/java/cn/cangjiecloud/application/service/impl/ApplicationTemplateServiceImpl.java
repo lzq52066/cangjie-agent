@@ -1,7 +1,8 @@
 package cn.cangjiecloud.application.service.impl;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import cn.cangjiecloud.common.util.JsonUtils;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -56,27 +57,27 @@ public class ApplicationTemplateServiceImpl
         }
 
         // 组装 bundle：application + promptTemplate + workflow
-        JSONObject bundle = new JSONObject();
-        JSONObject appSnapshot = (JSONObject) JSON.toJSON(app);
+        ObjectNode bundle = JsonUtils.newObject();
+        ObjectNode appSnapshot = JsonUtils.mapper().valueToTree(app);
         SNAPSHOT_EXCLUDES.forEach(appSnapshot::remove);
-        bundle.put("application", appSnapshot);
+        bundle.set("application", appSnapshot);
 
         if (StringUtils.hasText(app.getPromptTemplateId())) {
             PromptTemplateEntity pt = promptTemplateService.getById(app.getPromptTemplateId());
             if (pt != null) {
-                JSONObject ptJson = new JSONObject();
+                ObjectNode ptJson = JsonUtils.newObject();
                 ptJson.put("name", pt.getName());
                 ptJson.put("content", pt.getContent());
                 ptJson.put("category", pt.getCategory());
                 ptJson.put("description", pt.getDescription());
                 ptJson.put("variables", pt.getVariables());
-                bundle.put("promptTemplate", ptJson);
+                bundle.set("promptTemplate", ptJson);
             }
         }
 
         WorkflowEntity wf = workflowService.getByApplicationId(applicationId);
         if (wf != null) {
-            bundle.put("workflow", workflowToJson(wf));
+            bundle.set("workflow", workflowToJson(wf));
         }
 
         ApplicationTemplateEntity template = new ApplicationTemplateEntity();
@@ -85,7 +86,7 @@ public class ApplicationTemplateServiceImpl
         template.setIcon(app.getIcon());
         template.setCategory(category);
         template.setAppType(app.getType());
-        template.setSnapshot(bundle.toJSONString());
+        template.setSnapshot(bundle.toString());
         template.setUseCount(0);
         template.setStatus("published");
         template.setVersion(1);
@@ -93,7 +94,7 @@ public class ApplicationTemplateServiceImpl
         save(template);
         log.info("Bundle 模板已创建: {} <- 应用 {} (含提示词={}, 工作流={})",
                 template.getName(), app.getName(),
-                bundle.containsKey("promptTemplate"), bundle.containsKey("workflow"));
+                bundle.has("promptTemplate"), bundle.has("workflow"));
         return template;
     }
 
@@ -124,49 +125,52 @@ public class ApplicationTemplateServiceImpl
             throw new ApiException("模板已下线，无法使用");
         }
 
-        JSONObject bundle;
+        ObjectNode bundle;
         try {
-            bundle = JSON.parseObject(template.getSnapshot());
+            bundle = JsonUtils.parseObject(template.getSnapshot());
         } catch (Exception e) {
             throw new ApiException("模板快照损坏: " + e.getMessage());
         }
 
         // 1. 级联创建提示词模板
         String newPromptId = null;
-        JSONObject pt = bundle.getJSONObject("promptTemplate");
-        if (pt != null && StringUtils.hasText(pt.getString("content"))) {
+        ObjectNode pt = objectField(bundle, "promptTemplate");
+        if (pt != null && StringUtils.hasText(textOrNull(pt, "content"))) {
             PromptTemplateEntity ptEntity = new PromptTemplateEntity();
-            ptEntity.setName(StringUtils.hasText(pt.getString("name"))
-                    ? pt.getString("name") : template.getName() + " 提示词");
-            ptEntity.setContent(pt.getString("content"));
-            ptEntity.setCategory(pt.getString("category"));
-            ptEntity.setDescription(pt.getString("description"));
-            ptEntity.setVariables(pt.getString("variables"));
+            String ptName = textOrNull(pt, "name");
+            ptEntity.setName(StringUtils.hasText(ptName) ? ptName : template.getName() + " 提示词");
+            ptEntity.setContent(textOrNull(pt, "content"));
+            ptEntity.setCategory(textOrNull(pt, "category"));
+            ptEntity.setDescription(textOrNull(pt, "description"));
+            ptEntity.setVariables(textOrNull(pt, "variables"));
             ptEntity.setStatus("active");
             ptEntity.setIsDefault(false);
             newPromptId = promptTemplateService.create(ptEntity).getId();
         }
 
         // 2. 创建应用（bundle.application 为新格式；根对象为旧格式快照，均兼容）
-        JSONObject appSnapshot = bundle.getJSONObject("application") != null
-                ? bundle.getJSONObject("application") : bundle;
+        ObjectNode bundleApp = objectField(bundle, "application");
+        JsonNode appSnapshot = bundleApp != null ? bundleApp : bundle;
         ApplicationEntity app = new ApplicationEntity();
         app.setName(StringUtils.hasText(appName) ? appName : template.getName());
-        app.setDescription(appSnapshot.getString("description"));
-        app.setType(StringUtils.hasText(appSnapshot.getString("type"))
-                ? appSnapshot.getString("type") : template.getAppType());
-        app.setModelId(appSnapshot.getString("modelId"));
-        app.setKnowledgeBaseIds(appSnapshot.getString("knowledgeBaseIds"));
-        app.setSkillIds(appSnapshot.getString("skillIds"));
-        app.setRuleIds(appSnapshot.getString("ruleIds"));
-        app.setToolIds(appSnapshot.getString("toolIds"));
-        app.setMemoryEnabled(appSnapshot.getBoolean("memoryEnabled"));
-        app.setMaxTurns(appSnapshot.getInteger("maxTurns"));
-        app.setTemperature(appSnapshot.getDouble("temperature"));
-        app.setConfig(appSnapshot.getString("config"));
-        app.setSuggestions(appSnapshot.getString("suggestions"));
-        app.setIcon(appSnapshot.getString("icon"));
-        app.setRagMode(appSnapshot.getString("ragMode"));
+        app.setDescription(textOrNull(appSnapshot, "description"));
+        String snapshotType = textOrNull(appSnapshot, "type");
+        app.setType(StringUtils.hasText(snapshotType) ? snapshotType : template.getAppType());
+        app.setModelId(textOrNull(appSnapshot, "modelId"));
+        app.setKnowledgeBaseIds(textOrNull(appSnapshot, "knowledgeBaseIds"));
+        app.setSkillIds(textOrNull(appSnapshot, "skillIds"));
+        app.setRuleIds(textOrNull(appSnapshot, "ruleIds"));
+        app.setToolIds(textOrNull(appSnapshot, "toolIds"));
+        app.setMemoryEnabled(appSnapshot.hasNonNull("memoryEnabled")
+                ? appSnapshot.get("memoryEnabled").asBoolean() : null);
+        app.setMaxTurns(appSnapshot.hasNonNull("maxTurns")
+                ? appSnapshot.get("maxTurns").asInt() : null);
+        app.setTemperature(appSnapshot.hasNonNull("temperature")
+                ? appSnapshot.get("temperature").asDouble() : null);
+        app.setConfig(textOrNull(appSnapshot, "config"));
+        app.setSuggestions(textOrNull(appSnapshot, "suggestions"));
+        app.setIcon(textOrNull(appSnapshot, "icon"));
+        app.setRagMode(textOrNull(appSnapshot, "ragMode"));
         app.setStatus("draft");
         app.setTokenQuota(0L);
         if (newPromptId != null) {
@@ -175,15 +179,17 @@ public class ApplicationTemplateServiceImpl
         applicationService.save(app);
 
         // 3. 级联创建工作流（直接发布，保证创建即可运行）
-        JSONObject wf = bundle.getJSONObject("workflow");
-        if (wf != null && StringUtils.hasText(wf.getString("nodes"))) {
+        ObjectNode wf = objectField(bundle, "workflow");
+        if (wf != null && StringUtils.hasText(textOrNull(wf, "nodes"))) {
             WorkflowEntity wfEntity = new WorkflowEntity();
-            wfEntity.setName(StringUtils.hasText(wf.getString("name"))
-                    ? wf.getString("name") : template.getName() + " 工作流");
-            wfEntity.setDescription(wf.getString("description"));
-            wfEntity.setNodes(wf.getString("nodes"));
-            wfEntity.setEdges(StringUtils.hasText(wf.getString("edges")) ? wf.getString("edges") : "[]");
-            wfEntity.setVariables(StringUtils.hasText(wf.getString("variables")) ? wf.getString("variables") : "[]");
+            String wfName = textOrNull(wf, "name");
+            wfEntity.setName(StringUtils.hasText(wfName) ? wfName : template.getName() + " 工作流");
+            wfEntity.setDescription(textOrNull(wf, "description"));
+            wfEntity.setNodes(textOrNull(wf, "nodes"));
+            String edges = textOrNull(wf, "edges");
+            wfEntity.setEdges(StringUtils.hasText(edges) ? edges : "[]");
+            String variables = textOrNull(wf, "variables");
+            wfEntity.setVariables(StringUtils.hasText(variables) ? variables : "[]");
             wfEntity.setApplicationId(app.getId());
             wfEntity.setStatus("published");
             wfEntity.setVersion(1);
@@ -201,16 +207,16 @@ public class ApplicationTemplateServiceImpl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ApplicationTemplateEntity importBundle(String bundleJson, boolean builtin) {
-        JSONObject bundle;
+        ObjectNode bundle;
         try {
-            bundle = JSON.parseObject(bundleJson);
+            bundle = JsonUtils.parseObject(bundleJson);
         } catch (Exception e) {
             throw new ApiException("模板 JSON 解析失败: " + e.getMessage());
         }
-        if (bundle == null || !StringUtils.hasText(bundle.getString("name"))) {
+        if (bundle == null || !StringUtils.hasText(textOrNull(bundle, "name"))) {
             throw new ApiException("模板缺少 name 字段");
         }
-        String templateKey = bundle.getString("templateKey");
+        String templateKey = textOrNull(bundle, "templateKey");
 
         // 按 templateKey 幂等 upsert
         ApplicationTemplateEntity existing = StringUtils.hasText(templateKey)
@@ -221,18 +227,17 @@ public class ApplicationTemplateServiceImpl
 
         ApplicationTemplateEntity target = existing != null ? existing : new ApplicationTemplateEntity();
         target.setTemplateKey(templateKey);
-        target.setName(bundle.getString("name"));
-        target.setDescription(bundle.getString("description"));
-        target.setIcon(bundle.getString("icon"));
-        target.setCategory(bundle.getString("category"));
-        target.setAppType(StringUtils.hasText(bundle.getString("appType"))
-                ? bundle.getString("appType") : "chat");
-        Integer version = bundle.getInteger("version");
-        target.setVersion(version != null ? version : 1);
-        target.setBuiltin(builtin || Boolean.TRUE.equals(bundle.getBoolean("builtin")));
-        target.setStatus(StringUtils.hasText(bundle.getString("status"))
-                ? bundle.getString("status") : "published");
-        target.setSnapshot(bundle.toJSONString());
+        target.setName(textOrNull(bundle, "name"));
+        target.setDescription(textOrNull(bundle, "description"));
+        target.setIcon(textOrNull(bundle, "icon"));
+        target.setCategory(textOrNull(bundle, "category"));
+        String appType = textOrNull(bundle, "appType");
+        target.setAppType(StringUtils.hasText(appType) ? appType : "chat");
+        target.setVersion(bundle.hasNonNull("version") ? bundle.get("version").asInt() : 1);
+        target.setBuiltin(builtin || bundle.path("builtin").asBoolean(false));
+        String status = textOrNull(bundle, "status");
+        target.setStatus(StringUtils.hasText(status) ? status : "published");
+        target.setSnapshot(bundle.toString());
 
         if (existing != null) {
             updateById(target);
@@ -251,11 +256,11 @@ public class ApplicationTemplateServiceImpl
         if (template == null) {
             throw new ApiException("模板不存在");
         }
-        JSONObject bundle;
+        ObjectNode bundle;
         try {
-            bundle = JSON.parseObject(template.getSnapshot());
+            bundle = JsonUtils.parseObject(template.getSnapshot());
         } catch (Exception e) {
-            bundle = new JSONObject();
+            bundle = JsonUtils.newObject();
         }
         // 元信息合并到顶层，保证导出文件自包含
         bundle.put("templateKey", template.getTemplateKey());
@@ -265,7 +270,7 @@ public class ApplicationTemplateServiceImpl
         bundle.put("category", template.getCategory());
         bundle.put("appType", template.getAppType());
         bundle.put("version", template.getVersion());
-        return bundle.toJSONString();
+        return bundle.toString();
     }
 
     @Override
@@ -282,13 +287,25 @@ public class ApplicationTemplateServiceImpl
         log.info("应用模板已删除: {}", template.getName());
     }
 
-    private JSONObject workflowToJson(WorkflowEntity wf) {
-        JSONObject json = new JSONObject();
+    private ObjectNode workflowToJson(WorkflowEntity wf) {
+        ObjectNode json = JsonUtils.newObject();
         json.put("name", wf.getName());
         json.put("description", wf.getDescription());
         json.put("nodes", StringUtils.hasText(wf.getNodes()) ? wf.getNodes() : "[]");
         json.put("edges", StringUtils.hasText(wf.getEdges()) ? wf.getEdges() : "[]");
         json.put("variables", StringUtils.hasText(wf.getVariables()) ? wf.getVariables() : "[]");
         return json;
+    }
+
+    /** 取出对象字段：不存在、为 null 或不是 JSON 对象时返回 null */
+    private static ObjectNode objectField(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        return value instanceof ObjectNode object ? object : null;
+    }
+
+    /** 取出文本字段：不存在或为 null 时返回 null（数值等其它类型取字面量） */
+    private static String textOrNull(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? null : value.asText();
     }
 }

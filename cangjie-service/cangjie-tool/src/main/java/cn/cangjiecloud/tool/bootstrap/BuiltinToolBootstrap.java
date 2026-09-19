@@ -1,10 +1,12 @@
 package cn.cangjiecloud.tool.bootstrap;
 
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.tool.consts.ToolConstants;
 import cn.cangjiecloud.tool.entity.ToolEntity;
 import cn.cangjiecloud.tool.service.IToolService;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,7 +18,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StreamUtils;
 
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 
 /**
  * 内置工具引导：启动时从 classpath:builtin-tools/tools.json 幂等导入一批官方工具。
@@ -61,8 +62,8 @@ public class BuiltinToolBootstrap implements ApplicationRunner {
                     log.warn("内置工具定义读取失败: {} -> {}", resource.getFilename(), e.getMessage());
                     continue;
                 }
-                List<JSONObject> tools = JSON.parseObject(json).getJSONArray("tools").toJavaList(JSONObject.class);
-                for (JSONObject def : tools) {
+                ArrayNode tools = (ArrayNode) JsonUtils.parseObject(json).get("tools");
+                for (ObjectNode def : JsonUtils.toObjectList(tools)) {
                     try {
                         String outcome = upsert(def);
                         if ("inserted".equals(outcome)) {
@@ -71,7 +72,7 @@ public class BuiltinToolBootstrap implements ApplicationRunner {
                             updated++;
                         }
                     } catch (Exception e) {
-                        log.warn("内置工具[{}]导入失败: {}", def.getString("id"), e.getMessage());
+                        log.warn("内置工具[{}]导入失败: {}", textOrNull(def, "id"), e.getMessage());
                     }
                 }
             }
@@ -84,9 +85,9 @@ public class BuiltinToolBootstrap implements ApplicationRunner {
     }
 
     /** @return inserted / updated / skipped */
-    private String upsert(JSONObject def) throws Exception {
-        String id = def.getString("id");
-        String toolType = def.getString("toolType");
+    private String upsert(ObjectNode def) throws Exception {
+        String id = textOrNull(def, "id");
+        String toolType = textOrNull(def, "toolType");
 
         ToolEntity entity = buildEntity(def, toolType);
 
@@ -105,33 +106,33 @@ public class BuiltinToolBootstrap implements ApplicationRunner {
         return "updated";
     }
 
-    private ToolEntity buildEntity(JSONObject def, String toolType) throws Exception {
+    private ToolEntity buildEntity(ObjectNode def, String toolType) throws Exception {
         ToolEntity entity = new ToolEntity();
-        entity.setName(def.getString("name"));
-        entity.setDescription(def.getString("description"));
-        entity.setCategory(def.getString("category"));
-        entity.setIcon(def.getString("icon"));
+        entity.setName(textOrNull(def, "name"));
+        entity.setDescription(textOrNull(def, "description"));
+        entity.setCategory(textOrNull(def, "category"));
+        entity.setIcon(textOrNull(def, "icon"));
         // type（旧字段）与 toolType（新分发字段）双写
         entity.setToolType(toolType);
         entity.setType(toolType);
         // 函数名：优先用定义里显式声明的，否则回退到内置 ID（内置 ID 本身已是合法的 function name）
-        String functionName = def.getString("functionName");
-        entity.setFunctionName(functionName == null || functionName.isBlank() ? def.getString("id") : functionName);
+        String functionName = textOrNull(def, "functionName");
+        entity.setFunctionName(functionName == null || functionName.isBlank() ? textOrNull(def, "id") : functionName);
 
-        JSONObject parameters = def.getJSONObject("parameters");
-        entity.setParameters(parameters != null ? JSON.toJSONString(parameters) : null);
+        JsonNode parameters = def.get("parameters");
+        entity.setParameters(parameters != null && !parameters.isNull() ? JsonUtils.toJSONString(parameters) : null);
 
         switch (toolType) {
             case ToolConstants.ToolType.CUSTOM -> {
-                // confi                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    g 为 Groovy 脚本文本：优先读 scriptFile
-                String scriptFile = def.getString("scriptFile");
+                // config 为 Groovy 脚本文本：优先读 scriptFile
+                String scriptFile = textOrNull(def, "scriptFile");
                 if (scriptFile == null || scriptFile.isBlank()) {
                     throw new IllegalArgumentException("CUSTOM 工具缺少 scriptFile");
                 }
                 entity.setConfig(readClasspath(SCRIPT_BASE + scriptFile));
             }
             case ToolConstants.ToolType.PLUGIN -> {
-                String implementation = def.getString("implementation");
+                String implementation = textOrNull(def, "implementation");
                 if (implementation == null || implementation.isBlank()) {
                     throw new IllegalArgumentException("PLUGIN 工具缺少 implementation");
                 }
@@ -139,11 +140,11 @@ public class BuiltinToolBootstrap implements ApplicationRunner {
                 entity.setConfig(null);
             }
             case ToolConstants.ToolType.HTTP -> {
-                JSONObject config = def.getJSONObject("config");
-                if (config == null) {
+                JsonNode config = def.get("config");
+                if (config == null || config.isNull()) {
                     throw new IllegalArgumentException("HTTP 工具缺少 config");
                 }
-                entity.setConfig(JSON.toJSONString(config));
+                entity.setConfig(JsonUtils.toJSONString(config));
             }
             case ToolConstants.ToolType.LOCAL ->
                 // 本地工具服务端不执行，只需下发 function schema，无服务端配置
@@ -159,5 +160,11 @@ public class BuiltinToolBootstrap implements ApplicationRunner {
             throw new IllegalArgumentException("脚本文件不存在: " + classpathLocation);
         }
         return StreamUtils.copyToString(resource.getInputStream(), StandardCharsets.UTF_8);
+    }
+
+    /** 取字符串字段：缺失或 JSON null 时返回 null */
+    private static String textOrNull(ObjectNode node, String field) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? null : value.asText();
     }
 }

@@ -1,7 +1,7 @@
 package cn.cangjiecloud.tool.plugin.builtin;
 
 import cn.cangjiecloud.core.plugin.PluginContext;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -74,7 +74,7 @@ public class TextToolsPlugin extends AbstractBuiltinPlugin {
     // ------------------------------------------------------------------
 
     /** 文本统计：text 必填；maxChars &gt; 0 时额外给出是否超限的判定 */
-    private JSONObject textStats(Map<String, Object> params) {
+    private ObjectNode textStats(Map<String, Object> params) {
         String text = raw(params.get("text"));
         if (text.isEmpty()) {
             return missing("text");
@@ -148,7 +148,7 @@ public class TextToolsPlugin extends AbstractBuiltinPlugin {
      *     <li>password —— 强口令，length + 字符集开关，保证每类至少出现一次</li>
      * </ul>
      */
-    private JSONObject random(Map<String, Object> params) {
+    private ObjectNode random(Map<String, Object> params) {
         String type = str(params.getOrDefault("type", "int")).toLowerCase();
         int count = clamp(intVal(params.get("count"), 1), 1, 200);
         return switch (type) {
@@ -160,7 +160,7 @@ public class TextToolsPlugin extends AbstractBuiltinPlugin {
         };
     }
 
-    private JSONObject randomInt(Map<String, Object> params, int count) {
+    private ObjectNode randomInt(Map<String, Object> params, int count) {
         long min = longVal(params.get("min"), 0);
         long max = longVal(params.get("max"), 100);
         if (min > max) {
@@ -182,7 +182,7 @@ public class TextToolsPlugin extends AbstractBuiltinPlugin {
         return ok(data);
     }
 
-    private JSONObject randomDecimal(Map<String, Object> params, int count) {
+    private ObjectNode randomDecimal(Map<String, Object> params, int count) {
         double min = doubleVal(params.get("min"), 0);
         double max = doubleVal(params.get("max"), 1);
         if (min > max) {
@@ -205,7 +205,7 @@ public class TextToolsPlugin extends AbstractBuiltinPlugin {
         return ok(data);
     }
 
-    private JSONObject randomString(Map<String, Object> params, int count) {
+    private ObjectNode randomString(Map<String, Object> params, int count) {
         int length = clamp(intVal(params.get("length"), 16), 1, 512);
         boolean noAmbiguous = boolVal(params.get("noAmbiguous"), false);
         List<String> pools = new ArrayList<>(3);
@@ -235,7 +235,7 @@ public class TextToolsPlugin extends AbstractBuiltinPlugin {
         return ok(data);
     }
 
-    private JSONObject randomPassword(Map<String, Object> params, int count) {
+    private ObjectNode randomPassword(Map<String, Object> params, int count) {
         int length = clamp(intVal(params.get("length"), 16), 4, 128);
         boolean noAmbiguous = boolVal(params.get("noAmbiguous"), false);
         List<String> pools = new ArrayList<>(4);

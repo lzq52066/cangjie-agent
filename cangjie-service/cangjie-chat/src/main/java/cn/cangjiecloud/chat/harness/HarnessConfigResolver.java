@@ -5,8 +5,8 @@ import cn.cangjiecloud.core.harness.HarnessConfig;
 import cn.cangjiecloud.core.harness.LoopPolicy;
 import cn.cangjiecloud.core.harness.ModelSettings;
 import cn.cangjiecloud.core.harness.context.ContextBudget;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import cn.cangjiecloud.common.util.JsonUtils;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -40,11 +40,11 @@ public class HarnessConfigResolver {
             return null;
         }
         try {
-            JSONObject root = JSON.parseObject(application.getConfig());
-            if (root == null || root.getJSONObject(CONFIG_NODE) == null) {
+            ObjectNode root = JsonUtils.parseObject(application.getConfig());
+            if (root == null || root.get(CONFIG_NODE) == null) {
                 return null;
             }
-            return root.getJSONObject(CONFIG_NODE).toJavaObject(HarnessConfig.class);
+            return JsonUtils.toObject(root.get(CONFIG_NODE), HarnessConfig.class);
         } catch (Exception e) {
             log.warn("解析应用 harness 配置失败，回落全局默认: appId={}, {}", application.getId(), e.getMessage());
             return null;

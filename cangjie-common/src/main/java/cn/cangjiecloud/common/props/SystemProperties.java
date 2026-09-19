@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 public class SystemProperties {
 
     private String defaultUsername = "admin";
-    private String defaultPassword = "cangjie@123456";
+    private String defaultPassword = "admin123";
     private String defaultEmail = "admin@cangjiecloud.cn";
     private String defaultPhone = "18800000000";
 

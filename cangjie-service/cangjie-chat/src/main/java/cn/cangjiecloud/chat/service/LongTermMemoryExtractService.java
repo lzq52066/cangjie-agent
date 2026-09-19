@@ -5,14 +5,16 @@ import cn.cangjiecloud.chat.entity.ChatMessageEntity;
 import cn.cangjiecloud.core.model.ChatMessage;
 import cn.cangjiecloud.core.model.ChatRequest;
 import cn.cangjiecloud.core.model.ChatResponse;
+import cn.cangjiecloud.core.model.ChatTraceContext;
+import cn.cangjiecloud.model.entity.ModelEntity;
 import cn.cangjiecloud.model.provider.OpenAICompatibleClient;
 import cn.cangjiecloud.model.service.IModelService;
 import cn.cangjiecloud.prompt.entity.LongTermMemoryEntity;
 import cn.cangjiecloud.prompt.entity.MemorySimilarity;
 import cn.cangjiecloud.prompt.memory.MemoryDedupProperties;
 import cn.cangjiecloud.prompt.service.ILongTermMemoryService;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import cn.cangjiecloud.common.util.JsonUtils;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -37,6 +39,45 @@ import java.util.List;
 @RequiredArgsConstructor
 public class LongTermMemoryExtractService {
 
+    /**
+     * 记忆提取的输出结构，由 responseSchema 强约束。
+     * 根元素必须是 object：OpenAI 结构化输出的严格模式不允许数组直接作为根，故用 memories 包一层。
+     */
+    private static final String MEMORY_EXTRACT_SCHEMA = """
+            {
+              "type": "object",
+              "properties": {
+                "memories": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "dimension": {"type": "string", "enum": ["preference", "background", "convention", "goal"]},
+                      "memory_type": {"type": "string", "enum": ["user", "scene"]},
+                      "content": {"type": "string", "description": "简洁陈述事实，不超过 50 字"},
+                      "confidence": {"type": "number", "description": "置信度 0~1，不确定时取 0.8"}
+                    },
+                    "required": ["dimension", "memory_type", "content", "confidence"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["memories"],
+              "additionalProperties": false
+            }
+            """;
+
+    /** 单条提取结果的强类型映射（public 以便 Jackson 反序列化），字段与上面的 schema 一一对应 */
+    public record MemoryItem(String dimension,
+                             @JsonProperty("memory_type") String memoryType,
+                             String content,
+                             Double confidence) {
+    }
+
+    /** 记忆提取结果的强类型映射 */
+    public record MemoryExtractResult(List<MemoryItem> memories) {
+    }
+
     private final IModelService modelService;
     private final ILongTermMemoryService longTermMemoryService;
     private final MemoryMergeService memoryMergeService;
@@ -56,9 +97,13 @@ public class LongTermMemoryExtractService {
         try {
             String extractPrompt = buildMemoryExtractPrompt(userMessage.getContent(), aiMessage.getContent());
 
-            OpenAICompatibleClient client = StringUtils.hasText(application.getModelId())
-                    ? modelService.getClient(application.getModelId())
-                    : modelService.getDefaultClient();
+            String modelId = application.getModelId();
+            // 走默认模型时回填其 ID/名称，避免 trace 缺失模型归属导致成本无法归集
+            ModelEntity model = StringUtils.hasText(modelId)
+                    ? modelService.getById(modelId) : modelService.getDefaultModel();
+            String effectiveModelId = model != null ? model.getId() : modelId;
+            OpenAICompatibleClient client = StringUtils.hasText(effectiveModelId)
+                    ? modelService.getClient(effectiveModelId) : modelService.getDefaultClient();
 
             List<ChatMessage> extractMessages = List.of(
                     ChatMessage.system("你是一个用户画像分析助手，请从对话中提取用户信息与场景信息。"),
@@ -66,6 +111,19 @@ public class LongTermMemoryExtractService {
             ChatRequest chatRequest = ChatRequest.builder()
                     .messages(extractMessages)
                     .temperature(application.getTemperature() != null ? application.getTemperature() : 0.7)
+                    .responseSchema(MEMORY_EXTRACT_SCHEMA)
+                    .responseSchemaName("memory_extract")
+                    // trace 由 ChatModelListener 统一落库，这里只负责把业务归属挂上
+                    .traceContext(ChatTraceContext.builder()
+                            .requestId(StringUtils.hasText(sessionId)
+                                    ? "long-term-memory-extract-" + sessionId : "long-term-memory-extract")
+                            .appId(application.getId())
+                            .appName(application.getName())
+                            .sessionId(sessionId)
+                            .userId(userId)
+                            .modelId(effectiveModelId)
+                            .modelName(model != null ? model.getName() : null)
+                            .build())
                     .build();
 
             ChatResponse response = client.chat(chatRequest);
@@ -98,12 +156,10 @@ public class LongTermMemoryExtractService {
                 AI：%s
                 
                 请严格按以下JSON格式输出，不要输出其他内容：
-                [
-                  {"dimension": "preference", "memory_type": "user", "content": "...", "confidence": 0.8}
-                ]
+                {"memories": [{"dimension": "preference", "memory_type": "user", "content": "...", "confidence": 0.8}]}
                 
                 注意：
-                1. 如果没有值得记忆的信息，输出空数组 []
+                1. 如果没有值得记忆的信息，memories 输出空数组 []
                 2. 不要把一次性的问候、闲聊当作记忆
                 3. content 要简洁陈述事实，不超过 50 字
                 """.formatted(userInput, aiReply);
@@ -112,40 +168,34 @@ public class LongTermMemoryExtractService {
     private void parseAndSaveMemories(String userId, ApplicationEntity application, String sessionId,
                                       OpenAICompatibleClient client, String llmOutput) {
         try {
-            // 提取 JSON 数组
+            // 严格模式下即为纯 JSON，这里仍兼容被解释性文字包裹的情况
             String jsonStr = llmOutput.trim();
-            int start = jsonStr.indexOf('[');
-            int end = jsonStr.lastIndexOf(']');
-            if (start < 0 || end < 0 || end <= start) {
+            int start = jsonStr.indexOf('{');
+            int end = jsonStr.lastIndexOf('}');
+            if (start < 0 || end <= start) {
                 log.warn("记忆提取结果不是有效 JSON: {}", llmOutput);
                 return;
             }
-            jsonStr = jsonStr.substring(start, end + 1);
-
-            List<JSONObject> items = JSON.parseArray(jsonStr, JSONObject.class);
-            if (items == null || items.isEmpty()) {
+            MemoryExtractResult result =
+                    JsonUtils.parseObject(jsonStr.substring(start, end + 1), MemoryExtractResult.class);
+            List<MemoryItem> items = result != null && result.memories() != null ? result.memories() : List.of();
+            if (items.isEmpty()) {
                 return;
             }
 
             int savedCount = 0;
-            for (JSONObject item : items) {
-                String dimension = item.getString("dimension");
-                String content = item.getString("content");
-                if (!StringUtils.hasText(dimension) || !StringUtils.hasText(content)) {
+            for (MemoryItem item : items) {
+                if (item == null || !StringUtils.hasText(item.dimension()) || !StringUtils.hasText(item.content())) {
                     continue;
                 }
-                Double confidence = item.getDouble("confidence");
-                if (confidence == null) {
-                    confidence = 0.8;
-                }
-                String memoryType = item.getString("memory_type");
-                boolean isScene = "scene".equalsIgnoreCase(memoryType);
+                Double confidence = item.confidence() != null ? item.confidence() : 0.8;
+                boolean isScene = "scene".equalsIgnoreCase(item.memoryType());
 
                 LongTermMemoryEntity entity = new LongTermMemoryEntity();
                 entity.setUserId(userId);
                 entity.setApplicationId(application.getId());
-                entity.setDimension(dimension);
-                entity.setContent(content);
+                entity.setDimension(item.dimension());
+                entity.setContent(item.content());
                 entity.setConfidence(confidence);
                 entity.setSource("inferred");
                 entity.setTriggerCount(0);
@@ -154,7 +204,7 @@ public class LongTermMemoryExtractService {
                 entity.setMemoryType(isScene ? "scene" : "user");
                 entity.setSessionId(isScene ? sessionId : null);
 
-                if (storeMemory(entity, client, application.getTemperature())) {
+                if (storeMemory(entity, client, application.getTemperature(), application, sessionId, userId)) {
                     savedCount++;
                 }
             }
@@ -171,7 +221,8 @@ public class LongTermMemoryExtractService {
     /**
      * 单条提取记忆的语义感知入库，返回是否产生了写入（新增/强化/合并）。
      */
-    private boolean storeMemory(LongTermMemoryEntity entity, OpenAICompatibleClient client, Double temperature) {
+    private boolean storeMemory(LongTermMemoryEntity entity, OpenAICompatibleClient client, Double temperature,
+                                ApplicationEntity application, String sessionId, String userId) {
         float[] embedding = longTermMemoryService.embed(entity.getContent());
         if (embedding == null) {
             // 向量不可用：直接走精确去重 upsert（内含降级逻辑）
@@ -199,7 +250,8 @@ public class LongTermMemoryExtractService {
         // 2) 中度相似：可能是同一事实的不同表述/互补信息，交 LLM 判定是否合并
         if (sim >= dedupProperties.getMergeThreshold()) {
             String merged = memoryMergeService.decideMergedContent(
-                    client, temperature, best.getContent(), entity.getContent());
+                    client, temperature, best.getContent(), entity.getContent(),
+                    application.getId(), application.getName(), application.getModelId(), sessionId, userId);
             if (StringUtils.hasText(merged)) {
                 float[] mergedVector = longTermMemoryService.embed(merged);
                 longTermMemoryService.mergeInto(best.getId(), merged, confidence, mergedVector);

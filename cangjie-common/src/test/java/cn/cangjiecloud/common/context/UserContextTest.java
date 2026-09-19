@@ -2,9 +2,10 @@ package cn.cangjiecloud.common.context;
 
 import cn.cangjiecloud.common.constant.AppConst;
 import cn.cangjiecloud.common.domain.UserIdentity;
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.dev33.satoken.session.SaSession;
 import cn.dev33.satoken.stp.StpUtil;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
@@ -71,7 +72,7 @@ class UserContextTest {
 
     @Test
     void identityParsesFromJsonObject() {
-        JSONObject raw = new JSONObject();
+        ObjectNode raw = JsonUtils.newObject();
         raw.put("userId", "u2");
         raw.put("username", "bob");
         SaSession session = mock(SaSession.class);

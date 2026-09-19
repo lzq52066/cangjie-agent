@@ -74,9 +74,8 @@
       </template>
     </el-table>
 
-    <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                   :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
-                   :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+    <DataPager v-model:current-page="pageNum" v-model:page-size="pageSize"
+               :total="total" @change="loadList" />
 
     <!-- 新增 / 编辑 -->
     <el-dialog v-model="showDialog" :title="editing ? '编辑记忆' : '录入记忆'" width="560px" destroy-on-close>
@@ -115,6 +114,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
 import { memoryApi, type LongTermMemory, type MemoryItem } from '@admin/api/memory-api'
 import { applicationApi } from '@admin/api/application-api'
 import { useUserStore } from '@admin/store/user'
@@ -293,5 +293,4 @@ async function remove(id: string) {
 
 <style lang="scss" scoped>
 .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
-.pager { margin-top: 16px; justify-content: flex-end; }
 </style>

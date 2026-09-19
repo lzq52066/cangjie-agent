@@ -2,9 +2,9 @@ package cn.cangjiecloud.common.context;
 
 import cn.cangjiecloud.common.constant.AppConst;
 import cn.cangjiecloud.common.domain.UserIdentity;
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.dev33.satoken.stp.StpUtil;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class UserContext {
 
@@ -23,10 +23,10 @@ public class UserContext {
     public static UserIdentity getIdentity() {
         Object raw = StpUtil.getSession().get(IDENTITY_KEY);
         if (raw == null) return null;
-        if (raw instanceof JSONObject j) {
-            return j.toJavaObject(UserIdentity.class);
+        if (raw instanceof ObjectNode j) {
+            return JsonUtils.toObject(j, UserIdentity.class);
         }
-        return JSON.parseObject(JSON.toJSONString(raw), UserIdentity.class);
+        return JsonUtils.convert(raw, UserIdentity.class);
     }
 
     public static void setIdentity(UserIdentity identity) {

@@ -20,4 +20,6 @@ public class UserEntity extends BaseEntity {
     private String source;
     private String language;
     private String avatar;
+    /** 是否为待修改的初始密码：true 时首次登录被强制要求修改密码 */
+    private Boolean mustChangePassword;
 }

@@ -3,6 +3,7 @@ package cn.cangjiecloud.api.controller;
 import cn.cangjiecloud.application.entity.ApplicationEntity;
 import cn.cangjiecloud.application.service.IApplicationService;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.util.JsonUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.util.StringUtils;
@@ -75,7 +76,7 @@ public class EmbedController {
             return "[]";
         }
         try {
-            com.alibaba.fastjson.JSON.parseArray(suggestionsJson, String.class);
+            JsonUtils.parseList(suggestionsJson, String.class);
             return suggestionsJson.replace("</", "<\\/");
         } catch (Exception e) {
             return "[]";

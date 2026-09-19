@@ -50,6 +50,21 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
     @Value("${cangjie.model.fallback-model-id:}")
     private String fallbackModelId;
 
+    /** 瞬时故障（限流 / 5xx / 超时 / 网络）最大重试次数，0 表示关闭自动重试 */
+    @Value("${cangjie.model.retry.max-retries:2}")
+    private int maxRetries;
+
+    /** 首次重试延迟（毫秒），后续按 2 倍指数退避 */
+    @Value("${cangjie.model.retry.delay-ms:500}")
+    private long retryDelayMs;
+
+    /**
+     * LLM 调用监听器（由可观测模块注册），统一收敛请求 / 响应 / 异常与真实 token usage。
+     * 未注册任何监听器时注入为 null，客户端自行按空列表处理。
+     */
+    @Autowired(required = false)
+    private List<dev.langchain4j.model.chat.listener.ChatModelListener> chatModelListeners;
+
     @Autowired
     @Qualifier("llmStreamExecutor")
     private AsyncTaskExecutor streamExecutor;
@@ -69,7 +84,7 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
         assertProviderReady(provider);
         return new OpenAICompatibleClient(entity, apiKeyCipher.decrypt(provider.getApiKey()),
                 provider.getBaseUrl(), Duration.ofSeconds(timeoutSeconds),
-                streamExecutor, circuitBreaker);
+                streamExecutor, circuitBreaker, chatModelListeners, maxRetries, retryDelayMs);
     }
 
     /**
@@ -209,6 +224,12 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
                     ))
                     .temperature(entity.getTemperature() != null ? entity.getTemperature() : 0.7)
                     .maxTokens(entity.getMaxTokens() != null ? entity.getMaxTokens() : 1024)
+                    // 连通性测试同样纳入统一 trace，便于排查与成本归集
+                    .traceContext(ChatTraceContext.builder()
+                            .requestId("model-test-" + modelId)
+                            .modelId(entity.getId())
+                            .modelName(entity.getName())
+                            .build())
                     .build();
             ChatResponse response = client.chat(request);
             log.info("模型测试成功: {} → {} tokens", entity.getName(), response.getTotalTokens());

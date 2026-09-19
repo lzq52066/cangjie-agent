@@ -1,9 +1,9 @@
 package cn.cangjiecloud.eval.service.impl;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONArray;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
+import cn.cangjiecloud.common.util.JsonUtils;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.core.model.ChatMessage;
 import cn.cangjiecloud.core.model.ChatRequest;
 import cn.cangjiecloud.core.model.ChatResponse;
@@ -69,7 +69,7 @@ public class EvalRunServiceImpl extends ServiceImpl<EvalRunMapper, EvalRunEntity
         // 创建运行记录
         EvalRunEntity run = new EvalRunEntity();
         run.setDatasetId(datasetId);
-        run.setConfigSnapshot(JSON.toJSONString(config));
+        run.setConfigSnapshot(JsonUtils.toJSONString(config));
         run.setStatus("pending");
         run.setProgress(0);
         save(run);
@@ -177,8 +177,8 @@ public class EvalRunServiceImpl extends ServiceImpl<EvalRunMapper, EvalRunEntity
 
         run.setStatus("completed");
         run.setEndTime(LocalDateTime.now());
-        run.setSummary(JSON.toJSONString(summary));
-        run.setResults(JSON.toJSONString(caseResults));
+        run.setSummary(JsonUtils.toJSONString(summary));
+        run.setResults(JsonUtils.toJSONString(caseResults));
         run.setProgress(100);
         updateById(run);
 
@@ -196,10 +196,10 @@ public class EvalRunServiceImpl extends ServiceImpl<EvalRunMapper, EvalRunEntity
         }
         try {
             Set<String> referenceIds = new HashSet<>();
-            JSONArray arr = JSON.parseArray(referenceDocsJson);
+            JsonNode arr = JsonUtils.parseArray(referenceDocsJson);
             if (arr != null) {
-                for (Object o : arr) {
-                    referenceIds.add(o.toString());
+                for (JsonNode o : arr) {
+                    referenceIds.add(o.isTextual() ? o.asText() : o.toString());
                 }
             }
             if (referenceIds.isEmpty()) return 0.0;

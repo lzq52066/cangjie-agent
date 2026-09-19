@@ -197,7 +197,8 @@ sa-token:
 
 system:
   default-username: admin
-  default-password: ${SYSTEM_DEFAULT_PASSWORD:cangjiecloud@123456}
+  # 内置管理员初始密码：首次登录后会被强制修改，部署时也可通过 SYSTEM_DEFAULT_PASSWORD 覆盖
+  default-password: ${SYSTEM_DEFAULT_PASSWORD:admin123}
   default-phone: 18800000000
   default-email: admin@cangjiecloud.cn
 
@@ -215,12 +216,12 @@ logging:
     cn.cangjiecloud.observability.mapper.SystemMetricMapper: warn
     com.baomidou.mybatisplus: info
 
-# 可观测性：暴露健康检查与 Prometheus 指标端点
+# 可观测性：暴露健康检查与内置指标端点
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,metrics
   endpoint:
     health:
       show-details: when-authorized

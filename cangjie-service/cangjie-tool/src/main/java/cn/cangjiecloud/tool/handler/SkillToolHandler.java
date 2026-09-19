@@ -1,5 +1,6 @@
 package cn.cangjiecloud.tool.handler;
 
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.core.tool.ToolSpecification;
 import cn.cangjiecloud.prompt.entity.SkillEntity;
 import cn.cangjiecloud.prompt.service.ISkillService;
@@ -160,7 +161,7 @@ public class SkillToolHandler extends AbsToolHandler {
     private Map<String, Object> parseParameters(String parameters) {
         if (parameters == null || parameters.isEmpty()) return Map.of();
         try {
-            return com.alibaba.fastjson.JSON.parseObject(parameters);
+            return JsonUtils.parseMap(parameters);
         } catch (Exception e) {
             return Map.of();
         }

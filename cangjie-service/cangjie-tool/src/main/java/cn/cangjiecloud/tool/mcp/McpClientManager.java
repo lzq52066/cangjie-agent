@@ -1,8 +1,8 @@
 package cn.cangjiecloud.tool.mcp;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONArray;
-import com.alibaba.fastjson.JSONObject;
+import cn.cangjiecloud.common.util.JsonUtils;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
 import org.springframework.stereotype.Component;
@@ -141,32 +141,34 @@ public class McpClientManager {
          * MCP 初始化握手 (JSON-RPC 2.0 initialize)
          */
         void initialize() throws IOException {
-            JSONObject request = new JSONObject();
+            ObjectNode request = JsonUtils.newObject();
             request.put("jsonrpc", "2.0");
             request.put("method", "initialize");
-            request.put("params", new JSONObject()
-                    .fluentPut("protocolVersion", "2024-11-05")
-                    .fluentPut("capabilities", new JSONObject())
-                    .fluentPut("clientInfo", new JSONObject()
-                            .fluentPut("name", "cangjie-agent")
-                            .fluentPut("version", "1.0")));
+            ObjectNode params = JsonUtils.newObject();
+            params.put("protocolVersion", "2024-11-05");
+            params.set("capabilities", JsonUtils.newObject());
+            ObjectNode clientInfo = JsonUtils.newObject();
+            clientInfo.put("name", "cangjie-agent");
+            clientInfo.put("version", "1.0");
+            params.set("clientInfo", clientInfo);
+            request.set("params", params);
             request.put("id", requestId.getAndIncrement());
 
-            String response = postJson(serverUrl, request.toJSONString());
-            JSONObject respJson = JSON.parseObject(response);
-            if (respJson.containsKey("error")) {
-                throw new IOException("MCP 初始化失败: " + respJson.getJSONObject("error"));
+            String response = postJson(serverUrl, request.toString());
+            ObjectNode respJson = JsonUtils.parseObject(response);
+            if (respJson.has("error")) {
+                throw new IOException("MCP 初始化失败: " + respJson.get("error"));
             }
             connected = true;
             log.debug("MCP 握手成功: {}", serverUrl);
 
             // 发送 initialized 通知
-            JSONObject notif = new JSONObject();
+            ObjectNode notif = JsonUtils.newObject();
             notif.put("jsonrpc", "2.0");
             notif.put("method", "notifications/initialized");
-            notif.put("params", new JSONObject());
+            notif.set("params", JsonUtils.newObject());
             try {
-                postJson(serverUrl, notif.toJSONString());
+                postJson(serverUrl, notif.toString());
             } catch (Exception e) {
                 log.debug("MCP initialized 通知发送失败（非致命）: {}", e.getMessage());
             }
@@ -178,24 +180,26 @@ public class McpClientManager {
         @SuppressWarnings("unchecked")
         void discoverTools() {
             try {
-                JSONObject request = new JSONObject();
+                ObjectNode request = JsonUtils.newObject();
                 request.put("jsonrpc", "2.0");
                 request.put("method", "tools/list");
-                request.put("params", new JSONObject());
+                request.set("params", JsonUtils.newObject());
                 request.put("id", requestId.getAndIncrement());
 
-                String response = postJson(serverUrl, request.toJSONString());
-                JSONObject respJson = JSON.parseObject(response);
-                if (respJson.containsKey("result")) {
-                    JSONArray toolsArray = respJson.getJSONObject("result").getJSONArray("tools");
-                    if (toolsArray != null) {
-                        this.tools = toolsArray.stream()
-                                .map(t -> (Map<String, Object>) JSON.parseObject(t.toString()).getInnerMap())
-                                .toList();
+                String response = postJson(serverUrl, request.toString());
+                ObjectNode respJson = JsonUtils.parseObject(response);
+                if (respJson.has("result")) {
+                    JsonNode toolsNode = respJson.get("result").get("tools");
+                    if (toolsNode != null && toolsNode.isArray()) {
+                        List<Map<String, Object>> discovered = new ArrayList<>(toolsNode.size());
+                        for (JsonNode node : toolsNode) {
+                            discovered.add((Map<String, Object>) JsonUtils.toObject(node, Map.class));
+                        }
+                        this.tools = discovered;
                         log.info("MCP 工具发现完成: {} -> {} 个工具", serverUrl, tools.size());
                     }
-                } else if (respJson.containsKey("error")) {
-                    log.warn("MCP tools/list 失败: {} -> {}", serverUrl, respJson.getJSONObject("error"));
+                } else if (respJson.has("error")) {
+                    log.warn("MCP tools/list 失败: {} -> {}", serverUrl, respJson.get("error"));
                 }
             } catch (Exception e) {
                 log.warn("MCP 工具发现异常: {} -> {}", serverUrl, e.getMessage());
@@ -207,38 +211,38 @@ public class McpClientManager {
          */
         String callTool(String toolName, Map<String, Object> arguments) {
             try {
-                JSONObject request = new JSONObject();
+                ObjectNode request = JsonUtils.newObject();
                 request.put("jsonrpc", "2.0");
                 request.put("method", "tools/call");
-                request.put("params", new JSONObject()
-                        .fluentPut("name", toolName)
-                        .fluentPut("arguments", arguments != null ? arguments : Map.of()));
+                ObjectNode params = JsonUtils.newObject();
+                params.put("name", toolName);
+                params.set("arguments", JsonUtils.mapper().valueToTree(arguments != null ? arguments : Map.of()));
+                request.set("params", params);
                 request.put("id", requestId.getAndIncrement());
 
-                String response = postJson(serverUrl, request.toJSONString());
-                JSONObject respJson = JSON.parseObject(response);
+                String response = postJson(serverUrl, request.toString());
+                ObjectNode respJson = JsonUtils.parseObject(response);
 
-                if (respJson.containsKey("result")) {
-                    JSONObject result = respJson.getJSONObject("result");
-                    Object content = result.get("content");
-                    if (content instanceof JSONArray) {
-                        return ((JSONArray) content).toJSONString();
+                if (respJson.has("result")) {
+                    JsonNode content = respJson.get("result").get("content");
+                    if (content == null || content.isNull()) {
+                        return "";
                     }
-                    return content != null ? content.toString() : "";
+                    return content.isTextual() ? content.asText() : content.toString();
                 }
 
-                if (respJson.containsKey("error")) {
-                    JSONObject err = respJson.getJSONObject("error");
-                    return JSON.toJSONString(Map.of(
+                if (respJson.has("error")) {
+                    JsonNode message = respJson.get("error").get("message");
+                    return JsonUtils.toJSONString(Map.of(
                             "success", false,
-                            "error", err.getOrDefault("message", "unknown").toString()
+                            "error", message != null ? message.asText() : "unknown"
                     ));
                 }
 
                 return response;
             } catch (Exception e) {
                 log.error("MCP 工具调用异常: server={}, tool={}", serverUrl, toolName, e);
-                return JSON.toJSONString(Map.of(
+                return JsonUtils.toJSONString(Map.of(
                         "success", false,
                         "error", e.getMessage()
                 ));

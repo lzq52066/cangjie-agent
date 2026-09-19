@@ -40,10 +40,6 @@
             <groupId>cn.cangjiecloud</groupId>
             <artifactId>cangjie-knowledge</artifactId>
         </dependency>
-        <dependency>
-            <groupId>com.alibaba</groupId>
-            <artifactId>fastjson</artifactId>
-        </dependency>
 
     </dependencies>
 </project>

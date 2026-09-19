@@ -65,7 +65,7 @@
               </template>
             </el-table-column>
             <el-table-column label="上传时间" width="160" align="center">
-              <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
+              <template #default="{ row }">{{ formatDateTime(row.createTime) }}</template>
             </el-table-column>
             <el-table-column label="操作" width="200" fixed="right" align="center">
               <template #default="{ row }">
@@ -80,9 +80,8 @@
             </el-table-column>
           </el-table>
 
-          <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                         :total="docTotal" v-model:current-page="docPageNum" v-model:page-size="docPageSize"
-                         :page-sizes="[10, 20, 50]" @size-change="loadDocuments" @current-change="loadDocuments" />
+          <DataPager v-model:current-page="docPageNum" v-model:page-size="docPageSize"
+                     :total="docTotal" @change="loadDocuments" />
         </el-tab-pane>
 
         <!-- 检索测试 -->
@@ -142,9 +141,8 @@
         </el-table-column>
       </el-table>
 
-      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                     :total="paraTotal" v-model:current-page="paraPageNum" v-model:page-size="paraPageSize"
-                     :page-sizes="[10, 20, 50]" @size-change="loadParagraphs" @current-change="loadParagraphs" />
+      <DataPager v-model:current-page="paraPageNum" v-model:page-size="paraPageSize"
+                 :total="paraTotal" @change="loadParagraphs" />
     </el-dialog>
 
     <!-- 文档摘要对话框 -->
@@ -159,6 +157,8 @@ import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Upload, Search } from '@element-plus/icons-vue'
+import DataPager from '@admin/components/DataPager.vue'
+import { formatDateTime } from '@admin/utils/format'
 import { knowledgeApi } from '@admin/api/knowledge-api'
 
 const route = useRoute()
@@ -317,10 +317,6 @@ function formatSize(bytes: number) {
   if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
   return (bytes / 1048576).toFixed(1) + ' MB'
 }
-function formatTime(t: string) {
-  if (!t) return '-'
-  return t.replace('T', ' ').substring(0, 19)
-}
 
 function openFile(row: any) {
   // 通过文件管理接口直接打开文件预览
@@ -358,7 +354,6 @@ onMounted(() => {
 .score-sub { color: #909399; }
 .result-content { color: #303133; line-height: 1.8; white-space: pre-wrap; }
 .no-file { color: #c0c4cc; }
-.pager { margin-top: 16px; justify-content: flex-end; }
 .para-content {
   max-height: 80px; overflow: hidden; text-overflow: ellipsis;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;

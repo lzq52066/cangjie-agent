@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  后端运行时日志配置（容器外部挂载，无需重新打包 jar）。
+  宿主机：deploy/backend/logback-spring.xml  ->  容器：/app/logback-spring.xml
+  修改后执行 docker compose restart backend（或 ./91-restart.sh）即生效。
+  日志文件落在宿主机 ./data/logs（容器内 /app/logs）。
+
+  行为：
+    - info.log：DEBUG(业务 SQL) + INFO，单文件 10MB、按天切分、保留 14 天、总量上限 2GB；
+      WARN 不进此文件（WARN/ERROR 进 error.log）；
+    - error.log：WARN/ERROR，按天滚动保留 14 天；
+    - 控制台（docker logs / ./92-logs.sh）同步输出；
+    - 仅在 docker profile 下把 MyBatis Mapper 包调到 DEBUG，SQL 与普通业务日志一起进 info.log。
+  MyBatis 通过 JDK 动态代理把 SQL（Preparing/Parameters/Total）以 DEBUG 打到
+  Mapper 全限定名对应的 logger。
+  注意：root 是 INFO，子 logger 的 DEBUG 若仅靠 additivity 冒泡会被 root 级别阈值拦截，
+  因此 Mapper logger 必须 additivity=false 并显式挂 CONSOLE + INFO_FILE。
+-->
+<configuration>
+    <property name="LOG_DIR" value="/app/logs"/>
+    <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{40} - %msg%n"/>
+
+    <!-- ========== 控制台 ========== -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!--
+      ========== 业务日志文件 info.log ==========
+      接收 DEBUG（SQL）与 INFO；WARN 被显式拒绝（WARN 及以上进 error.log）。
+      仅使用 logback 内置过滤器（ThresholdFilter + LevelFilter），不依赖 Janino。
+      滚动：单文件 10MB + 按天切分，保留 14 天，总量上限 2GB。
+    -->
+    <appender name="INFO_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/info.log</file>
+        <!-- 阈值放到 DEBUG，放行 SQL -->
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>DEBUG</level>
+        </filter>
+        <!-- WARN 单独拒绝（ERROR 因 mapper 不直接产生而不受影响；WARN+ 已由 error.log 记录） -->
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>WARN</level>
+            <onMatch>DENY</onMatch>
+            <onMismatch>NEUTRAL</onMismatch>
+        </filter>
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/info.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>10MB</maxFileSize>
+            <maxHistory>14</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- ========== WARN/ERROR 文件 ========== -->
+    <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/error.log</file>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>WARN</level>
+        </filter>
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/error.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>14</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+    <!-- 默认：全部 INFO -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="INFO_FILE"/>
+        <appender-ref ref="ERROR_FILE"/>
+    </root>
+
+    <!--
+      容器部署：业务 Mapper 包开 DEBUG，SQL 直接进 info.log 与控制台。
+      additivity=false + 显式挂 appender，绕过 root 的 INFO 级别拦截。
+    -->
+    <springProfile name="docker">
+        <logger name="cn.cangjiecloud.user.mapper" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="INFO_FILE"/>
+        </logger>
+        <logger name="cn.cangjiecloud.system.mapper" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="INFO_FILE"/>
+        </logger>
+        <logger name="cn.cangjiecloud.model.mapper" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="INFO_FILE"/>
+        </logger>
+        <logger name="cn.cangjiecloud.knowledge.mapper" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="INFO_FILE"/>
+        </logger>
+        <logger name="cn.cangjiecloud.application.mapper" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="INFO_FILE"/>
+        </logger>
+        <logger name="cn.cangjiecloud.chat.mapper" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="INFO_FILE"/>
+        </logger>
+        <logger name="cn.cangjiecloud.workflow.mapper" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="INFO_FILE"/>
+        </logger>
+        <logger name="cn.cangjiecloud.tool.mapper" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="INFO_FILE"/>
+        </logger>
+        <logger name="cn.cangjiecloud.prompt.mapper" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="INFO_FILE"/>
+        </logger>
+        <logger name="cn.cangjiecloud.oss.mapper" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="INFO_FILE"/>
+        </logger>
+        <logger name="cn.cangjiecloud.trigger.mapper" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="INFO_FILE"/>
+        </logger>
+        <logger name="cn.cangjiecloud.eval.mapper" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="INFO_FILE"/>
+        </logger>
+        <logger name="cn.cangjiecloud.observability.mapper" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="INFO_FILE"/>
+        </logger>
+
+        <!-- 高频指标采集 Mapper 压回 INFO（显式挂 appender 走正常通道，SQL 不再输出） -->
+        <logger name="cn.cangjiecloud.observability.mapper.SystemMetricMapper" level="INFO" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="INFO_FILE"/>
+            <appender-ref ref="ERROR_FILE"/>
+        </logger>
+        <logger name="cn.cangjiecloud.observability.mapper.AgentRunStepMapper" level="INFO" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="INFO_FILE"/>
+            <appender-ref ref="ERROR_FILE"/>
+        </logger>
+    </springProfile>
+</configuration>

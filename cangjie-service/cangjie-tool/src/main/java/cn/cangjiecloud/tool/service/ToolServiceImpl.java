@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import cn.cangjiecloud.common.exception.ApiException;
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.core.plugin.Plugin;
 import cn.cangjiecloud.core.plugin.PluginContext;
 import cn.cangjiecloud.core.tool.ToolSpecification;
@@ -214,25 +215,25 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
         ToolEntity entity = resolveByCallName(toolName);
         if (entity == null) {
             log.warn("工具不存在: toolName={}", toolName);
-            return com.alibaba.fastjson.JSON.toJSONString(Map.of("success", false, "error", "工具不存在"));
+            return JsonUtils.toJSONString(Map.of("success", false, "error", "工具不存在"));
         }
 
         String resolvedType = resolveToolType(entity);
         if (ToolConstants.ToolType.LOCAL.equals(resolvedType)) {
-            return com.alibaba.fastjson.JSON.toJSONString(Map.of("success", false,
+            return JsonUtils.toJSONString(Map.of("success", false,
                     "error", "本地工具不在服务端执行，需由网页在用户浏览器授权目录内执行"));
         }
         AbsToolHandler handler = handlerRegistry.get(resolvedType);
         if (handler == null) {
             log.warn("不支持的工具类型: toolName={}, toolType={}", toolName, resolvedType);
-            return com.alibaba.fastjson.JSON.toJSONString(Map.of("success", false, "error", "不支持的工具类型"));
+            return JsonUtils.toJSONString(Map.of("success", false, "error", "不支持的工具类型"));
         }
 
         var result = handler.execute(entity, arguments);
         if (Boolean.TRUE.equals(result.getSuccess())) {
             return result.getOutput() != null ? result.getOutput().toString() : "";
         }
-        return com.alibaba.fastjson.JSON.toJSONString(Map.of("success", false, "error", result.getError()));
+        return JsonUtils.toJSONString(Map.of("success", false, "error", result.getError()));
     }
 
     // ========== 被 ToolProviderServiceImpl 调用 ==========
@@ -258,14 +259,14 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
      */
     private String executeSkillCall(String toolName, Map<String, Object> arguments) {
         if (skillToolHandler == null) {
-            return com.alibaba.fastjson.JSON.toJSONString(Map.of("success", false, "error", "技能处理器未初始化"));
+            return JsonUtils.toJSONString(Map.of("success", false, "error", "技能处理器未初始化"));
         }
         String skillId = ToolNaming.parse(toolName);
         var result = skillToolHandler.execute(skillId, arguments);
         if (Boolean.TRUE.equals(result.getSuccess())) {
             return result.getOutput() != null ? result.getOutput().toString() : "";
         }
-        return com.alibaba.fastjson.JSON.toJSONString(Map.of("success", false, "error", result.getError()));
+        return JsonUtils.toJSONString(Map.of("success", false, "error", result.getError()));
     }
 
     // ========== 内部工具方法 ==========
@@ -327,7 +328,7 @@ public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity>
     private Map<String, Object> parseJsonMap(String json) {
         if (json == null || json.isEmpty()) return Map.of();
         try {
-            return com.alibaba.fastjson.JSON.parseObject(json);
+            return JsonUtils.parseMap(json);
         } catch (Exception e) {
             return Map.of();
         }

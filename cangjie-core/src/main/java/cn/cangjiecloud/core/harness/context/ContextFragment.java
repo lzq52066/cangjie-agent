@@ -1,6 +1,7 @@
 package cn.cangjiecloud.core.harness.context;
 
 import cn.cangjiecloud.core.model.ChatMessage;
+import cn.cangjiecloud.core.model.TokenEstimator;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -26,7 +27,7 @@ public class ContextFragment {
 
     private List<ChatMessage> messages;
 
-    /** 估算 token（中文按 0.75/字符，与既有历史估算口径一致） */
+    /** 估算 token（jtokkit cl100k_base 精确计数） */
     private int estTokens;
 
     /** 本片段是否可被压缩或丢弃 */
@@ -73,17 +74,9 @@ public class ContextFragment {
     }
 
     /**
-     * 按字符数估算 token，口径与 {@code ChatServiceImpl#estimateHistoryTokens} 保持一致。
+     * 按 jtokkit（cl100k_base）重算 token，含工具调用参数。
      */
     public void refreshEstTokens() {
-        int sum = 0;
-        if (messages != null) {
-            for (ChatMessage m : messages) {
-                if (m.getContent() != null) {
-                    sum += (int) Math.ceil(m.getContent().length() * 0.75);
-                }
-            }
-        }
-        this.estTokens = sum;
+        this.estTokens = TokenEstimator.count(messages);
     }
 }

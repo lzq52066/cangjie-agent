@@ -45,12 +45,8 @@
         </el-table-column>
       </el-table>
 
-      <div class="pagination">
-        <el-pagination background v-model:current-page="pageNum" v-model:page-size="pageSize"
-                       :total="total" :page-sizes="[10, 20, 50]"
-                       layout="total, sizes, prev, pager, next"
-                       @size-change="loadList" @current-change="loadList" />
-      </div>
+      <DataPager v-model:current-page="pageNum" v-model:page-size="pageSize"
+                 :total="total" @change="loadList" />
     </el-card>
 
     <!-- 新增/编辑 -->
@@ -101,6 +97,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
 import { userApi, type AdminUser, type UserSaveDTO } from '@admin/api/user-api'
 import { roleApi, type Role } from '@admin/api/role-api'
 
@@ -255,5 +252,4 @@ onMounted(async () => {
 <style lang="scss" scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .header-left { display: flex; gap: 10px; align-items: center; }
-.pagination { margin-top: 16px; display: flex; justify-content: flex-end; }
 </style>

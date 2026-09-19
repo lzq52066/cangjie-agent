@@ -1,6 +1,6 @@
 package cn.cangjiecloud.tool.service;
 
-import com.alibaba.fastjson.JSON;
+import cn.cangjiecloud.common.util.JsonUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -132,8 +132,8 @@ public class McpServerServiceImpl extends ServiceImpl<McpServerMapper, McpServer
             target.setType("function");
             target.setToolType(ToolConstants.ToolType.MCP);
             target.setFunctionName(name);
-            target.setParameters(schema != null ? JSON.toJSONString(schema) : "{}");
-            target.setConfig(JSON.toJSONString(Map.of("serverUrl", entity.getServerUrl())));
+            target.setParameters(schema != null ? JsonUtils.toJSONString(schema) : "{}");
+            target.setConfig(JsonUtils.toJSONString(Map.of("serverUrl", entity.getServerUrl())));
             target.setStatus(ToolConstants.STATUS_ACTIVE);
             target.setCategory("MCP:" + entity.getName());
 
@@ -194,7 +194,7 @@ public class McpServerServiceImpl extends ServiceImpl<McpServerMapper, McpServer
             return false;
         }
         try {
-            Map<String, Object> config = JSON.parseObject(tool.getConfig());
+            Map<String, Object> config = JsonUtils.parseMap(tool.getConfig());
             return serverUrl.equals(config.get("serverUrl"));
         } catch (Exception e) {
             return false;

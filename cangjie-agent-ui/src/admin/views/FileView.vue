@@ -46,9 +46,8 @@
       </el-table-column>
     </el-table>
 
-    <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                   :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
-                   :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+    <DataPager v-model:current-page="pageNum" v-model:page-size="pageSize"
+               :total="total" @change="loadList" />
 
     <!-- 文件预览弹窗 -->
     <el-dialog v-model="previewVisible" :title="previewTitle" width="80%" top="5vh" destroy-on-close>
@@ -69,6 +68,8 @@ import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, Upload } from '@element-plus/icons-vue'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
+import { copyText } from '@admin/utils/clipboard'
 import { fileApi } from '@admin/api/file-api'
 
 const categories = ['document', 'image', 'avatar', 'other']
@@ -214,14 +215,9 @@ function downloadFile(row: any) {
   document.body.removeChild(a)
 }
 
-async function copyUrl(row: any) {
+function copyUrl(row: any) {
   const url = row.url || (location.origin + fileApi.previewUrl(row.id))
-  try {
-    await navigator.clipboard.writeText(url)
-    ElMessage.success('链接已复制')
-  } catch {
-    ElMessage.warning('复制失败，请手动复制：' + url)
-  }
+  copyText(url, '复制失败，请手动复制：' + url, '链接已复制')
 }
 
 onMounted(loadList)
@@ -230,7 +226,6 @@ onMounted(loadList)
 <style lang="scss" scoped>
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .toolbar-left { display: flex; gap: 12px; }
-.pager { margin-top: 16px; justify-content: flex-end; }
 .preview-container { min-height: 400px; display: flex; align-items: center; justify-content: center; }
 .preview-iframe { width: 100%; height: 70vh; border: none; }
 .preview-unsupported { text-align: center; color: #999; }

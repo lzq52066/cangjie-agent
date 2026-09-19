@@ -127,7 +127,7 @@ cangjie-agent
 │   ├── cangjie-chat        -- 对话服务（Agent 循环、SSE 流式、限流、反馈标注）
 │   ├── cangjie-trigger     -- 渠道接入（微信等）
 │   ├── cangjie-oss         -- 文件存储 + 操作日志
-│   ├── cangjie-observability -- 可观测性（LLM Trace、Prometheus 指标）
+│   ├── cangjie-observability -- 可观测性（LLM Trace、系统指标）
 │   ├── cangjie-eval        -- 知识库/应用评测
 │   └── cangjie-system      -- 系统设置
 ├── cangjie-api             -- 对外开放接口层（OpenAI 兼容协议）
@@ -217,7 +217,7 @@ cangjie-agent
 ### 📡 可观测性与可靠性
 - **LLM 全链路追踪**：每次模型调用的输入输出、token、耗时、成败落库
 - **操作日志**：AOP 全量写操作审计，敏感字段自动脱敏
-- **Prometheus 指标**：`/actuator/prometheus` 暴露 JVM / HTTP / 业务指标
+- **系统指标采集**：内置采集器落库 JVM / HTTP / 业务指标，`/actuator/metrics` 查看运行时指标
 - **traceId 贯穿**：线程池任务装饰器保证异步场景链路不断
 - **全链路超时**：LLM 调用超时、Agent 循环总超时、SSE 超时，均可配置
 - **优雅降级**：模型熔断降级、知识库检索失败不阻塞对话、客户端断开即停止后台推流
@@ -249,7 +249,7 @@ cangjie-agent
 | LangChain4j | 1.18.1 | AI 集成（模型 / 流式 / Function Calling） |
 | MinIO | 8.5.17 | 对象存储 |
 | Caffeine / Redis | — | 缓存 / 会话存储 |
-| Micrometer + Prometheus | — | 指标暴露 |
+| Micrometer (Actuator) | — | 运行时指标 |
 | Knife4j + SpringDoc | — | API 文档 |
 | Apache PDFBox / POI | — | 文档解析 |
 | OkHttp | — | 工具调用 / MCP 通信 |
@@ -375,7 +375,7 @@ sudo ./deploy-all.sh
 | `POST /chat/**/send`、`/send-stream` | 平台对话接口（X-API-Key 鉴权） |
 | `POST /api/open/chat/stream` | 网页匿名流式聊天 |
 | `POST /admin/workflow/{id}/execute/async` | 工作流异步执行 |
-| `GET /actuator/prometheus` | Prometheus 指标抓取 |
+| `GET /actuator/metrics` | 运行时指标查看 |
 
 完整接口文档：启动后访问 `/swagger-ui.html`（Knife4j）。
 
@@ -439,7 +439,7 @@ curl http://平台地址/api/open/chat/completions \
 - [x] 对话反馈与人工标注
 - [x] 多渠道接入
 - [x] RBAC 权限 + 知识库数据权限
-- [x] 可观测性（链路追踪 / 操作日志 / Prometheus）
+- [x] 可观测性（链路追踪 / 操作日志 / 系统指标）
 - [x] 文件管理（本地 + MinIO）
 - [ ] 工作流节点扩充（意图识别 / 参数提取 / 真循环）
 - [ ] 资源级授权（模型 / 应用授权到人）

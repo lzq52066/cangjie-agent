@@ -13,6 +13,12 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 public class SaTokenConfigure implements WebMvcConfigurer {
 
+    private final ForceChangePasswordInterceptor forceChangePasswordInterceptor;
+
+    public SaTokenConfigure(ForceChangePasswordInterceptor forceChangePasswordInterceptor) {
+        this.forceChangePasswordInterceptor = forceChangePasswordInterceptor;
+    }
+
     @Bean
     public StpLogic getStpLogicJwt() {
         return new StpLogicJwtForSimple();
@@ -41,6 +47,8 @@ public class SaTokenConfigure implements WebMvcConfigurer {
                 "/*.html",
                 "/assets/**"
           );
+        // 首次登录强制改密兜底拦截，注册在 Sa-Token 之后
+        registry.addInterceptor(forceChangePasswordInterceptor).addPathPatterns("/**");
     }
 
     @Override

@@ -42,9 +42,8 @@
       </el-table-column>
     </el-table>
 
-    <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                   :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
-                   :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+    <DataPager v-model:current-page="pageNum" v-model:page-size="pageSize"
+               :total="total" @change="loadList" />
 
     <el-drawer v-model="drawer" title="执行详情" size="720px" destroy-on-close>
       <template v-if="current">
@@ -78,9 +77,9 @@
         <el-empty v-else description="暂无节点事件" :image-size="60" />
 
         <el-divider content-position="left">输入</el-divider>
-        <pre class="code-block">{{ pretty(current.inputs) }}</pre>
+        <pre class="code-block">{{ prettyJson(current.inputs) }}</pre>
         <el-divider content-position="left">输出</el-divider>
-        <pre class="code-block">{{ pretty(current.outputs) }}</pre>
+        <pre class="code-block">{{ prettyJson(current.outputs) }}</pre>
       </template>
     </el-drawer>
   </div>
@@ -89,6 +88,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
+import { prettyJson } from '@admin/utils/format'
 import { workflowApi } from '@admin/api/workflow-api'
 import { applicationApi } from '@admin/api/application-api'
 
@@ -113,14 +114,6 @@ function eventTagType(s?: string): any {
 function fmtDuration(ms?: number | null) {
   if (ms == null) return '-'
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(2)} s`
-}
-function pretty(text?: string) {
-  if (!text) return '-'
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2)
-  } catch {
-    return text
-  }
 }
 
 const workflowOptions = ref<any[]>([])
@@ -198,7 +191,6 @@ async function showDetail(row: any) {
 
 <style lang="scss" scoped>
 .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
-.pager { margin-top: 16px; justify-content: flex-end; }
 .event-status { font-size: 13px; color: #606266; }
 .event-error { color: #f56c6c; font-size: 12px; margin-top: 4px; }
 .code-block {

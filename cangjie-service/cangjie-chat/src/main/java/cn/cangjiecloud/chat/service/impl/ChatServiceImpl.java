@@ -1,7 +1,7 @@
 package cn.cangjiecloud.chat.service.impl;
 
 import cn.hutool.core.util.IdUtil;
-import com.alibaba.fastjson.JSON;
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.application.api.dto.ChatRequestDTO;
 import cn.cangjiecloud.application.api.dto.ChatResponseDTO;
 import cn.cangjiecloud.application.entity.ApplicationEntity;
@@ -19,7 +19,6 @@ import cn.cangjiecloud.core.harness.HarnessRequest;
 import cn.cangjiecloud.core.harness.HarnessTimeoutException;
 import cn.cangjiecloud.core.harness.RunStatus;
 import cn.cangjiecloud.observability.context.TraceContext;
-import cn.cangjiecloud.observability.service.ILlmTraceRecorder;
 import cn.cangjiecloud.chat.service.IChatService;
 import cn.cangjiecloud.chat.service.IChatSessionService;
 import cn.cangjiecloud.chat.service.LongTermMemoryExtractService;
@@ -60,7 +59,6 @@ public class ChatServiceImpl implements IChatService {
     private final IChatMessageService chatMessageService;
     private final IModelService modelService;
     private final LongTermMemoryExtractService longTermMemoryExtractService;
-    private final ILlmTraceRecorder llmTraceRecorder;
     private final IWorkflowService workflowService;
     private final cn.cangjiecloud.chat.ratelimit.ChatRateLimiter chatRateLimiter;
 
@@ -325,7 +323,7 @@ public class ChatServiceImpl implements IChatService {
         aiMessage.setRole("assistant");
         aiMessage.setContent(chatResponse.getContent());
         aiMessage.setTokens(chatResponse.getTotalTokens());
-        aiMessage.setRetrievalSources(retrievalSources.isEmpty() ? null : JSON.toJSONString(retrievalSources));
+        aiMessage.setRetrievalSources(retrievalSources.isEmpty() ? null : JsonUtils.toJSONString(retrievalSources));
         aiMessage.setDuration(duration);
         chatMessageService.save(aiMessage);
         return aiMessage;
@@ -357,7 +355,6 @@ public class ChatServiceImpl implements IChatService {
         HarnessRequest request = harnessContextFactory.newRequest(application, context, false, null,
                 sessionId, userId, traceId);
         HarnessOutcome outcome = agentHarness.run(request, HarnessListener.NOOP);
-        List<ChatMessage> conversation = outcome.getConversation();
 
         if (outcome.getStatus() == RunStatus.WAITING_APPROVAL) {
             throw new ApiException("存在待人工审批的工具调用，请通过 POST /api/chat/approval/"
@@ -378,16 +375,9 @@ public class ChatServiceImpl implements IChatService {
                                 : "模型调用失败: " + error);
             }
             if (!timeout) {
-                llmTraceRecorder.recordFailure(ILlmTraceRecorder.LlmTraceRecord.builder()
-                        .requestId("chatcmpl-" + traceId)
-                        .appId(application.getId())
-                        .appName(application.getName())
-                        .modelId(application.getModelId())
-                        .modelName(modelName)
-                        .promptContent(JSON.toJSONString(conversation))
-                        .duration(System.currentTimeMillis() - llmStart)
-                        .startTimeMs(llmStart)
-                        .build(), "模型调用失败: " + error);
+                // llm_trace 由 ChatModelListener 按每次模型调用统一落库（含真实 usage 与异常分类）
+                log.warn("对话失败: traceId={}, app={}, error={}", traceId,
+                        application == null ? null : application.getName(), error);
             }
             throw new ApiException(timeout ? error : "模型调用失败: " + error);
         }
@@ -405,21 +395,6 @@ public class ChatServiceImpl implements IChatService {
                     System.currentTimeMillis() - llmStart, "success",
                     "模型: " + modelName + ", tokens: " + response.getTotalTokens());
         }
-        llmTraceRecorder.recordSuccess(ILlmTraceRecorder.LlmTraceRecord.builder()
-                .requestId("chatcmpl-" + traceId)
-                .appId(application.getId())
-                .appName(application.getName())
-                .modelId(application.getModelId())
-                .modelName(modelName)
-                .promptContent(JSON.toJSONString(conversation))
-                .inputTokens(outcome.getInputTokens())
-                .outputTokens(outcome.getOutputTokens())
-                .totalTokens(outcome.getTotalTokens())
-                .responseContent(outcome.getFinalText())
-                .finishReason(outcome.getFinishReason())
-                .duration(System.currentTimeMillis() - llmStart)
-                .startTimeMs(llmStart)
-                .build());
         return response;
     }
 
@@ -460,7 +435,6 @@ public class ChatServiceImpl implements IChatService {
             return;
         }
 
-        List<ChatMessage> messages = outcome.getConversation();
         if (outcome.getStatus() != RunStatus.COMPLETED) {
             String error = outcome.getErrorMessage() == null ? "对话处理失败" : outcome.getErrorMessage();
             // 流式中断前可能已吐出部分正文：保留落库，页面与历史记录都能看到已产出的内容
@@ -477,22 +451,11 @@ public class ChatServiceImpl implements IChatService {
                 updateSessionStats(session, partialMessage);
                 addApplicationTokens(application.getId(), outcome.getTotalTokens());
             }
-            // 错误帧已由 listener 推送；记录失败 trace
+            // 错误帧已由 listener 推送；llm_trace 由 ChatModelListener 按每次模型调用统一落库
             if (traceCollector != null) {
                 recordTrace("chat", "llm_call", traceId,
                         System.currentTimeMillis() - llmStart, "fail", "模型调用失败: " + error);
             }
-            llmTraceRecorder.recordFailure(ILlmTraceRecorder.LlmTraceRecord.builder()
-                    .requestId(requestId)
-                    .appId(application.getId())
-                    .appName(application.getName())
-                    .modelId(application.getModelId())
-                    .modelName(modelName)
-                    .promptContent(JSON.toJSONString(messages))
-                    .responseContent(partial)
-                    .duration(System.currentTimeMillis() - llmStart)
-                    .startTimeMs(llmStart)
-                    .build(), error);
             return;
         }
 
@@ -511,22 +474,6 @@ public class ChatServiceImpl implements IChatService {
                         .finishReason(null)
                         .build(),
                 retrievalSources, duration);
-
-        llmTraceRecorder.recordSuccess(ILlmTraceRecorder.LlmTraceRecord.builder()
-                .requestId(requestId)
-                .appId(application.getId())
-                .appName(application.getName())
-                .modelId(application.getModelId())
-                .modelName(modelName)
-                .promptContent(JSON.toJSONString(messages))
-                .inputTokens(outcome.getInputTokens())
-                .outputTokens(outcome.getOutputTokens())
-                .totalTokens(outcome.getTotalTokens())
-                .responseContent(finalText)
-                .finishReason(outcome.getFinishReason())
-                .duration(System.currentTimeMillis() - llmStart)
-                .startTimeMs(llmStart)
-                .build());
 
         updateSessionStats(session, aiMessage);
         addApplicationTokens(application.getId(), outcome.getTotalTokens());

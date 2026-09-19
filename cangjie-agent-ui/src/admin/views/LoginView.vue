@@ -97,8 +97,13 @@ async function onSubmit() {
   await formRef.value.validate()
   try {
     loading.value = true
-    await userStore.login(form as any)
+    const res = await userStore.login(form as any)
     ElMessage.success('登录成功')
+    if (res.user?.mustChangePassword) {
+      // 首次登录使用初始密码，强制先改密
+      router.replace('/change-password')
+      return
+    }
     const redirect = String(route.query.redirect || '/dashboard')
     router.replace(redirect)
   } finally {

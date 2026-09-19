@@ -7,7 +7,7 @@ import cn.cangjiecloud.tool.handler.ToolHandlerRegistry;
 import cn.cangjiecloud.tool.service.IToolProviderService;
 import cn.cangjiecloud.tool.service.ToolServiceImpl;
 import cn.cangjiecloud.core.tool.ToolSpecification;
-import com.alibaba.fastjson.JSON;
+import cn.cangjiecloud.common.util.JsonUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -71,21 +71,21 @@ public class ToolProviderServiceImpl implements IToolProviderService {
         ToolEntity entity = toolService.resolveByCallName(toolName);
         if (entity == null) {
             log.warn("工具不存在: toolName={}", toolName);
-            return JSON.toJSONString(Map.of("success", false, "error", "工具不存在: " + toolName));
+            return JsonUtils.toJSONString(Map.of("success", false, "error", "工具不存在: " + toolName));
         }
 
         String toolType = resolveToolType(entity);
         AbsToolHandler handler = handlerRegistry.get(toolType);
         if (handler == null) {
             log.warn("不支持的工具类型: toolName={}, toolType={}", toolName, toolType);
-            return JSON.toJSONString(Map.of("success", false, "error", "不支持的工具类型"));
+            return JsonUtils.toJSONString(Map.of("success", false, "error", "不支持的工具类型"));
         }
 
         var result = handler.execute(entity, arguments);
         if (Boolean.TRUE.equals(result.getSuccess())) {
             return result.getOutput() != null ? result.getOutput().toString() : "";
         }
-        return JSON.toJSONString(Map.of("success", false, "error", result.getError()));
+        return JsonUtils.toJSONString(Map.of("success", false, "error", result.getError()));
     }
 
     private String resolveToolType(ToolEntity entity) {

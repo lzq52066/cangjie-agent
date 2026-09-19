@@ -11,13 +11,9 @@ import cn.cangjiecloud.core.harness.HarnessListener;
 import cn.cangjiecloud.core.harness.HarnessOutcome;
 import cn.cangjiecloud.core.harness.LocalToolCall;
 import cn.cangjiecloud.core.harness.RunStatus;
-import cn.cangjiecloud.model.entity.ModelEntity;
-import cn.cangjiecloud.model.service.IModelService;
 import cn.cangjiecloud.observability.entity.AgentRunEntity;
 import cn.cangjiecloud.observability.service.IAgentRunService;
-import cn.cangjiecloud.observability.service.ILlmTraceRecorder;
 import cn.cangjiecloud.common.exception.ApiException;
-import com.alibaba.fastjson.JSON;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -40,8 +36,6 @@ public class LocalToolResumeService {
     private final IApplicationService applicationService;
     private final IChatSessionService chatSessionService;
     private final IChatMessageService chatMessageService;
-    private final IModelService modelService;
-    private final ILlmTraceRecorder llmTraceRecorder;
     private final SessionSummaryService sessionSummaryService;
 
     /**
@@ -116,7 +110,9 @@ public class LocalToolResumeService {
         if (outcome.getStatus() != RunStatus.COMPLETED) {
             String error = outcome.getErrorMessage() == null ? "恢复运行失败" : outcome.getErrorMessage();
             builder.errorMessage(error);
-            recordTrace(outcome, null, error);
+            // 模型调用 trace 已由 ChatModelListener 统一记录，这里只留业务侧日志
+            log.warn("本地工具恢复运行未完成: runId={}, status={}, error={}",
+                    outcome.getRunId(), outcome.getStatus(), error);
             return builder.build();
         }
 
@@ -127,7 +123,7 @@ public class LocalToolResumeService {
     }
 
     /**
-     * 收尾：回答落库为 assistant 消息、会话与应用统计累加、模型 trace 记录。
+     * 收尾：回答落库为 assistant 消息、会话与应用统计累加。
      */
     private void persist(HarnessOutcome outcome, String finalText) {
         AgentRunEntity run = agentRunService.getById(outcome.getRunId());
@@ -140,7 +136,6 @@ public class LocalToolResumeService {
         if (session == null || application == null) {
             log.warn("恢复运行的会话或应用不存在，跳过落库: runId={}, sessionId={}, appId={}",
                     outcome.getRunId(), sessionId, applicationId);
-            recordTrace(outcome, finalText, null);
             return;
         }
         // 会话归属以 run 记录为准，回填给 DTO 供前端关联
@@ -159,40 +154,7 @@ public class LocalToolResumeService {
         chatSessionService.updateById(session);
 
         addApplicationTokens(application.getId(), outcome.getTotalTokens());
-        recordTrace(outcome, finalText, null);
         sessionSummaryService.maybeSummarizeAsync(session.getSessionId(), application.getModelId());
-    }
-
-    private void recordTrace(HarnessOutcome outcome, String finalText, String error) {
-        try {
-            AgentRunEntity run = agentRunService.getById(outcome.getRunId());
-            String applicationId = run == null ? null : run.getAppId();
-            ApplicationEntity application = applicationId == null ? null
-                    : applicationService.getById(applicationId);
-            String modelId = application == null ? null : application.getModelId();
-            ILlmTraceRecorder.LlmTraceRecord.LlmTraceRecordBuilder record = ILlmTraceRecorder.LlmTraceRecord.builder()
-                    .requestId("chatcmpl-" + outcome.getRunId())
-                    .appId(applicationId)
-                    .appName(application == null ? null : application.getName())
-                    .sessionId(run == null ? null : run.getSessionId())
-                    .modelId(modelId)
-                    .modelName(resolveModelName(modelId))
-                    .promptContent(JSON.toJSONString(outcome.getConversation()))
-                    .duration(outcome.getDurationMs());
-            if (error == null) {
-                llmTraceRecorder.recordSuccess(record
-                        .inputTokens(outcome.getInputTokens())
-                        .outputTokens(outcome.getOutputTokens())
-                        .totalTokens(outcome.getTotalTokens())
-                        .responseContent(finalText)
-                        .finishReason(outcome.getFinishReason())
-                        .build());
-            } else {
-                llmTraceRecorder.recordFailure(record.build(), error);
-            }
-        } catch (Exception ex) {
-            log.warn("恢复运行的 llm_trace 记录失败: runId={}, {}", outcome.getRunId(), ex.getMessage());
-        }
     }
 
     /**
@@ -242,20 +204,5 @@ public class LocalToolResumeService {
                 .expireAt(approval.getExpireAt())
                 .resumeToken(approval.getResumeToken())
                 .build();
-    }
-
-    private String resolveModelName(String modelId) {
-        if (!StringUtils.hasText(modelId)) {
-            return "默认模型";
-        }
-        try {
-            ModelEntity model = modelService.getById(modelId);
-            if (model != null && StringUtils.hasText(model.getName())) {
-                return model.getName();
-            }
-        } catch (Exception e) {
-            log.warn("获取模型名称失败: modelId={}, {}", modelId, e.getMessage());
-        }
-        return modelId;
     }
 }

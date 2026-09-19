@@ -1,12 +1,13 @@
 package cn.cangjiecloud.workflow.service;
 
-import com.alibaba.fastjson.JSONArray;
-import com.alibaba.fastjson.JSONObject;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.core.workflow.RetryExecutor;
 import cn.cangjiecloud.core.workflow.WorkflowNode;
 import cn.cangjiecloud.core.workflow.WorkflowNodeRegistry;
 import cn.cangjiecloud.workflow.api.dto.WorkflowNodeDTO;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
@@ -90,7 +91,7 @@ public class WorkflowExecutionEngine {
      * @param inputs     工作流输入
      * @return 执行结果（所有节点输出合并后的变量 Map）
      */
-    public Map<String, Object> execute(List<WorkflowNodeDTO> nodes, JSONArray edgesArray,
+    public Map<String, Object> execute(List<WorkflowNodeDTO> nodes, ArrayNode edgesArray,
                                         Map<String, Object> inputs) {
         return execute(nodes, edgesArray, inputs, null);
     }
@@ -98,7 +99,7 @@ public class WorkflowExecutionEngine {
     /**
      * 并行执行工作流 DAG（带节点事件监听）
      */
-    public Map<String, Object> execute(List<WorkflowNodeDTO> nodes, JSONArray edgesArray,
+    public Map<String, Object> execute(List<WorkflowNodeDTO> nodes, ArrayNode edgesArray,
                                         Map<String, Object> inputs, NodeEventListener listener) {
         if (nodes == null || nodes.isEmpty()) {
             throw new ApiException("工作流节点为空");
@@ -114,13 +115,13 @@ public class WorkflowExecutionEngine {
         Map<String, List<String>> reverseAdj = new HashMap<>();
 
         for (int i = 0; i < edgesArray.size(); i++) {
-            JSONObject edge = edgesArray.getJSONObject(i);
-            String source = edge.getString("source");
-            String target = edge.getString("target");
+            ObjectNode edge = (ObjectNode) edgesArray.get(i);
+            String source = textOrNull(edge, "source");
+            String target = textOrNull(edge, "target");
             if (source == null || target == null) {
                 continue;
             }
-            String cond = edge.getString("condition");
+            String cond = textOrNull(edge, "condition");
             adjacency.computeIfAbsent(source, k -> new ArrayList<>())
                     .add(new Edge(target, cond));
             reverseAdj.computeIfAbsent(target, k -> new ArrayList<>()).add(source);
@@ -380,6 +381,14 @@ public class WorkflowExecutionEngine {
                 readyQueue.add(edge.target);
             }
         }
+    }
+
+    /**
+     * 读取节点的字符串字段，字段缺失或为 JSON null 时返回 null（对齐 fastjson getString 语义）。
+     */
+    private String textOrNull(ObjectNode node, String field) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? null : value.asText();
     }
 
     /**

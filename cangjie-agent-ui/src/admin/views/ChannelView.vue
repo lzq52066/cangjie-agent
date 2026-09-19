@@ -64,9 +64,8 @@
         </el-table-column>
       </el-table>
 
-      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                     :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
-                     :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+      <DataPager v-model:current-page="pageNum" v-model:page-size="pageSize"
+                 :total="total" @change="loadList" />
       </template>
     </el-card>
 
@@ -156,9 +155,8 @@
         </el-table-column>
       </el-table>
 
-      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                     :total="msgTotal" v-model:current-page="msgPageNum" v-model:page-size="msgPageSize"
-                     :page-sizes="[10, 20, 50]" @size-change="loadMessages" @current-change="loadMessages" />
+      <DataPager v-model:current-page="msgPageNum" v-model:page-size="msgPageSize"
+                 :total="msgTotal" @change="loadMessages" />
       <el-empty v-if="!msgLoading && messages.length === 0" description="暂无消息记录" :image-size="80" />
     </el-dialog>
   </div>
@@ -169,6 +167,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
+import { copyText } from '@admin/utils/clipboard'
 import { channelApi } from '@admin/api/channel-api'
 import { applicationApi } from '@admin/api/application-api'
 import ChannelMessagesPanel from '@admin/components/trigger/ChannelMessagesPanel.vue'
@@ -345,13 +345,8 @@ function openMessages(row: any) {
   loadMessages()
 }
 
-async function copy(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('已复制')
-  } catch {
-    ElMessage.warning('复制失败，请手动选择文本')
-  }
+function copy(text?: string) {
+  return copyText(text, '复制失败，请手动选择文本')
 }
 
 onMounted(async () => {
@@ -370,5 +365,4 @@ onMounted(async () => {
 .toolbar-left { display: flex; gap: 12px; }
 .copy-line { display: flex; align-items: center; gap: 10px; }
 .mono { font-family: Consolas, Monaco, monospace; font-size: 13px; word-break: break-all; }
-.pager { margin-top: 16px; justify-content: flex-end; }
 </style>

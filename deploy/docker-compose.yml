@@ -3,7 +3,14 @@
 # 各服务自包含，构建上下文即各自目录：
 #   ./backend/cangjie-start.jar  后端制品（由 pack.ps1 / pack.sh 从 target 拷贝）
 #   ./frontend/dist/             前端制品（admin + chat）
-#   ./postgres、./backend、./frontend  运行时镜像定义
+#   ./postgres、./backend、./frontend  运行时镜像/配置定义
+#     ./redis/redis.conf          Redis 配置（修改后 ./04-start.sh 生效，密码不写在此文件）
+#     ./backend/logback-spring.xml 后端日志配置（SQL 并入 info.log，restart backend 生效）
+#   ./data/                      持久化数据（数据库/缓存/对象存储/日志），直接躺在宿主机上
+#
+# 端口策略：对外只暴露前端 Nginx 的 80 端口（由 WEB_PORT 控制）。
+#   PostgreSQL / Redis / MinIO 均不发布到宿主机，只在 cangjie-net 内网互通；
+#   MinIO 文件（预签名 URL）走 Nginx 的 /<桶名>/，控制台走 /minio-console/。
 # 用法：见 README.md / 直接执行 ./deploy-all.sh
 # ============================================================
 name: cangjie
@@ -23,7 +30,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cangjie_secret}
       TZ: Asia/Shanghai
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      # 数据直接落在宿主机 ./data/postgres，便于备份与迁移
+      # :z 用于 SELinux 开启的系统（CentOS/RedHat 默认开启），非 SELinux 环境会被忽略
+      - ./data/postgres:/var/lib/postgresql/data:z
     networks: [cangjie-net]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cangjie} -d ${POSTGRES_DB:-cangjie_agent}"]
@@ -31,17 +40,24 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+    # 数据库仅供容器内网访问，不发布到宿主机（需要备份直接用 ./data/postgres）
 
   # ---------- Redis 7 ----------
   redis:
     image: redis:7-alpine
     container_name: cangjie-redis
     restart: unless-stopped
-    command: redis-server --requirepass ${REDIS_PASSWORD:-redis_secret} --appendonly yes
+    # 以挂载的 redis/redis.conf 启动；密码由 .env 的 REDIS_PASSWORD 在命令行注入
+    # （命令行参数优先级高于配置文件，避免把密码写进 redis.conf）
+    command:
+      - redis-server
+      - /etc/redis/redis.conf
+      - --requirepass
+      - ${REDIS_PASSWORD:-redis_secret}
     volumes:
-      - redis-data:/data
+      - ./data/redis:/data:z
+      # 配置文件只读挂载，改完执行 ./04-start.sh 即可生效
+      - ./redis/redis.conf:/etc/redis/redis.conf:ro,z
     networks: [cangjie-net]
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secret}", "ping"]
@@ -49,8 +65,7 @@ services:
       timeout: 3s
       retries: 10
       start_period: 10s
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    # Redis 仅供容器内网访问，不发布到宿主机
 
   # ---------- MinIO 对象存储 ----------
   minio:
@@ -61,8 +76,12 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin123}
+      # 控制台走 Nginx 的 /minio-console/ 子路径（唯一对外入口是 80 端口）
+      MINIO_BROWSER_REDIRECT_URL: ${MINIO_CONSOLE_PUBLIC_URL:-http://localhost/minio-console}
+      MINIO_BROWSER_REDIRECT_URL_DYNAMIC: "on"
     volumes:
-      - minio-data:/data
+      # 对象存储文件直接落在宿主机 ./data/minio
+      - ./data/minio:/data:z
     networks: [cangjie-net]
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
@@ -70,9 +89,7 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
-    ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    # MinIO 的 9000/9001 均不发布到宿主机，仅通过前端 Nginx 反代对外提供服务
 
   # ---------- MinIO 建桶（一次性，退出即完成） ----------
   createbucket:
@@ -98,8 +115,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    image: cangjie-agent:latest
-    container_name: cangjie-agent
+    image: cangjie-backend:latest
+    container_name: cangjie-backend
     restart: unless-stopped
     environment:
       SPRING_PROFILES_ACTIVE: docker
@@ -113,7 +130,7 @@ services:
       SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secret}
       OSS_TYPE: minio
       OSS_MINIO_ENDPOINT: http://minio:9000
-      OSS_MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-http://localhost:9000}
+      OSS_MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-http://localhost}
       OSS_MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
       OSS_MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin123}
       OSS_MINIO_BUCKET: ${MINIO_BUCKET:-cangjie-files}
@@ -123,7 +140,11 @@ services:
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1024}
       CANGJIE_MODEL_KEY_SECRET: ${CANGJIE_MODEL_KEY_SECRET:-change-me-model-key-secret-32chars}
       SA_TOKEN_JWT_SECRET_KEY: ${SA_TOKEN_JWT_SECRET_KEY:-change-me-to-a-random-64-chars-string}
-      SYSTEM_DEFAULT_PASSWORD: ${SYSTEM_DEFAULT_PASSWORD:-cangjiecloud@123}
+      # 外部 logback 配置：开启 MyBatis SQL 日志并写入 /app/logs/sql.log（见 backend/logback-spring.xml）
+      LOGGING_CONFIG: file:/app/logback-spring.xml
+      SYSTEM_DEFAULT_USERNAME: ${SYSTEM_DEFAULT_USERNAME:-admin}
+      # 管理员初始密码：首次登录后会被强制修改
+      SYSTEM_DEFAULT_PASSWORD: ${SYSTEM_DEFAULT_PASSWORD:-admin123}
     depends_on:
       postgres:
         condition: service_healthy
@@ -134,7 +155,10 @@ services:
       createbucket:
         condition: service_completed_successfully
     volumes:
-      - backend-logs:/app/logs
+      # 后端日志直接落在宿主机 ./data/logs（error.log / info.log / sql.log）
+      - ./data/logs:/app/logs:z
+      # 运行时日志配置（只读），改完 docker compose restart backend 即生效，无需重打 jar
+      - ./backend/logback-spring.xml:/app/logback-spring.xml:ro,z
     networks: [cangjie-net]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
@@ -150,20 +174,17 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    image: cangjie-agent-ui:latest
-    container_name: cangjie-frontend
+    image: cangjie-nginx:latest
+    container_name: cangjie-nginx
     restart: unless-stopped
     depends_on:
       - backend
+    environment:
+      # 注入 Nginx 模板：S3 预签名 URL 反代到 /<桶名>/，桶名与 .env 保持一致
+      MINIO_BUCKET: ${MINIO_BUCKET:-cangjie-files}
     ports:
       - "${WEB_PORT:-80}:80"
     networks: [cangjie-net]
-
-volumes:
-  postgres-data:
-  redis-data:
-  minio-data:
-  backend-logs:
 
 networks:
   cangjie-net:

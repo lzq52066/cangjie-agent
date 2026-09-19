@@ -1,12 +1,13 @@
 package cn.cangjiecloud.agent;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONArray;
 import cn.cangjiecloud.common.exception.ApiException;
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.core.workflow.WorkflowNode;
 import cn.cangjiecloud.core.workflow.WorkflowNodeRegistry;
 import cn.cangjiecloud.workflow.api.dto.WorkflowNodeDTO;
 import cn.cangjiecloud.workflow.service.WorkflowExecutionEngine;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -96,19 +97,24 @@ class WorkflowExecutionEngineTest {
         return dto;
     }
 
-    private JSONArray edges(String... pairs) {
-        JSONArray array = new JSONArray();
+    private ArrayNode edges(String... pairs) {
+        ArrayNode array = JsonUtils.newArray();
         for (int i = 0; i + 1 < pairs.length; i += 2) {
-            array.add(JSON.parseObject(
-                    "{\"source\":\"" + pairs[i] + "\",\"target\":\"" + pairs[i + 1] + "\"}"));
+            ObjectNode e = JsonUtils.newObject();
+            e.put("source", pairs[i]);
+            e.put("target", pairs[i + 1]);
+            array.add(e);
         }
         return array;
     }
 
-    private JSONArray edgesWithCondition(String source, String target, String condition) {
-        JSONArray array = new JSONArray();
-        array.add(JSON.parseObject(
-                "{\"source\":\"" + source + "\",\"target\":\"" + target + "\",\"condition\":\"" + condition + "\"}"));
+    private ArrayNode edgesWithCondition(String source, String target, String condition) {
+        ArrayNode array = JsonUtils.newArray();
+        ObjectNode e = JsonUtils.newObject();
+        e.put("source", source);
+        e.put("target", target);
+        e.put("condition", condition);
+        array.add(e);
         return array;
     }
 
@@ -117,7 +123,7 @@ class WorkflowExecutionEngineTest {
         WorkflowExecutionEngine engine = engine(List.of(stub("taskA", false), stub("taskB", false)));
         List<WorkflowNodeDTO> nodes = List.of(
                 node("s", "start"), node("a", "taskA"), node("b", "taskB"), node("e", "end"));
-        JSONArray edges = new JSONArray();
+        ArrayNode edges = JsonUtils.newArray();
         edges.addAll(edges("s", "a", "s", "b"));
         edges.addAll(edges("a", "e", "b", "e"));
 
@@ -149,7 +155,7 @@ class WorkflowExecutionEngineTest {
                 node("s", "start"), node("c", "condition"),
                 node("t", "taskTrue"), node("f", "taskFalse"), node("e", "end"));
 
-        JSONArray edges = new JSONArray();
+        ArrayNode edges = JsonUtils.newArray();
         edges.addAll(edges("s", "c"));
         edges.addAll(edgesWithCondition("c", "t", "true"));
         edges.addAll(edgesWithCondition("c", "f", "false"));

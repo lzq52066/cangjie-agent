@@ -1,11 +1,12 @@
 package cn.cangjiecloud.system.controller;
 
-import com.alibaba.fastjson.JSONObject;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.system.entity.SystemSettingEntity;
 import cn.cangjiecloud.system.mapper.SystemSettingMapper;
 import cn.dev33.satoken.annotation.SaCheckLogin;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -32,13 +33,13 @@ public class SystemController {
     }
 
     @GetMapping("/setting/{type}")
-    public R<JSONObject> getSetting(@PathVariable Integer type) {
+    public R<ObjectNode> getSetting(@PathVariable Integer type) {
         SystemSettingEntity entity = systemSettingMapper.selectById(type);
-        return R.data(entity == null ? new JSONObject() : entity.getMeta());
+        return R.data(entity == null ? JsonUtils.newObject() : entity.getMeta());
     }
 
     @PutMapping("/setting/{type}")
-    public R<Void> saveSetting(@PathVariable Integer type, @RequestBody JSONObject meta) {
+    public R<Void> saveSetting(@PathVariable Integer type, @RequestBody ObjectNode meta) {
         SystemSettingEntity entity = new SystemSettingEntity();
         entity.setType(type);
         entity.setMeta(meta);

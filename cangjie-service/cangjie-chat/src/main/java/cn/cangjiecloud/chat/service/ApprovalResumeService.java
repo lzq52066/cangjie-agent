@@ -11,13 +11,9 @@ import cn.cangjiecloud.core.harness.ApprovalRequest;
 import cn.cangjiecloud.core.harness.HarnessListener;
 import cn.cangjiecloud.core.harness.HarnessOutcome;
 import cn.cangjiecloud.core.harness.RunStatus;
-import cn.cangjiecloud.model.entity.ModelEntity;
-import cn.cangjiecloud.model.service.IModelService;
 import cn.cangjiecloud.observability.service.IAgentApprovalService;
-import cn.cangjiecloud.observability.service.ILlmTraceRecorder;
 import cn.cangjiecloud.common.context.UserContext;
 import cn.cangjiecloud.common.exception.ApiException;
-import com.alibaba.fastjson.JSON;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -46,8 +42,6 @@ public class ApprovalResumeService {
     private final IApplicationService applicationService;
     private final IChatSessionService chatSessionService;
     private final IChatMessageService chatMessageService;
-    private final IModelService modelService;
-    private final ILlmTraceRecorder llmTraceRecorder;
     private final SessionSummaryService sessionSummaryService;
 
     /**
@@ -127,7 +121,9 @@ public class ApprovalResumeService {
         if (outcome.getStatus() != RunStatus.COMPLETED) {
             String error = outcome.getErrorMessage() == null ? "恢复运行失败" : outcome.getErrorMessage();
             builder.errorMessage(error);
-            recordTrace(approval, outcome, null, error);
+            // 模型调用 trace 已由 ChatModelListener 统一记录，这里只留业务侧日志
+            log.warn("审批恢复运行未完成: runId={}, status={}, error={}",
+                    outcome.getRunId(), outcome.getStatus(), error);
             return builder.build();
         }
 
@@ -138,7 +134,7 @@ public class ApprovalResumeService {
     }
 
     /**
-     * 收尾：回答落库为 assistant 消息、会话与应用统计累加、模型 trace 记录。
+     * 收尾：回答落库为 assistant 消息、会话与应用统计累加。
      * <p>
      * 回答已经在库里（agent_run_step），落库失败只降级为日志，不能把已成功的恢复报成失败。
      */
@@ -150,7 +146,6 @@ public class ApprovalResumeService {
         if (session == null || application == null) {
             log.warn("恢复运行的会话或应用不存在，跳过落库: runId={}, sessionId={}, appId={}",
                     outcome.getRunId(), approval.getSessionId(), approval.getApplicationId());
-            recordTrace(approval, outcome, finalText, null);
             return;
         }
 
@@ -169,39 +164,7 @@ public class ApprovalResumeService {
         chatSessionService.updateById(session);
 
         addApplicationTokens(application.getId(), outcome.getTotalTokens());
-        recordTrace(approval, outcome, finalText, null);
         sessionSummaryService.maybeSummarizeAsync(session.getSessionId(), application.getModelId());
-    }
-
-    private void recordTrace(ApprovalRequest approval, HarnessOutcome outcome,
-                             String finalText, String error) {
-        try {
-            ApplicationEntity application = approval.getApplicationId() == null ? null
-                    : applicationService.getById(approval.getApplicationId());
-            String modelId = application == null ? null : application.getModelId();
-            ILlmTraceRecorder.LlmTraceRecord.LlmTraceRecordBuilder record = ILlmTraceRecorder.LlmTraceRecord.builder()
-                    .requestId("chatcmpl-" + approval.getRunId())
-                    .appId(approval.getApplicationId())
-                    .appName(application == null ? null : application.getName())
-                    .sessionId(approval.getSessionId())
-                    .modelId(modelId)
-                    .modelName(resolveModelName(modelId))
-                    .promptContent(JSON.toJSONString(outcome.getConversation()))
-                    .duration(outcome.getDurationMs());
-            if (error == null) {
-                llmTraceRecorder.recordSuccess(record
-                        .inputTokens(outcome.getInputTokens())
-                        .outputTokens(outcome.getOutputTokens())
-                        .totalTokens(outcome.getTotalTokens())
-                        .responseContent(finalText)
-                        .finishReason(outcome.getFinishReason())
-                        .build());
-            } else {
-                llmTraceRecorder.recordFailure(record.build(), error);
-            }
-        } catch (Exception ex) {
-            log.warn("恢复运行的 llm_trace 记录失败: runId={}, {}", outcome.getRunId(), ex.getMessage());
-        }
     }
 
     /**
@@ -236,20 +199,5 @@ public class ApprovalResumeService {
                 .expireAt(approval.getExpireAt())
                 .resumeToken(approval.getResumeToken())
                 .build();
-    }
-
-    private String resolveModelName(String modelId) {
-        if (!StringUtils.hasText(modelId)) {
-            return "默认模型";
-        }
-        try {
-            ModelEntity model = modelService.getById(modelId);
-            if (model != null && StringUtils.hasText(model.getName())) {
-                return model.getName();
-            }
-        } catch (Exception e) {
-            log.warn("获取模型名称失败: modelId={}, {}", modelId, e.getMessage());
-        }
-        return modelId;
     }
 }

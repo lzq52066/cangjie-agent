@@ -2,8 +2,8 @@ package cn.cangjiecloud.application.template;
 
 import cn.cangjiecloud.application.entity.ApplicationTemplateEntity;
 import cn.cangjiecloud.application.service.IApplicationTemplateService;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import cn.cangjiecloud.common.util.JsonUtils;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -68,9 +68,9 @@ public class OfficialTemplateBootstrap implements ApplicationRunner {
     }
 
     private String importIfNeeded(String bundleJson) {
-        JSONObject bundle = JSON.parseObject(bundleJson);
-        String templateKey = bundle.getString("templateKey");
-        int bundleVersion = bundle.getIntValue("version") > 0 ? bundle.getIntValue("version") : 1;
+        ObjectNode bundle = JsonUtils.parseObject(bundleJson);
+        String templateKey = bundle.hasNonNull("templateKey") ? bundle.get("templateKey").asText() : null;
+        int bundleVersion = bundle.path("version").asInt(0) > 0 ? bundle.path("version").asInt() : 1;
 
         ApplicationTemplateEntity existing = templateKey == null ? null
                 : templateService.getOne(new LambdaQueryWrapper<ApplicationTemplateEntity>()

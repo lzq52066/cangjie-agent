@@ -1,12 +1,14 @@
 package cn.cangjiecloud.tool.plugin.builtin;
 
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.core.plugin.Plugin;
 import cn.cangjiecloud.core.plugin.PluginContext;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.NullNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -18,25 +20,31 @@ import java.util.Map;
 public abstract class AbstractBuiltinPlugin implements Plugin {
 
     /** 成功结果：{"success": true, ...data} */
-    protected static JSONObject ok(Map<String, Object> data) {
-        JSONObject jo = new JSONObject(new LinkedHashMap<>());
-        jo.put("success", true);
+    protected static ObjectNode ok(Map<String, Object> data) {
+        ObjectNode node = JsonUtils.newObject();
+        node.put("success", true);
         if (data != null) {
-            jo.putAll(data);
+            for (Map.Entry<String, Object> entry : data.entrySet()) {
+                Object value = entry.getValue();
+                JsonNode converted = value instanceof JsonNode jsonNode
+                        ? jsonNode
+                        : JsonUtils.mapper().valueToTree(value);
+                node.set(entry.getKey(), converted != null ? converted : NullNode.instance);
+            }
         }
-        return jo;
+        return node;
     }
 
     /** 失败结果：{"success": false, "error": message} */
-    protected static JSONObject error(String message) {
-        JSONObject jo = new JSONObject(new LinkedHashMap<>());
-        jo.put("success", false);
-        jo.put("error", message);
-        return jo;
+    protected static ObjectNode error(String message) {
+        ObjectNode node = JsonUtils.newObject();
+        node.put("success", false);
+        node.put("error", message);
+        return node;
     }
 
     /** 必填参数缺失 */
-    protected static JSONObject missing(String name) {
+    protected static ObjectNode missing(String name) {
         return error("参数 " + name + " 不能为空");
     }
 

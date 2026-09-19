@@ -58,9 +58,8 @@
       </el-table-column>
     </el-table>
 
-    <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                   :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
-                   :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+    <DataPager v-model:current-page="pageNum" v-model:page-size="pageSize"
+               :total="total" @change="loadList" />
 
     <!-- 执行详情抽屉 -->
     <el-drawer v-model="drawer" :title="`Agent 执行详情${detail?.run ? ' - ' + detail.run.id : ''}`"
@@ -102,11 +101,11 @@
               <div class="step-io">
                 <div v-if="row.input">
                   <div class="step-io-label">入参</div>
-                  <pre class="code-block">{{ pretty(row.input) }}</pre>
+                  <pre class="code-block">{{ prettyJson(row.input) }}</pre>
                 </div>
                 <div v-if="row.output">
                   <div class="step-io-label">产出</div>
-                  <pre class="code-block">{{ pretty(row.output) }}</pre>
+                  <pre class="code-block">{{ prettyJson(row.output) }}</pre>
                 </div>
                 <el-alert v-if="row.errorMessage" type="error" :closable="false" show-icon
                           :title="row.errorMessage" style="margin-top:8px" />
@@ -197,6 +196,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
+import { prettyJson } from '@admin/utils/format'
 import { observabilityApi } from '@admin/api/observability-api'
 import { applicationApi } from '@admin/api/application-api'
 
@@ -254,14 +255,6 @@ function approvalStatusLabel(s?: string) {
 function fmtDuration(ms?: number | null) {
   if (ms == null) return '-'
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(2)} s`
-}
-function pretty(text?: string) {
-  if (!text) return '-'
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2)
-  } catch {
-    return text
-  }
 }
 
 const appOptions = ref<any[]>([])
@@ -338,7 +331,6 @@ async function showDetail(runId: string) {
 
 <style lang="scss" scoped>
 .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
-.pager { margin-top: 16px; justify-content: flex-end; }
 .step-io { padding: 8px 16px; }
 .step-io-label { font-size: 12px; color: #909399; margin: 6px 0 4px; }
 .code-block {

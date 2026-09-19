@@ -38,9 +38,8 @@
               </div>
             </div>
             <el-empty v-if="!datasets.length" description="暂无数据集，点击右上角新建" :image-size="80" />
-            <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                           :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
-                           :page-sizes="[10, 20, 50]" @size-change="loadDatasets" @current-change="loadDatasets" />
+            <DataPager v-model:current-page="pageNum" v-model:page-size="pageSize"
+                       :total="total" @change="loadDatasets" />
           </div>
         </el-card>
       </el-col>
@@ -71,9 +70,8 @@
               </template>
             </el-table-column>
           </el-table>
-          <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                         :total="caseTotal" v-model:current-page="casePageNum" v-model:page-size="casePageSize"
-                         :page-sizes="[10, 20, 50]" @size-change="loadCases" @current-change="loadCases" />
+          <DataPager v-model:current-page="casePageNum" v-model:page-size="casePageSize"
+                     :total="caseTotal" @change="loadCases" />
         </el-card>
         <el-card v-else>
           <el-empty description="请选择左侧数据集，或先新建一个数据集" :image-size="100" />
@@ -223,10 +221,8 @@
           </template>
         </el-table-column>
       </el-table>
-      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                     :total="historyTotal" v-model:current-page="historyPageNum"
-                     v-model:page-size="historyPageSize" :page-sizes="[10, 20, 50]"
-                     @size-change="loadHistory" @current-change="loadHistory" />
+      <DataPager v-model:current-page="historyPageNum" v-model:page-size="historyPageSize"
+                 :total="historyTotal" @change="loadHistory" />
     </el-drawer>
   </div>
 </template>
@@ -235,6 +231,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, MoreFilled, Clock } from '@element-plus/icons-vue'
+import DataPager from '@admin/components/DataPager.vue'
 import { evalApi } from '@admin/api/eval-api'
 import { modelApi } from '@admin/api/model-api'
 import { knowledgeApi } from '@admin/api/knowledge-api'
@@ -553,7 +550,6 @@ onMounted(async () => {
 .card-header {
   display: flex; justify-content: space-between; align-items: center;
 }
-.pager { margin-top: 16px; justify-content: flex-end; }
 .dataset-card {
   .dataset-item {
     display: flex; justify-content: space-between; align-items: center;

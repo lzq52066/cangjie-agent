@@ -48,9 +48,8 @@
                   :image-size="90" class="tpl-empty" />
       </div>
 
-      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                     :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
-                     :page-sizes="[12, 24, 48]" @size-change="loadList" @current-change="loadList" />
+      <DataPager v-model:current-page="pageNum" v-model:page-size="pageSize"
+                 :total="total" :page-sizes="[12, 24, 48]" @change="loadList" />
     </el-card>
 
     <!-- 从应用另存 -->
@@ -88,6 +87,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Upload, Star } from '@element-plus/icons-vue'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
 import { applicationApi, applicationTemplateApi } from '@admin/api/application-api'
 
 function typeLabel(t?: string) {
@@ -260,5 +260,4 @@ onMounted(async () => {
 }
 .tpl-footer { display: flex; align-items: center; gap: 8px; }
 .tpl-empty { grid-column: 1 / -1; }
-.pager { margin-top: 16px; justify-content: flex-end; }
 </style>

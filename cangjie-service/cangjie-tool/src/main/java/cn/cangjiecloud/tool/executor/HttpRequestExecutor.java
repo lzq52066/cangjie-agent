@@ -1,7 +1,6 @@
 package cn.cangjiecloud.tool.executor;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import cn.cangjiecloud.common.util.JsonUtils;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
 
@@ -60,7 +59,7 @@ public class HttpRequestExecutor {
             String respBody = response.body() != null ? response.body().string() : "";
             if (!response.isSuccessful()) {
                 log.warn("HTTP 工具调用失败: {} {} -> status={}", httpMethod, url, response.code());
-                return JSON.toJSONString(Map.of(
+                return JsonUtils.toJSONString(Map.of(
                         "status", response.code(),
                         "error", respBody,
                         "success", false
@@ -69,7 +68,7 @@ public class HttpRequestExecutor {
             return respBody;
         } catch (IOException e) {
             log.error("HTTP 工具执行异常: {} {}", httpMethod, url, e);
-            return JSON.toJSONString(Map.of(
+            return JsonUtils.toJSONString(Map.of(
                     "success", false,
                     "error", e.getMessage()
             ));

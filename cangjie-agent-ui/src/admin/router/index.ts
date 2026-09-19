@@ -8,6 +8,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../views/LoginView.vue'),
     meta: { public: true, title: '登录' }
   },
+  {
+    path: '/change-password',
+    component: () => import('../views/ChangePasswordView.vue'),
+    meta: { title: '修改初始密码' }
+  },
   { path: '/', redirect: '/dashboard' },
   {
     path: '/workflow/design/:id',
@@ -82,6 +87,16 @@ router.beforeEach(async (to, _from, next) => {
   }
   if (!userStore.userInfo) {
     try { await userStore.loadUserInfo() } catch { next({ path: '/login' }); return }
+  }
+  // 首次登录使用初始密码：强制留在改密页，改完清除标记后才放行
+  if (userStore.userInfo?.mustChangePassword && to.path !== '/change-password') {
+    next({ path: '/change-password' })
+    return
+  }
+  // 已完成改密后不应再停留在改密页
+  if (!userStore.userInfo?.mustChangePassword && to.path === '/change-password') {
+    next({ path: '/dashboard' })
+    return
   }
   next()
 })

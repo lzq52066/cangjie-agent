@@ -55,9 +55,8 @@
         </el-table-column>
       </el-table>
 
-      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                     :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
-                     :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+      <DataPager v-model:current-page="pageNum" v-model:page-size="pageSize"
+                 :total="total" @change="loadList" />
       </template>
     </el-card>
 
@@ -182,6 +181,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
 import { promptApi, type PromptResource } from '@admin/api/prompt-api'
 import MemoryManager from '@admin/components/MemoryManager.vue'
 
@@ -431,7 +431,6 @@ onMounted(loadList)
 
 <style lang="scss" scoped>
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-.pager { margin-top: 16px; justify-content: flex-end; }
 .hint { font-size: 12px; color: #909399; margin-top: 4px; }
 .hint-inline { margin-left: 10px; font-size: 12px; color: #909399; }
 .cmd { background: #f4f4f5; padding: 2px 6px; border-radius: 4px; color: #e6a23c; }

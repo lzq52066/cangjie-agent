@@ -56,9 +56,8 @@
         </el-table-column>
       </el-table>
 
-      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                     :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
-                     :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+      <DataPager v-model:current-page="pageNum" v-model:page-size="pageSize"
+                 :total="total" @change="loadList" />
       </template>
     </el-card>
 
@@ -111,9 +110,8 @@
         <el-table-column label="开始时间" prop="startTime" width="170" />
         <el-table-column label="错误" prop="errorMessage" min-width="180" show-overflow-tooltip />
       </el-table>
-      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                     :total="execTotal" v-model:current-page="execPageNum" v-model:page-size="execPageSize"
-                     :page-sizes="[10, 20, 50]" @size-change="loadExecutions" @current-change="loadExecutions" />
+      <DataPager v-model:current-page="execPageNum" v-model:page-size="execPageSize"
+                 :total="execTotal" @change="loadExecutions" />
       <template v-if="detailExecution">
         <el-divider>执行详情</el-divider>
         <ExecutionDetail :execution="detailExecution" />
@@ -128,6 +126,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
 import { workflowApi } from '@admin/api/workflow-api'
 import { applicationApi } from '@admin/api/application-api'
 import ExecutionDetail from '@admin/components/ExecutionDetail.vue'
@@ -324,5 +323,4 @@ onMounted(async () => {
 <style lang="scss" scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .tab-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.pager { margin-top: 16px; justify-content: flex-end; }
 </style>

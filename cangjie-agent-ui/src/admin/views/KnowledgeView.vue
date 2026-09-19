@@ -43,7 +43,7 @@
         <el-table-column label="文档数" prop="documentCount" width="80" align="center" />
         <el-table-column label="段落数" prop="paragraphCount" width="80" align="center" />
         <el-table-column label="创建时间" width="170" align="center">
-          <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
+          <template #default="{ row }">{{ formatDateTime(row.createTime) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="200" fixed="right" align="center">
           <template #default="{ row }">
@@ -58,9 +58,8 @@
         </el-table-column>
       </el-table>
 
-      <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                     :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
-                     :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+      <DataPager v-model:current-page="pageNum" v-model:page-size="pageSize"
+                 :total="total" @change="loadList" />
     </el-card>
 
     <!-- 创建/编辑对话框 -->
@@ -132,6 +131,8 @@ import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
+import { formatDateTime } from '@admin/utils/format'
 import { knowledgeApi } from '@admin/api/knowledge-api'
 
 const router = useRouter()
@@ -254,16 +255,10 @@ function strategyTag(code: string): any {
   return { smart: 'success', custom: 'warning' }[code] || ''
 }
 
-function formatTime(t: string) {
-  if (!t) return '-'
-  return t.replace('T', ' ').substring(0, 19)
-}
-
 onMounted(loadList)
 </script>
 
 <style lang="scss" scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .form-hint { margin-left: 8px; color: #909399; font-size: 12px; }
-.pager { margin-top: 16px; justify-content: flex-end; }
 </style>

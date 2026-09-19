@@ -7,6 +7,7 @@ import cn.cangjiecloud.core.rag.TextChunk;
 import cn.cangjiecloud.core.rag.TextSplitter;
 import cn.cangjiecloud.core.rag.TextSplitterFactory;
 import cn.cangjiecloud.core.rag.VectorStore;
+import cn.cangjiecloud.core.model.TokenEstimator;
 import cn.cangjiecloud.knowledge.api.enums.DocumentStatus;
 import cn.cangjiecloud.knowledge.entity.KnowledgeBaseEntity;
 import cn.cangjiecloud.knowledge.entity.KnowledgeDocumentEntity;
@@ -204,8 +205,7 @@ public class DocumentProcessingService {
     }
 
     private int estimateTokens(String text) {
-        if (text == null) return 0;
-        return (int) (text.length() * 0.75);
+        return TokenEstimator.count(text);
     }
 
     private List<String> parseSeparators(String separatorsJson) {

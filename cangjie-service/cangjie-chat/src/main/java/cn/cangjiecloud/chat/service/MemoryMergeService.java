@@ -3,10 +3,9 @@ package cn.cangjiecloud.chat.service;
 import cn.cangjiecloud.core.model.ChatMessage;
 import cn.cangjiecloud.core.model.ChatRequest;
 import cn.cangjiecloud.core.model.ChatResponse;
+import cn.cangjiecloud.core.model.ChatTraceContext;
 import cn.cangjiecloud.model.provider.OpenAICompatibleClient;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
-import lombok.RequiredArgsConstructor;
+import cn.cangjiecloud.common.util.JsonUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -19,16 +18,39 @@ import java.util.List;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class MemoryMergeService {
+
+    /** 合并判定的输出结构；由 responseSchema 强约束，模型不再可能返回格式漂移的结果 */
+    private static final String MERGE_SCHEMA = """
+            {
+              "type": "object",
+              "properties": {
+                "merge": {"type": "boolean", "description": "两条记忆是否应合并为一条"},
+                "content": {"type": "string", "description": "合并后的记忆；不合并时输出空字符串"}
+              },
+              "required": ["merge", "content"],
+              "additionalProperties": false
+            }
+            """;
+
+    /** 合并判定结果的强类型映射（public 以便 Jackson 反序列化） */
+    public record MergeDecision(boolean merge, String content) {
+    }
 
     /**
      * 判定两条记忆是否应合并，并返回合并后的内容。
      *
+     * @param appId      应用 ID（用于 trace 归属，可为 null）
+     * @param appName    应用名称（可为 null）
+     * @param modelId    模型 ID（可为 null）
+     * @param sessionId  会话 ID（可为 null）
+     * @param userId     用户 ID（可为 null）
      * @return 合并后的内容；判定为不应合并或调用失败时返回 null
      */
     public String decideMergedContent(OpenAICompatibleClient client, Double temperature,
-                                      String existing, String incoming) {
+                                      String existing, String incoming,
+                                      String appId, String appName, String modelId,
+                                      String sessionId, String userId) {
         try {
             String prompt = buildMergePrompt(existing, incoming);
             ChatRequest request = ChatRequest.builder()
@@ -36,8 +58,26 @@ public class MemoryMergeService {
                             ChatMessage.system("你是严谨的用户画像记忆整理助手，只输出 JSON。"),
                             ChatMessage.user(prompt)))
                     .temperature(0.0)
+                    .responseSchema(MERGE_SCHEMA)
+                    .responseSchemaName("memory_merge")
+                    // trace 由 ChatModelListener 统一落库，这里只负责把业务归属挂上
+                    .traceContext(ChatTraceContext.builder()
+                            .requestId(StringUtils.hasText(sessionId) ? "memory-merge-" + sessionId : "memory-merge")
+                            .appId(appId)
+                            .appName(appName)
+                            .sessionId(sessionId)
+                            .userId(userId)
+                            .modelId(modelId)
+                            .build())
                     .build();
-            ChatResponse response = client.chat(request);
+            ChatResponse response;
+            try {
+                response = client.chat(request);
+            } catch (Exception e) {
+                // 判定失败按"不合并"处理，保留两条记忆，不影响主流程
+                log.warn("记忆合并判定失败，按不合并处理: {}", e.getMessage());
+                return null;
+            }
             if (response == null || !StringUtils.hasText(response.getContent())) {
                 return null;
             }
@@ -47,11 +87,11 @@ public class MemoryMergeService {
             if (start < 0 || end <= start) {
                 return null;
             }
-            JSONObject obj = JSON.parseObject(raw.substring(start, end + 1));
-            if (obj == null || !obj.getBooleanValue("merge")) {
+            MergeDecision decision = JsonUtils.parseObject(raw.substring(start, end + 1), MergeDecision.class);
+            if (decision == null || !decision.merge()) {
                 return null;
             }
-            String merged = obj.getString("content");
+            String merged = decision.content();
             // 合并结果必须有信息量，且不应只是新记忆的原样复制（那属于判重而非合并）
             if (!StringUtils.hasText(merged)) {
                 return null;
@@ -82,7 +122,7 @@ public class MemoryMergeService {
                 只输出 JSON：
                 {"merge": true, "content": "合并后的记忆"}
                 或
-                {"merge": false}
+                {"merge": false, "content": ""}
                 """.formatted(existing, incoming);
     }
 }

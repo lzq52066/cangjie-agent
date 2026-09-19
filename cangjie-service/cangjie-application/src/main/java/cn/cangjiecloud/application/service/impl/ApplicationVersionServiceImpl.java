@@ -9,7 +9,7 @@ import cn.cangjiecloud.application.mapper.ApplicationVersionMapper;
 import cn.cangjiecloud.application.service.IApplicationService;
 import cn.cangjiecloud.application.service.IApplicationVersionService;
 import cn.cangjiecloud.common.exception.ApiException;
-import com.alibaba.fastjson.JSON;
+import cn.cangjiecloud.common.util.JsonUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -73,7 +73,7 @@ public class ApplicationVersionServiceImpl extends ServiceImpl<ApplicationVersio
         version.setConfig(entity.getConfig());
         version.setSuggestions(entity.getSuggestions());
         version.setIcon(entity.getIcon());
-        version.setSnapshot(JSON.toJSONString(entity));
+        version.setSnapshot(JsonUtils.toJSONString(entity));
         version.setPublishLog("发布版本 v" + (maxVersion + 1));
         version.setPublishBy(operator != null ? operator : "system");
         save(version);
@@ -99,7 +99,7 @@ public class ApplicationVersionServiceImpl extends ServiceImpl<ApplicationVersio
         }
 
         // 从快照恢复字段（保持 ID、createTime 等不变）
-        ApplicationEntity snapshot = JSON.parseObject(targetVersion.getSnapshot(), ApplicationEntity.class);
+        ApplicationEntity snapshot = JsonUtils.parseObject(targetVersion.getSnapshot(), ApplicationEntity.class);
         current.setName(snapshot.getName());
         current.setDescription(snapshot.getDescription());
         current.setType(snapshot.getType());

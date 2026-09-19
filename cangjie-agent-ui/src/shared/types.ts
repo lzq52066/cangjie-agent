@@ -42,6 +42,8 @@ export interface UserIdentity {
   phone: string
   role: string
   workspaceId: string
+  /** 是否为待修改的初始密码：true 时首次登录被强制要求修改密码 */
+  mustChangePassword?: boolean
   permissions?: string[]
   menus?: MenuNode[]
 }

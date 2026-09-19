@@ -114,7 +114,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
             throw new ApiException("新密码不能与旧密码相同");
         }
         user.setPassword(PASSWORD_ENCODER.encode(dto.getNewPassword()));
+        // 完成一次自助改密后解除首次登录强制改密标记
+        user.setMustChangePassword(false);
         updateById(user);
+        // 立即刷新会话中的身份信息，使 mustChangePassword=false 及时生效
+        UserContext.clearIdentity();
     }
 
     private UserEntity requireCurrentUser() {
@@ -145,6 +149,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
                 .phone(user.getPhone())
                 .role(user.getRole())
                 .workspaceId(AppConst.Workspace.DEFAULT_WORKSPACE_ID)
+                .mustChangePassword(Boolean.TRUE.equals(user.getMustChangePassword()))
                 .build();
     }
 
@@ -161,6 +166,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
         admin.setIsActive(true);
         admin.setSource("LOCAL");
         admin.setLanguage("zh_CN");
+        // 内置管理员使用初始密码，强制首次登录后修改
+        admin.setMustChangePassword(true);
         admin.setCreateBy("system");
         admin.setUpdateBy("system");
         admin.setCreateTime(LocalDateTime.now());

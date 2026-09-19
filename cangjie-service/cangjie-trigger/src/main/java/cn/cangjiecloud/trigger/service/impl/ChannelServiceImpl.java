@@ -17,8 +17,9 @@ import cn.cangjiecloud.trigger.service.IChannelService;
 import cn.cangjiecloud.workflow.entity.WorkflowEntity;
 import cn.cangjiecloud.workflow.entity.WorkflowExecutionEntity;
 import cn.cangjiecloud.workflow.service.IWorkflowService;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import cn.cangjiecloud.common.util.JsonUtils;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -31,6 +32,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -231,19 +233,22 @@ public class ChannelServiceImpl extends ServiceImpl<ChannelMapper, ChannelEntity
             return null;
         }
         try {
-            JSONObject outputs = JSON.parseObject(outputsJson);
+            ObjectNode outputs = JsonUtils.parseObject(outputsJson);
             // 按优先级查找常见的输出变量
             for (String key : List.of("output", "result", "reply", "response", "answer", "message")) {
-                String value = outputs.getString(key);
+                String value = textOrNull(outputs, key);
                 if (StringUtils.hasText(value)) {
                     return value;
                 }
             }
             // 兜底：返回第一个非 __end__ 的字符串值
-            for (Map.Entry<String, Object> entry : outputs.entrySet()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = outputs.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> entry = fields.next();
                 if ("__end__".equals(entry.getKey())) continue;
-                if (entry.getValue() instanceof String && StringUtils.hasText((String) entry.getValue())) {
-                    return (String) entry.getValue();
+                JsonNode value = entry.getValue();
+                if (value.isTextual() && StringUtils.hasText(value.asText())) {
+                    return value.asText();
                 }
             }
             return outputsJson;
@@ -251,6 +256,11 @@ public class ChannelServiceImpl extends ServiceImpl<ChannelMapper, ChannelEntity
             log.warn("解析工作流输出失败: {}", e.getMessage());
             return outputsJson;
         }
+    }
+
+    private static String textOrNull(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? null : value.asText();
     }
 
     private void saveMessage(ChannelEntity channel, ChannelReplyDTO dto, String sessionId,

@@ -6,6 +6,7 @@ import cn.cangjiecloud.application.api.dto.ChatRequestDTO;
 import cn.cangjiecloud.application.api.dto.ChatResponseDTO;
 import cn.cangjiecloud.application.api.dto.LocalToolResultDTO;
 import cn.cangjiecloud.application.api.dto.LocalToolResumeDTO;
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.application.entity.ApplicationEntity;
 import cn.cangjiecloud.application.service.IApplicationService;
 import cn.cangjiecloud.chat.entity.ChatMessageEntity;
@@ -195,7 +196,7 @@ public class OpenWebChatController {
             return java.util.Collections.emptyList();
         }
         try {
-            return com.alibaba.fastjson.JSON.parseArray(json, String.class);
+            return JsonUtils.parseList(json, String.class);
         } catch (Exception e) {
             return java.util.Collections.emptyList();
         }

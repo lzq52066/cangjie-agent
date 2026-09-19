@@ -2,10 +2,10 @@ package cn.cangjiecloud.knowledge.rag;
 
 import cn.cangjiecloud.core.rag.Reranker;
 import cn.cangjiecloud.core.rag.RetrievalResult;
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.hutool.http.HttpRequest;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONArray;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -59,7 +59,7 @@ public class BgeRerankerClient implements Reranker {
         try {
             String response = HttpRequest.post(baseUrl + "/rerank")
                     .header("Content-Type", "application/json")
-                    .body(JSON.toJSONString(requestBody))
+                    .body(JsonUtils.toJSONString(requestBody))
                     .timeout(30_000)
                     .execute()
                     .body();
@@ -69,25 +69,24 @@ public class BgeRerankerClient implements Reranker {
                 return candidates.stream().limit(topK).collect(Collectors.toList());
             }
 
-            JSONArray results = JSON.parseArray(response);
+            ArrayNode results = JsonUtils.parseArray(response);
             if (results == null || results.isEmpty()) {
                 return candidates.stream().limit(topK).collect(Collectors.toList());
             }
 
             // 按 score 降序
-            List<JSONObject> sorted = results.stream()
-                    .map(o -> (JSONObject) o)
-                    .sorted(Comparator.comparingDouble(o -> -o.getDoubleValue("score")))
-                    .collect(Collectors.toList());
+            List<JsonNode> sorted = new ArrayList<>();
+            results.forEach(sorted::add);
+            sorted.sort(Comparator.comparingDouble(o -> -o.path("score").asDouble()));
 
             List<RetrievalResult> reranked = new ArrayList<>(Math.min(topK, sorted.size()));
-            for (JSONObject result : sorted) {
-                int index = result.getIntValue("index");
+            for (JsonNode result : sorted) {
+                int index = result.path("index").asInt();
                 if (index < 0 || index >= candidates.size()) {
                     continue;
                 }
                 RetrievalResult r = candidates.get(index);
-                r.setFinalScore(result.getDoubleValue("score"));
+                r.setFinalScore(result.path("score").asDouble());
                 reranked.add(r);
                 if (reranked.size() >= topK) {
                     break;

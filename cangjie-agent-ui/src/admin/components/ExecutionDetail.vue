@@ -16,17 +16,18 @@
 
     <div class="io-block">
       <div class="io-label">输入</div>
-      <pre class="io-content">{{ pretty(execution.inputs) }}</pre>
+      <pre class="io-content">{{ prettyJson(execution.inputs) }}</pre>
     </div>
     <div class="io-block">
       <div class="io-label">输出</div>
-      <pre class="io-content">{{ pretty(execution.outputs) }}</pre>
+      <pre class="io-content">{{ prettyJson(execution.outputs) }}</pre>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { prettyJson } from '@admin/utils/format'
 
 const props = defineProps<{ execution: Record<string, any> }>()
 
@@ -34,15 +35,6 @@ const statusLabel = computed(() =>
   ({ running: '执行中', completed: '成功', failed: '失败' } as any)[props.execution.status] || props.execution.status)
 const statusTag = computed<any>(() =>
   ({ running: 'warning', completed: 'success', failed: 'danger' } as any)[props.execution.status] || 'info')
-
-function pretty(text?: string) {
-  if (!text) return '-'
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2)
-  } catch {
-    return text
-  }
-}
 </script>
 
 <style lang="scss" scoped>

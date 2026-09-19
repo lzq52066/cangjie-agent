@@ -4,7 +4,7 @@ import cn.cangjiecloud.observability.context.TraceContext;
 import cn.cangjiecloud.observability.entity.LlmTraceEntity;
 import cn.cangjiecloud.observability.service.ILlmTraceRecorder;
 import cn.cangjiecloud.observability.service.ILlmTraceService;
-import com.alibaba.fastjson.JSON;
+import cn.cangjiecloud.common.util.JsonUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -65,7 +65,7 @@ public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
             // promptContent
             String promptContent = record.getPromptContent();
             if (promptContent == null && record.getMessages() != null) {
-                promptContent = JSON.toJSONString(record.getMessages());
+                promptContent = JsonUtils.toJSONString(record.getMessages());
             }
             trace.setPromptContent(applyContentPolicy(promptContent));
 

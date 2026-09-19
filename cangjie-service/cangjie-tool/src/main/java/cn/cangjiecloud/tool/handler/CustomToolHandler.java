@@ -1,6 +1,6 @@
 package cn.cangjiecloud.tool.handler;
 
-import com.alibaba.fastjson.JSON;
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.tool.consts.ToolConstants;
 import cn.cangjiecloud.tool.annotation.ToolHandlerType;
 import cn.cangjiecloud.tool.api.dto.ToolExecuteResultDTO;
@@ -67,7 +67,7 @@ public class CustomToolHandler extends AbsToolHandler {
     private Map<String, Object> parseParameters(String parameters) {
         if (parameters == null || parameters.isEmpty()) return Map.of();
         try {
-            return com.alibaba.fastjson.JSON.parseObject(parameters);
+            return JsonUtils.parseMap(parameters);
         } catch (Exception e) {
             return Map.of();
         }

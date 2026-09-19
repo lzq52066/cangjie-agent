@@ -40,9 +40,8 @@
       </el-table-column>
     </el-table>
 
-    <el-pagination class="pager" background layout="total, sizes, prev, pager, next"
-                   :total="total" v-model:current-page="pageNum" v-model:page-size="pageSize"
-                   :page-sizes="[10, 20, 50]" @size-change="loadList" @current-change="loadList" />
+    <DataPager v-model:current-page="pageNum" v-model:page-size="pageSize"
+               :total="total" @change="loadList" />
 
     <!-- 审批单详情抽屉（管理侧只读，决策在对话侧完成） -->
     <el-drawer v-model="drawer" title="审批单详情" size="640px" destroy-on-close>
@@ -72,7 +71,7 @@
         <div class="reason-text">{{ current.reason || '-' }}</div>
 
         <el-divider content-position="left">调用参数</el-divider>
-        <pre class="code-block">{{ pretty(current.arguments) }}</pre>
+        <pre class="code-block">{{ prettyJson(current.arguments) }}</pre>
       </template>
     </el-drawer>
   </div>
@@ -81,6 +80,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
+import { prettyJson } from '@admin/utils/format'
 import { observabilityApi } from '@admin/api/observability-api'
 import { applicationApi } from '@admin/api/application-api'
 
@@ -107,14 +108,6 @@ function riskTagType(r?: string) {
   if (r === 'high') return 'danger'
   if (r === 'medium' || r === 'mid') return 'warning'
   return 'info'
-}
-function pretty(text?: string) {
-  if (!text) return '-'
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2)
-  } catch {
-    return text
-  }
 }
 
 const appOptions = ref<any[]>([])
@@ -175,7 +168,6 @@ async function showDetail(id: string) {
 
 <style lang="scss" scoped>
 .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
-.pager { margin-top: 16px; justify-content: flex-end; }
 .reason-text {
   background: #fdf6ec; border: 1px solid #faecd8; border-radius: 6px;
   padding: 10px 12px; font-size: 13px; line-height: 1.7; color: #e6a23c;

@@ -1,7 +1,7 @@
 package cn.cangjiecloud.tool.plugin.builtin;
 
 import cn.cangjiecloud.core.plugin.PluginContext;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 
 import java.time.DateTimeException;
@@ -84,7 +84,7 @@ public class DateTimeToolsPlugin extends AbstractBuiltinPlugin {
     // ------------------------------------------------------------------
 
     /** 当前时间：timezone 默认取服务器时区，format 自定义 datetime 输出格式 */
-    private JSONObject now(Map<String, Object> params) {
+    private ObjectNode now(Map<String, Object> params) {
         ZoneResult zone = resolveZone(str(params.get("timezone")));
         if (zone.error() != null) {
             return error(zone.error());
@@ -110,7 +110,7 @@ public class DateTimeToolsPlugin extends AbstractBuiltinPlugin {
      * 时间戳互转：value 为纯数字时按时间戳解析（10 位秒 / 13 位毫秒），
      * 否则按日期字符串解析并输出对应时间戳。
      */
-    private JSONObject timestampConvert(Map<String, Object> params) {
+    private ObjectNode timestampConvert(Map<String, Object> params) {
         String value = str(params.get("value"));
         if (value.isEmpty()) {
             return missing("value");
@@ -161,7 +161,7 @@ public class DateTimeToolsPlugin extends AbstractBuiltinPlugin {
      * 日期差值：start / end 支持 yyyy-MM-dd、yyyy-MM-dd HH:mm:ss、ISO（含时区偏移）、
      * 时间戳混用，返回总天数、年/月分解以及区间内工作日数量。
      */
-    private JSONObject dateDiff(Map<String, Object> params) {
+    private ObjectNode dateDiff(Map<String, Object> params) {
         String startText = str(params.get("start"));
         String endText = str(params.get("end"));
         if (startText.isEmpty()) {

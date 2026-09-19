@@ -1,7 +1,9 @@
 package cn.cangjiecloud.tool.plugin.builtin;
 
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.core.plugin.PluginContext;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 
 import java.net.URLDecoder;
@@ -60,7 +62,7 @@ public class BuiltinToolsPlugin extends AbstractBuiltinPlugin {
     }
 
     /** 文本哈希：algorithm 支持 md5 / sha1 / sha256（默认 md5） */
-    private JSONObject hash(Map<String, Object> params) {
+    private ObjectNode hash(Map<String, Object> params) {
         String text = raw(params.get("text"));
         String algorithm = str(params.getOrDefault("algorithm", "md5")).toLowerCase();
         if (text.isEmpty()) {
@@ -92,7 +94,7 @@ public class BuiltinToolsPlugin extends AbstractBuiltinPlugin {
     }
 
     /** 生成 UUID：count 1~100，默认 1；uppercase 控制大小写；hyphen=false 去掉连字符 */
-    private JSONObject generateUuid(Map<String, Object> params) {
+    private ObjectNode generateUuid(Map<String, Object> params) {
         int count = clamp(intVal(params.get("count"), 1), 1, 100);
         boolean uppercase = boolVal(params.get("uppercase"), false);
         boolean hyphen = boolVal(params.get("hyphen"), true);
@@ -111,7 +113,7 @@ public class BuiltinToolsPlugin extends AbstractBuiltinPlugin {
     }
 
     /** Base64 编码/解码：mode=encode（默认）/ decode */
-    private JSONObject base64(Map<String, Object> params) {
+    private ObjectNode base64(Map<String, Object> params) {
         String text = raw(params.get("text"));
         String mode = str(params.getOrDefault("mode", "encode")).toLowerCase();
         if (text.isEmpty()) {
@@ -134,7 +136,7 @@ public class BuiltinToolsPlugin extends AbstractBuiltinPlugin {
     }
 
     /** URL 编码/解码：mode=encode（默认）/ decode */
-    private JSONObject urlCode(Map<String, Object> params) {
+    private ObjectNode urlCode(Map<String, Object> params) {
         String text = raw(params.get("text"));
         String mode = str(params.getOrDefault("mode", "encode")).toLowerCase();
         if (text.isEmpty()) {
@@ -158,7 +160,7 @@ public class BuiltinToolsPlugin extends AbstractBuiltinPlugin {
     /**
      * JSON 字段提取：path 支持点路径（data.items.0.name）或标准 JSONPath（$.data.items[0].name）。
      */
-    private JSONObject jsonExtract(Map<String, Object> params) {
+    private ObjectNode jsonExtract(Map<String, Object> params) {
         String jsonText = raw(params.get("json"));
         String path = str(params.get("path"));
         if (jsonText.isEmpty()) {
@@ -168,33 +170,58 @@ public class BuiltinToolsPlugin extends AbstractBuiltinPlugin {
             return error("path 不能为空");
         }
         try {
-            Object root = com.alibaba.fastjson.JSON.parse(jsonText);
-            String jsonPath;
-            if (path.startsWith("$")) {
-                jsonPath = path;
-            } else {
-                // 点路径转标准 JSONPath：数字段 .0 -> [0]
-                StringBuilder sb = new StringBuilder("$");
-                for (String seg : path.split("\\.")) {
-                    if (seg.isEmpty()) {
-                        continue;
-                    }
-                    if (seg.matches("\\d+")) {
-                        sb.append('[').append(seg).append(']');
-                    } else {
-                        sb.append('.').append(seg);
-                    }
-                }
-                jsonPath = sb.toString();
-            }
-            Object value = com.alibaba.fastjson.JSONPath.eval(root, jsonPath);
+            JsonNode root = JsonUtils.mapper().readTree(jsonText);
+            JsonNode value = resolvePath(root, path);
+            boolean found = value != null && !value.isNull();
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("path", path);
-            data.put("found", value != null);
-            data.put("value", value);
+            data.put("found", found);
+            data.put("value", found ? value : null);
             return ok(data);
         } catch (Exception e) {
             return error("JSON 解析或提取失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 按路径取字段：点路径的每一段与 JSONPath 的 {@code .field} / {@code [index]} 等价，
+     * 数组下标既可用 {@code [0]} 也可用点路径的 {@code .0}。路径不存在时返回 null。
+     */
+    private static JsonNode resolvePath(JsonNode root, String path) {
+        String expression = path.startsWith("$") ? path.substring(1) : "." + path;
+        JsonNode current = root;
+        int index = 0;
+        while (current != null && index < expression.length()) {
+            char c = expression.charAt(index);
+            if (c == '.') {
+                index++;
+                int end = index;
+                while (end < expression.length() && expression.charAt(end) != '.' && expression.charAt(end) != '[') {
+                    end++;
+                }
+                String field = expression.substring(index, end);
+                current = current.isArray() && field.matches("\\d+")
+                        ? current.get(Integer.parseInt(field))
+                        : current.get(field);
+                index = end;
+            } else if (c == '[') {
+                int close = expression.indexOf(']', index);
+                if (close < 0) {
+                    return null;
+                }
+                String token = expression.substring(index + 1, close).trim();
+                if (token.length() >= 2 && (token.startsWith("'") || token.startsWith("\""))) {
+                    current = current.get(token.substring(1, token.length() - 1));
+                } else if (token.matches("\\d+")) {
+                    current = current.get(Integer.parseInt(token));
+                } else {
+                    return null;
+                }
+                index = close + 1;
+            } else {
+                return null;
+            }
+        }
+        return current;
     }
 }

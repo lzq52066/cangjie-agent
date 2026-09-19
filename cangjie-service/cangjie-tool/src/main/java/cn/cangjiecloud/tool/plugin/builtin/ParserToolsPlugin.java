@@ -1,8 +1,9 @@
 package cn.cangjiecloud.tool.plugin.builtin;
 
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.core.plugin.PluginContext;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 
 import java.net.URLDecoder;
@@ -68,7 +69,7 @@ public class ParserToolsPlugin extends AbstractBuiltinPlugin {
      * 拆解 URL。容忍大模型常见的写法问题：缺少协议前缀（www.example.com/a）、
      * 带尖括号或引号、结尾多余空格等。
      */
-    private JSONObject urlParse(Map<String, Object> params) {
+    private ObjectNode urlParse(Map<String, Object> params) {
         String input = stripWrappers(raw(params.get("url")));
         if (input.isEmpty()) {
             return missing("url");
@@ -229,7 +230,7 @@ public class ParserToolsPlugin extends AbstractBuiltinPlugin {
      * 只做 Base64URL 解码，<b>不校验签名</b>，因此解码出的内容不可作为授权依据，
      * 仅用于向用户解释令牌里写了什么。
      */
-    private JSONObject jwtDecode(Map<String, Object> params) {
+    private ObjectNode jwtDecode(Map<String, Object> params) {
         String token = stripWrappers(raw(params.get("token")));
         if (token.isEmpty()) {
             return missing("token");
@@ -251,8 +252,8 @@ public class ParserToolsPlugin extends AbstractBuiltinPlugin {
             return error("无效的时区: " + timezone + "（示例 Asia/Shanghai、UTC）");
         }
 
-        JSONObject header;
-        JSONObject payload;
+        ObjectNode header;
+        ObjectNode payload;
         try {
             header = decodeSegment(parts[0], "header");
             payload = decodeSegment(parts[1], "payload");
@@ -294,7 +295,7 @@ public class ParserToolsPlugin extends AbstractBuiltinPlugin {
     }
 
     /** Base64URL 段解码为 JSON 对象 */
-    private JSONObject decodeSegment(String segment, String name) {
+    private ObjectNode decodeSegment(String segment, String name) {
         String cleaned = segment;
         int eq = cleaned.indexOf('=');
         if (eq >= 0) {
@@ -313,19 +314,19 @@ public class ParserToolsPlugin extends AbstractBuiltinPlugin {
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException(name + " 段不是合法的 Base64URL 编码");
         }
-        Object parsed;
+        JsonNode parsed;
         try {
-            parsed = JSON.parse(new String(bytes, StandardCharsets.UTF_8));
+            parsed = JsonUtils.mapper().readTree(new String(bytes, StandardCharsets.UTF_8));
         } catch (Exception e) {
             throw new IllegalArgumentException(name + " 段解码后不是合法 JSON，请确认传入的是标准 JWT");
         }
-        if (!(parsed instanceof JSONObject object)) {
+        if (!(parsed instanceof ObjectNode object)) {
             throw new IllegalArgumentException(name + " 段解码后不是 JSON 对象");
         }
         return object;
     }
 
-    private void putTime(Map<String, Object> data, JSONObject payload, String claim, String field, ZoneId zone) {
+    private void putTime(Map<String, Object> data, ObjectNode payload, String claim, String field, ZoneId zone) {
         Long epochSecond = longClaim(payload, claim);
         if (epochSecond == null) {
             return;
@@ -335,16 +336,16 @@ public class ParserToolsPlugin extends AbstractBuiltinPlugin {
     }
 
     /** 读取时间类声明：兼容数字与字符串化的秒级时间戳 */
-    private static Long longClaim(JSONObject payload, String claim) {
-        Object value = payload.get(claim);
-        if (value == null) {
+    private static Long longClaim(ObjectNode payload, String claim) {
+        JsonNode value = payload.get(claim);
+        if (value == null || value.isNull()) {
             return null;
         }
-        if (value instanceof Number number) {
-            return number.longValue();
+        if (value.isNumber()) {
+            return value.longValue();
         }
         try {
-            return Long.parseLong(value.toString().trim());
+            return Long.parseLong(value.asText().trim());
         } catch (NumberFormatException e) {
             return null;
         }

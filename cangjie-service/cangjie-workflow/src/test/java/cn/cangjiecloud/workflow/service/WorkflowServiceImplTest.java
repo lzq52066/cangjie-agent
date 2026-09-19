@@ -8,8 +8,8 @@ import cn.cangjiecloud.workflow.entity.WorkflowExecutionEventEntity;
 import cn.cangjiecloud.workflow.mapper.WorkflowExecutionEventMapper;
 import cn.cangjiecloud.workflow.mapper.WorkflowExecutionMapper;
 import cn.cangjiecloud.workflow.mapper.WorkflowMapper;
-import com.alibaba.fastjson.JSONArray;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -116,7 +116,7 @@ class WorkflowServiceImplTest {
 
     /** 打桩引擎正常返回，并返回捕获到的节点事件监听器 */
     private WorkflowExecutionEngine.NodeEventListener stubEngineSuccess(Map<String, Object> outputs) {
-        when(executionEngine.execute(anyList(), any(JSONArray.class), anyMap(),
+        when(executionEngine.execute(anyList(), any(ArrayNode.class), anyMap(),
                 any(WorkflowExecutionEngine.NodeEventListener.class))).thenReturn(outputs);
         ArgumentCaptor<WorkflowExecutionEngine.NodeEventListener> captor =
                 ArgumentCaptor.forClass(WorkflowExecutionEngine.NodeEventListener.class);
@@ -355,7 +355,7 @@ class WorkflowServiceImplTest {
     // 覆盖场景：同步执行成功 —— 执行记录 running→completed、输出落 JSON、trace 记 success
     void executeShouldCompleteAndPersistOutputsOnSuccess() {
         stubPublishedWorkflow();
-        when(executionEngine.execute(anyList(), any(JSONArray.class), anyMap(),
+        when(executionEngine.execute(anyList(), any(ArrayNode.class), anyMap(),
                 any(WorkflowExecutionEngine.NodeEventListener.class)))
                 .thenReturn(new HashMap<>(Map.of("llm_output", "你好")));
 
@@ -383,7 +383,7 @@ class WorkflowServiceImplTest {
     // 覆盖场景：引擎执行抛异常 —— 状态置 failed、记录 errorMessage、trace 记 fail、对外不抛
     void executeShouldMarkFailedWhenEngineThrows() {
         stubPublishedWorkflow();
-        when(executionEngine.execute(anyList(), any(JSONArray.class), anyMap(),
+        when(executionEngine.execute(anyList(), any(ArrayNode.class), anyMap(),
                 any(WorkflowExecutionEngine.NodeEventListener.class)))
                 .thenThrow(new ApiException("节点 [大模型] 执行失败: boom"));
 
@@ -407,7 +407,7 @@ class WorkflowServiceImplTest {
 
         assertThat(execution.getStatus()).isEqualTo("failed");
         assertThat(execution.getErrorMessage()).isEqualTo("工作流节点为空");
-        verify(executionEngine, never()).execute(anyList(), any(JSONArray.class), anyMap(),
+        verify(executionEngine, never()).execute(anyList(), any(ArrayNode.class), anyMap(),
                 any(WorkflowExecutionEngine.NodeEventListener.class));
     }
 
@@ -416,7 +416,7 @@ class WorkflowServiceImplTest {
     void executeShouldTolerateNullTraceCollector() {
         ReflectionTestUtils.setField(service, "traceCollector", null);
         stubPublishedWorkflow();
-        when(executionEngine.execute(anyList(), any(JSONArray.class), anyMap(),
+        when(executionEngine.execute(anyList(), any(ArrayNode.class), anyMap(),
                 any(WorkflowExecutionEngine.NodeEventListener.class)))
                 .thenReturn(new HashMap<>());
 
@@ -429,7 +429,7 @@ class WorkflowServiceImplTest {
     // 覆盖场景：异步执行 —— 提交后立即返回 running 记录，任务在 businessExecutor 中延后运行
     void executeAsyncShouldDeferExecutionToBusinessExecutor() {
         stubPublishedWorkflow();
-        when(executionEngine.execute(anyList(), any(JSONArray.class), anyMap(),
+        when(executionEngine.execute(anyList(), any(ArrayNode.class), anyMap(),
                 any(WorkflowExecutionEngine.NodeEventListener.class)))
                 .thenReturn(new HashMap<>(Map.of("k", "v")));
 
@@ -437,13 +437,13 @@ class WorkflowServiceImplTest {
 
         assertThat(execution.getStatus()).isEqualTo("running");
         assertThat(deferredTasks).hasSize(1);
-        verify(executionEngine, never()).execute(anyList(), any(JSONArray.class), anyMap(),
+        verify(executionEngine, never()).execute(anyList(), any(ArrayNode.class), anyMap(),
                 any(WorkflowExecutionEngine.NodeEventListener.class));
 
         // 手动驱动异步任务后完成
         deferredTasks.get(0).run();
         assertThat(execution.getStatus()).isEqualTo("completed");
-        verify(executionEngine).execute(anyList(), any(JSONArray.class), anyMap(),
+        verify(executionEngine).execute(anyList(), any(ArrayNode.class), anyMap(),
                 any(WorkflowExecutionEngine.NodeEventListener.class));
     }
 
@@ -453,14 +453,14 @@ class WorkflowServiceImplTest {
     // 覆盖场景：节点事件落库 —— 超长输出截断到 4000 字符、失败事件带 errorMessage
     void eventListenerShouldPersistTruncatedOutputsAndErrors() {
         stubPublishedWorkflow();
-        when(executionEngine.execute(anyList(), any(JSONArray.class), anyMap(),
+        when(executionEngine.execute(anyList(), any(ArrayNode.class), anyMap(),
                 any(WorkflowExecutionEngine.NodeEventListener.class)))
                 .thenReturn(new HashMap<>());
         service.execute("w1", new HashMap<>());
 
         ArgumentCaptor<WorkflowExecutionEngine.NodeEventListener> captor =
                 ArgumentCaptor.forClass(WorkflowExecutionEngine.NodeEventListener.class);
-        verify(executionEngine).execute(anyList(), any(JSONArray.class), anyMap(), captor.capture());
+        verify(executionEngine).execute(anyList(), any(ArrayNode.class), anyMap(), captor.capture());
         WorkflowExecutionEngine.NodeEventListener listener = captor.getValue();
 
         // 成功事件：输出 JSON 远超 4000 字符，应被截断
@@ -487,14 +487,14 @@ class WorkflowServiceImplTest {
     // 覆盖场景：事件落库抛异常 —— 监听器内部吞掉，不影响主流程
     void eventListenerShouldSwallowPersistenceFailure() {
         stubPublishedWorkflow();
-        when(executionEngine.execute(anyList(), any(JSONArray.class), anyMap(),
+        when(executionEngine.execute(anyList(), any(ArrayNode.class), anyMap(),
                 any(WorkflowExecutionEngine.NodeEventListener.class)))
                 .thenReturn(new HashMap<>());
         service.execute("w1", new HashMap<>());
 
         ArgumentCaptor<WorkflowExecutionEngine.NodeEventListener> captor =
                 ArgumentCaptor.forClass(WorkflowExecutionEngine.NodeEventListener.class);
-        verify(executionEngine).execute(anyList(), any(JSONArray.class), anyMap(), captor.capture());
+        verify(executionEngine).execute(anyList(), any(ArrayNode.class), anyMap(), captor.capture());
 
         doThrow(new RuntimeException("db down")).when(workflowExecutionEventService)
                 .save(any(WorkflowExecutionEventEntity.class));

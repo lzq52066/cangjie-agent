@@ -2,10 +2,9 @@ package cn.cangjiecloud.knowledge.rag;
 
 import cn.cangjiecloud.core.rag.Reranker;
 import cn.cangjiecloud.core.rag.RetrievalResult;
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.hutool.http.HttpRequest;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONArray;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -64,7 +63,7 @@ public class CohereReranker implements Reranker {
             String response = HttpRequest.post(baseUrl + "/v1/rerank")
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Content-Type", "application/json")
-                    .body(JSON.toJSONString(requestBody))
+                    .body(JsonUtils.toJSONString(requestBody))
                     .timeout(30_000)
                     .execute()
                     .body();
@@ -74,22 +73,21 @@ public class CohereReranker implements Reranker {
                 return candidates.stream().limit(topK).collect(Collectors.toList());
             }
 
-            JSONObject json = JSON.parseObject(response);
-            JSONArray results = json.getJSONArray("results");
+            JsonNode json = JsonUtils.parseObject(response);
+            JsonNode results = json == null ? null : json.get("results");
             if (results == null || results.isEmpty()) {
                 return candidates.stream().limit(topK).collect(Collectors.toList());
             }
 
             // 按 API 返回顺序（已按相关性排序）重组结果
             List<RetrievalResult> reranked = new ArrayList<>(Math.min(topK, results.size()));
-            for (Object o : results) {
-                JSONObject result = (JSONObject) o;
-                int index = result.getIntValue("index");
+            for (JsonNode result : results) {
+                int index = result.path("index").asInt();
                 if (index < 0 || index >= candidates.size()) {
                     continue;
                 }
                 RetrievalResult r = candidates.get(index);
-                r.setFinalScore(result.getDoubleValue("relevance_score"));
+                r.setFinalScore(result.path("relevance_score").asDouble());
                 reranked.add(r);
                 if (reranked.size() >= topK) {
                     break;

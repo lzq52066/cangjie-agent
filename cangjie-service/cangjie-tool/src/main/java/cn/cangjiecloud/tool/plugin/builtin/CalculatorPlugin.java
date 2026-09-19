@@ -1,7 +1,7 @@
 package cn.cangjiecloud.tool.plugin.builtin;
 
 import cn.cangjiecloud.core.plugin.PluginContext;
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -60,7 +60,7 @@ public class CalculatorPlugin extends AbstractBuiltinPlugin {
     // ------------------------------------------------------------------
 
     /** 表达式求值：expression 必填，precision 控制小数位（默认 10，自动去尾零） */
-    private JSONObject calculate(Map<String, Object> params) {
+    private ObjectNode calculate(Map<String, Object> params) {
         String rawExpression = str(params.get("expression"));
         if (rawExpression.isEmpty()) {
             return missing("expression");
@@ -540,7 +540,7 @@ public class CalculatorPlugin extends AbstractBuiltinPlugin {
     /**
      * 单位换算。category 可选，用于同名单位跨类别消歧；温度走独立分支。
      */
-    private JSONObject unitConvert(Map<String, Object> params) {
+    private ObjectNode unitConvert(Map<String, Object> params) {
         String valueText = str(params.get("value"));
         String from = normalizeUnit(str(params.get("from")));
         String to = normalizeUnit(str(params.get("to")));
@@ -588,7 +588,7 @@ public class CalculatorPlugin extends AbstractBuiltinPlugin {
         return ok(data);
     }
 
-    private JSONObject temperatureConvert(double value, String from, String to, int precision) {
+    private ObjectNode temperatureConvert(double value, String from, String to, int precision) {
         String fromKey = temperatureKey(from);
         String toKey = temperatureKey(to);
         double celsius = switch (fromKey) {

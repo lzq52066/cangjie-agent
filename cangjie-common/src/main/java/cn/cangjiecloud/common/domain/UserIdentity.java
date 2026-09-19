@@ -20,6 +20,8 @@ public class UserIdentity implements Serializable {
     private String phone;
     private String role;
     private String workspaceId;
+    /** 是否为待修改的初始密码：true 时前端强制跳转改密页 */
+    private Boolean mustChangePassword;
     /** 权限码列表（按钮级权限） */
     private List<String> permissions;
     /** 菜单树（前端路由用） */

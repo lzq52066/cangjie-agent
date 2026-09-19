@@ -4,8 +4,9 @@ import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.core.workflow.WorkflowNode;
 import cn.cangjiecloud.core.workflow.WorkflowNodeRegistry;
 import cn.cangjiecloud.workflow.api.dto.WorkflowNodeDTO;
-import com.alibaba.fastjson.JSONArray;
-import com.alibaba.fastjson.JSONObject;
+import cn.cangjiecloud.common.util.JsonUtils;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -80,11 +81,11 @@ class WorkflowExecutionEngineTest {
         return dto(id, id, type, config);
     }
 
-    private static JSONArray edges(Object... triples) {
-        JSONArray array = new JSONArray();
+    private static ArrayNode edges(Object... triples) {
+        ArrayNode array = JsonUtils.newArray();
         for (Object t : triples) {
             if (t instanceof String[] parts) {
-                JSONObject e = new JSONObject();
+                ObjectNode e = JsonUtils.newObject();
                 e.put("source", parts[0]);
                 e.put("target", parts[1]);
                 if (parts.length > 2 && parts[2] != null) {
@@ -92,7 +93,7 @@ class WorkflowExecutionEngineTest {
                 }
                 array.add(e);
             } else {
-                array.add(t);
+                array.add(JsonUtils.mapper().valueToTree(t));
             }
         }
         return array;
@@ -115,10 +116,10 @@ class WorkflowExecutionEngineTest {
     // 覆盖场景：nodes 为 null / 空列表 —— 抛"工作流节点为空"
     void executeShouldThrowWhenNodesEmpty() {
         WorkflowExecutionEngine engine = engine();
-        assertThatThrownBy(() -> engine.execute(null, new JSONArray(), Map.of()))
+        assertThatThrownBy(() -> engine.execute(null, JsonUtils.newArray(), Map.of()))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("工作流节点为空");
-        assertThatThrownBy(() -> engine.execute(List.of(), new JSONArray(), Map.of()))
+        assertThatThrownBy(() -> engine.execute(List.of(), JsonUtils.newArray(), Map.of()))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("工作流节点为空");
     }
@@ -128,7 +129,7 @@ class WorkflowExecutionEngineTest {
     void executeShouldThrowWhenStartNodeMissing() {
         WorkflowExecutionEngine engine = engine();
         assertThatThrownBy(() -> engine.execute(
-                List.of(dto("n1", "llm")), new JSONArray(), Map.of()))
+                List.of(dto("n1", "llm")), JsonUtils.newArray(), Map.of()))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("工作流缺少 start 节点");
     }
@@ -401,9 +402,9 @@ class WorkflowExecutionEngineTest {
     void executeShouldIgnoreMalformedEdges() {
         StubNode llm = new StubNode("llm", in -> Map.of("llm_output", "v"));
 
-        JSONObject missingTarget = new JSONObject();
+        ObjectNode missingTarget = JsonUtils.newObject();
         missingTarget.put("source", "l"); // 无 target
-        JSONObject missingSource = new JSONObject();
+        ObjectNode missingSource = JsonUtils.newObject();
         missingSource.put("target", "l"); // 无 source
 
         Map<String, Object> result = engine(llm).execute(
@@ -411,8 +412,8 @@ class WorkflowExecutionEngineTest {
                 edges(new String[]{"s", "l"}, new String[]{"l", "ghost-node"},
                         new String[]{"l", "e"}),
                 Map.of());
-        // 追加两条脏边（放入同一 JSONArray 再次执行验证）
-        JSONArray withDirty = edges(new String[]{"s", "l"}, new String[]{"l", "e"});
+        // 追加两条脏边（放入同一 ArrayNode 再次执行验证）
+        ArrayNode withDirty = edges(new String[]{"s", "l"}, new String[]{"l", "e"});
         withDirty.add(missingTarget);
         withDirty.add(missingSource);
 

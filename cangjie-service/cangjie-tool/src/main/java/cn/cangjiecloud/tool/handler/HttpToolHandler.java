@@ -1,5 +1,6 @@
 package cn.cangjiecloud.tool.handler;
 
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.tool.consts.ToolConstants;
 import cn.cangjiecloud.tool.annotation.ToolHandlerType;
 import cn.cangjiecloud.tool.api.dto.ToolExecuteResultDTO;
@@ -52,7 +53,7 @@ public class HttpToolHandler extends AbsToolHandler {
 
             // 如果没配 body 模板且是 POST/PUT/PATCH，参数整体序列化为 JSON body
             if (!hasBodyTemplate && !"GET".equals(method) && !"DELETE".equals(method)) {
-                bodyStr = com.alibaba.fastjson.JSON.toJSONString(params);
+                bodyStr = JsonUtils.toJSONString(params);
                 queryParams = null;
             }
 
@@ -92,7 +93,7 @@ public class HttpToolHandler extends AbsToolHandler {
     private Map<String, Object> parseParameters(String parameters) {
         if (parameters == null || parameters.isEmpty()) return Map.of();
         try {
-            return new com.alibaba.fastjson2.JSONObject(com.alibaba.fastjson.JSON.parseObject(parameters));
+            return JsonUtils.parseMap(parameters);
         } catch (Exception e) {
             return Map.of();
         }
@@ -102,7 +103,7 @@ public class HttpToolHandler extends AbsToolHandler {
     private Map<String, Object> parseConfig(String config) {
         if (config == null || config.isEmpty()) return Map.of();
         try {
-            return com.alibaba.fastjson.JSON.parseObject(config);
+            return JsonUtils.parseMap(config);
         } catch (Exception e) {
             return Map.of();
         }

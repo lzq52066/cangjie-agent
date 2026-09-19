@@ -45,4 +45,22 @@ public class ChatRequest {
 
     /** 工具选择策略：auto / none / required */
     private String toolChoice;
+
+    /**
+     * 结构化输出的 JSON Schema 原文（根元素）。
+     * 非空时要求模型严格按该 schema 返回 JSON；为空则不加约束（模型自由输出）。
+     * 目前仅同步调用（{@code chat}）生效，流式调用忽略该字段。
+     */
+    private String responseSchema;
+
+    /** 结构化输出 schema 名称（部分厂商 json_schema 模式要求提供） */
+    private String responseSchemaName;
+
+    /**
+     * 业务上下文（traceId / 应用 / 会话 / 用户）。
+     * <p>
+     * 不参与模型请求体，仅透传给 langchain4j 的 ChatModelListener，
+     * 使每次模型调用都能带上业务归属与真实 token usage 落库。
+     */
+    private ChatTraceContext traceContext;
 }

@@ -1,6 +1,6 @@
 package cn.cangjiecloud.system.entity;
 
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
@@ -17,7 +17,7 @@ public class SystemSettingEntity {
     private Integer type;
 
     @TableField(typeHandler = JSONBTypeHandler.class)
-    private JSONObject meta;
+    private ObjectNode meta;
 
     private LocalDateTime createTime;
     private LocalDateTime updateTime;

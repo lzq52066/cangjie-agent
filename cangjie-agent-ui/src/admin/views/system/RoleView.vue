@@ -46,17 +46,9 @@
         </el-table-column>
       </el-table>
 
-      <div class="pagination">
-        <el-pagination
-          v-model:current-page="page"
-          v-model:page-size="size"
-          :total="total"
-          :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next, jumper"
-          @size-change="loadList"
-          @current-change="loadList"
-        />
-      </div>
+      <DataPager v-model:current-page="page" v-model:page-size="size"
+                 :total="total" :page-sizes="[10, 20, 50, 100]" :background="false"
+                 layout="total, sizes, prev, pager, next, jumper" @change="loadList" />
     </el-card>
 
     <!-- 创建/编辑对话框 -->
@@ -130,6 +122,7 @@ import { nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
 import QueryBar from '@admin/components/QueryBar.vue'
+import DataPager from '@admin/components/DataPager.vue'
 import { roleApi } from '@admin/api/role-api'
 
 // 列表
@@ -293,7 +286,6 @@ onMounted(loadList)
 <style lang="scss" scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .header-left { display: flex; gap: 12px; }
-.pagination { margin-top: 16px; display: flex; justify-content: flex-end; }
 .user-select-area { padding: 4px 0; }
 .admin-role-tag { color: var(--el-color-info); font-size: 13px; cursor: default; }
 </style>

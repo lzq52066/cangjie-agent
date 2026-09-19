@@ -10,6 +10,7 @@ import cn.cangjiecloud.core.model.ChatChunk;
 import cn.cangjiecloud.core.model.ChatMessage;
 import cn.cangjiecloud.core.model.ChatRequest;
 import cn.cangjiecloud.core.model.ChatResponse;
+import cn.cangjiecloud.core.model.ChatTraceContext;
 import cn.cangjiecloud.model.entity.ModelEntity;
 import cn.cangjiecloud.model.provider.OpenAICompatibleClient;
 import cn.cangjiecloud.model.service.IModelService;
@@ -153,6 +154,16 @@ public class OpenAiModelGateway implements ModelGateway {
                 .topP(settings.getTopP())
                 .tools(tools)
                 .toolChoice(tools.isEmpty() ? "none" : "auto")
+                // 业务上下文随请求透传，由 ChatModelListener 统一落 trace（含真实 usage）
+                .traceContext(ChatTraceContext.builder()
+                        .traceId(request.getTraceId())
+                        .appId(request.getApplicationId())
+                        .appName(request.getApplicationName())
+                        .sessionId(request.getSessionId())
+                        .userId(request.getUserId())
+                        .modelId(request.getModelId())
+                        .modelName(request.getModelName())
+                        .build())
                 .build();
     }
 
