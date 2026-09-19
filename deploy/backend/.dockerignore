@@ -1,0 +1,4 @@
+# 后端 jar 运行时由 docker-compose 挂载（./backend/artifacts），构建镜像时并不需要，
+# 排除后可避免把几百 MB 制品打进构建上下文传给 docker daemon。
+artifacts/
+*.jar

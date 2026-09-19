@@ -30,11 +30,11 @@ if (-not $SkipBackend) {
     }
     $jar = Join-Path $root 'cangjie-start\target\cangjie-start.jar'
     if (-not (Test-Path $jar)) { throw "未找到后端产物：$jar" }
-    $destDir = Join-Path $deploy 'backend'
+    $destDir = Join-Path $deploy 'backend\artifacts'
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
     Copy-Item $jar (Join-Path $destDir 'cangjie-start.jar') -Force
     $mb = [math]::Round((Get-Item $jar).Length / 1MB, 1)
-    Write-Host ">>> 后端制品已就位：backend\cangjie-start.jar ($mb MB)" -ForegroundColor Green
+    Write-Host ">>> 后端制品已就位：backend\artifacts\cangjie-start.jar ($mb MB)" -ForegroundColor Green
 }
 
 # ---------- 前端 ----------

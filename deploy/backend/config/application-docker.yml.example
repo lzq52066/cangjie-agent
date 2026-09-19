@@ -1,0 +1,41 @@
+# ============================================================
+# 生产环境配置覆盖（docker profile 专用）
+#
+# 机制：本目录挂载到容器 /app/config，并通过
+#       SPRING_CONFIG_ADDITIONAL_LOCATION=file:/app/config/ 生效。
+#
+# 用法：
+#   1) 复制成本目录下的 application-docker.yml（去掉 .example 后缀才会被加载）：
+#        cp application-docker.yml.example application-docker.yml
+#   2) 只写需要覆盖的键；没写的键仍使用 jar 内 application.yml / application-docker.yml 的默认值
+#   3) 改完执行：docker compose restart backend
+#
+# 注意：
+#   - 容器环境变量（docker-compose.yml 的 environment，如 DB_URL、EMBEDDING_*）
+#     优先级高于本文件，冲突时以环境变量为准。
+#   - 不要在此目录放 db/migration（Flyway 会与 jar 内同名脚本冲突）、
+#     i18n、static，它们不通过该机制加载，放了也不生效。
+# ============================================================
+
+#spring:
+#  datasource:
+#    hikari:
+#      maximum-pool-size: 40
+#      minimum-idle: 10
+
+#logging:
+#  level:
+#    root: info
+#    cn.cangjiecloud: info
+
+#cangjie:
+#  harness:
+#    max-rounds: 8
+#    timeout-seconds: 600
+#  chat:
+#    history:
+#      max-tokens: 8000
+#  model:
+#    timeout-seconds: 180
+#  ratelimit:
+#    enabled: false

@@ -79,32 +79,31 @@ if [ ! -f .env ]; then
     echo "[02] 警告：未能探测到对外 IP，请手工修改 .env 的 MINIO_PUBLIC_ENDPOINT 与 MINIO_CONSOLE_PUBLIC_URL" >&2
   fi
 
-  # 2.2 随机化敏感项，避免生产环境沿用示例值
+  # 2.2 随机化安全密钥，避免生产环境沿用示例值
+  #     数据库/Redis/MinIO 的账号密码保持 .env 中的固定默认值（cangjie / cangjie123），便于自行连接
   set_env() {
     sed_inplace "s|^${1}=.*|${1}=${2}|" .env
   }
-  set_env POSTGRES_PASSWORD "$(rand 24)"
-  set_env REDIS_PASSWORD "$(rand 24)"
-  set_env MINIO_SECRET_KEY "$(rand 24)"
   set_env CANGJIE_MODEL_KEY_SECRET "$(rand 32)"
   set_env SA_TOKEN_JWT_SECRET_KEY "$(rand 64)"
-  # 管理员初始密码使用简单固定值（默认 admin123），首次登录后会被强制修改，因此不随机化
-  echo "[02] 已随机生成 PostgreSQL / Redis / MinIO 密码与安全密钥"
+  echo "[02] 已随机生成模型 Key 加密密钥与会话签名密钥"
+  echo "[02] 数据库/Redis/MinIO 使用固定账号密码：$(awk -F= '/^POSTGRES_USER=/{print $2}' .env) / $(awk -F= '/^POSTGRES_PASSWORD=/{print $2}' .env)（如需修改请直接编辑 .env）"
+  # 管理员初始密码使用固定值（默认 cangjie123），首次登录后会被强制修改，因此不随机化
   echo "[02] 管理员初始账号/密码：$(awk -F= '/^SYSTEM_DEFAULT_USERNAME=/{print $2}' .env) / $(awk -F= '/^SYSTEM_DEFAULT_PASSWORD=/{print $2}' .env)（首次登录需修改）"
 else
   echo "[02] 已存在 .env，跳过生成（如需重置配置请先删除 .env）"
-  if grep -qE 'change-me|^POSTGRES_PASSWORD=cangjie_secret' .env; then
-    echo "[02] 警告：.env 中仍是示例密钥，对外暴露前请修改" >&2
+  if grep -qE 'change-me' .env; then
+    echo "[02] 警告：.env 中的安全密钥仍是示例值，对外暴露前请务必修改（可执行一次 ./02-init.sh 自动随机化）" >&2
   fi
 fi
 
 # ---------- 3) 制品校验 ----------
-if [ ! -f backend/cangjie-start.jar ]; then
-  echo "[02] 错误：未找到 backend/cangjie-start.jar" >&2
-  echo "     请用本地 pack.ps1 / pack.sh 打包，或手动拷贝 cangjie-start/target/cangjie-start.jar 到 backend/ 目录" >&2
+if [ ! -f backend/artifacts/cangjie-start.jar ]; then
+  echo "[02] 错误：未找到 backend/artifacts/cangjie-start.jar" >&2
+  echo "     请用本地 pack.ps1 / pack.sh 打包，或手动拷贝 cangjie-start/target/cangjie-start.jar 到 backend/artifacts/ 目录" >&2
   exit 1
 fi
-echo "[02] 后端制品: backend/cangjie-start.jar ($(du -h backend/cangjie-start.jar | cut -f1))"
+echo "[02] 后端制品: backend/artifacts/cangjie-start.jar ($(du -h backend/artifacts/cangjie-start.jar | cut -f1))"
 
 if [ ! -d frontend/dist/admin ] || [ ! -d frontend/dist/chat ]; then
   echo "[02] 错误：未找到 frontend/dist/admin 或 frontend/dist/chat" >&2

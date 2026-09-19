@@ -1,4 +1,5 @@
-# 后端运行时镜像（只打包已编译好的 jar，服务器上不做 Maven 编译）
+# 后端运行时镜像（不含 jar：jar 由 docker-compose 挂载 ./backend/artifacts 进容器，
+# 更新制品无需重建镜像，见 docker-compose.yml 中 backend 的 volumes）
 #
 # 基础镜像 amazoncorretto:17-al2023 已自带 curl（健康检查用）与 tzdata（Asia/Shanghai），
 # 且不含 microdnf/useradd，故这里不装任何包、也不调用 useradd，直接写入 passwd/group 记录。
@@ -8,11 +9,8 @@ WORKDIR /app
 RUN ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo "cangjie:x:1000:1000::/home/cangjie:/sbin/nologin" >> /etc/passwd \
     && echo "cangjie:x:1000:" >> /etc/group \
-    && mkdir -p /home/cangjie /app/logs /app/uploads \
+    && mkdir -p /home/cangjie /app/logs /app/uploads /app/artifacts \
     && chown -R 1000:1000 /home/cangjie /app
-
-# jar 与本 Dockerfile 同目录，构建上下文即 backend/
-COPY --chown=1000:1000 cangjie-start.jar app.jar
 
 USER 1000
 
@@ -27,4 +25,4 @@ ENTRYPOINT exec java $JAVA_OPTS \
     -XX:MaxRAMPercentage=75.0 \
     -XX:+ExitOnOutOfMemoryError \
     -Djava.security.egd=file:/dev/./urandom \
-    -jar app.jar
+    -jar /app/artifacts/cangjie-start.jar
