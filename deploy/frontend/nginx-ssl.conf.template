@@ -1,0 +1,34 @@
+# HTTPS 配置（/etc/nginx/certs 下存在 server.crt + server.key 时由 05-nginx-conf.sh 选用）
+# 证书文件约定：
+#   server.crt —— 服务器证书，若中间证书与服务器证书是分开的，请按"服务器证书 + 中间证书"顺序合并
+#   server.key —— 私钥
+
+# MinIO 控制台需要 WebSocket（实时日志等）
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 443 ssl;
+    server_name _;
+
+    ssl_certificate     /etc/nginx/certs/server.crt;
+    ssl_certificate_key /etc/nginx/certs/server.key;
+
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1h;
+    ssl_prefer_server_ciphers off;
+
+    include /etc/nginx/locations.conf;
+}
+
+# HTTP 一律跳转到 HTTPS
+server {
+    listen 80;
+    server_name _;
+
+    return 301 https://$host$request_uri;
+}

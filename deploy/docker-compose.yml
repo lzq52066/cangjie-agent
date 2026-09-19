@@ -9,9 +9,12 @@
 #     ./redis/redis.conf          Redis 配置（修改后 ./04-start.sh 生效，密码不写在此文件）
 #     ./backend/logback-spring.xml 后端日志配置（SQL 并入 info.log，restart backend 生效）
 #     ./frontend/dist             前端页面（挂载生效，覆盖新文件后 reload nginx 即可，无需重建镜像）
+#     ./frontend/certs            HTTPS 证书（server.crt + server.key，放好后 restart frontend 生效）
 #   ./data/                      持久化数据（数据库/缓存/对象存储/日志），直接躺在宿主机上
 #
-# 端口策略：对外只暴露前端 Nginx 的 80 端口（由 WEB_PORT 控制）。
+# 端口策略：对外只暴露前端 Nginx 的 80 / 443 端口（由 WEB_PORT / WEB_SSL_PORT 控制）。
+#   443 仅在 ./frontend/certs/ 放好 server.crt + server.key 后才监听，此时 80 的请求 301 跳到 443；
+#   未放证书时只有 80 提供 HTTP 服务。
 #   PostgreSQL / Redis / MinIO 均不发布到宿主机，只在 cangjie-net 内网互通；
 #   MinIO 文件（预签名 URL）走 Nginx 的 /<桶名>/，控制台走 /minio-console/。
 # 用法：见 README.md / 直接执行 ./deploy-all.sh
@@ -196,8 +199,12 @@ services:
       # 前端页面直接挂载宿主机 ./frontend/dist（镜像内不再作为唯一来源）
       # 更新制品后只需：docker compose exec frontend nginx -s reload
       - ./frontend/dist:/usr/share/nginx/html:ro,z
+      # HTTPS 证书目录（可选）：放入 server.crt + server.key 后 restart frontend 即启用 HTTPS
+      - ./frontend/certs:/etc/nginx/certs:ro,z
     ports:
       - "${WEB_PORT:-80}:80"
+      # HTTPS 端口（可选）：未放置证书时容器内无 443 监听，该端口连接被拒绝
+      - "${WEB_SSL_PORT:-443}:443"
     networks: [cangjie-net]
 
 networks:
