@@ -149,6 +149,8 @@ services:
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-m3}
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1024}
+      # 是否在嵌入请求中传 dimensions 参数：bge-m3 等固定维度模型不支持该参数，需设为 false
+      EMBEDDING_DIMENSION_ENABLED: ${EMBEDDING_DIMENSION_ENABLED:-false}
       CANGJIE_MODEL_KEY_SECRET: ${CANGJIE_MODEL_KEY_SECRET:-change-me-model-key-secret-32chars}
       SA_TOKEN_JWT_SECRET_KEY: ${SA_TOKEN_JWT_SECRET_KEY:-change-me-to-a-random-64-chars-string}
       # 外部 logback 配置：开启 MyBatis SQL 日志并写入 /app/logs/sql.log（见 backend/logback-spring.xml）

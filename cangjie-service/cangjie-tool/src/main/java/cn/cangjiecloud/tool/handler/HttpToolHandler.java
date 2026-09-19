@@ -43,7 +43,7 @@ public class HttpToolHandler extends AbsToolHandler {
             @SuppressWarnings("unchecked")
             Map<String, String> headers = (Map<String, String>) config.get("headers");
 
-            String bodyTemplate = (String) config.getOrDefault("body", "");
+            String bodyTemplate = resolveBodyTemplate(config.get("body"));
             boolean hasBodyTemplate = bodyTemplate != null && !bodyTemplate.isEmpty();
 
             // body 中写了 {{param}} 的参数直接替换进 body，没写的参数自动拼到 query
@@ -74,6 +74,19 @@ public class HttpToolHandler extends AbsToolHandler {
                     .executionTime(cost)
                     .build();
         }
+    }
+
+    /**
+     * 解析请求体模板：兼容配置为字符串（含占位符的 JSON 文本）或 JSON 对象/数组（自动序列化）
+     */
+    private String resolveBodyTemplate(Object body) {
+        if (body == null) {
+            return "";
+        }
+        if (body instanceof String s) {
+            return s;
+        }
+        return JsonUtils.toJSONString(body);
     }
 
     private Map<String, String> buildQueryParams(Map<String, Object> params, String bodyTemplate) {
