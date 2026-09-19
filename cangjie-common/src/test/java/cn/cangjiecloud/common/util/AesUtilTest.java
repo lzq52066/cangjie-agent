@@ -41,9 +41,15 @@ class AesUtilTest {
     }
 
     @Test
-    void decryptWithWrongSecretShouldFail() {
+    void decryptWithWrongSecretShouldNotRecoverPlainText() {
         String cipher = AesUtil.encrypt("top-secret", SECRET);
-        assertThrows(IllegalStateException.class, () -> AesUtil.decrypt(cipher, "other-secret"));
+        // 错误密钥通常因 PKCS5 padding 校验失败抛 IllegalStateException；
+        // 但 padding 恰好合法的概率约 1/256，此时会返回乱码，故这里断言"绝不可能还原出原文"
+        try {
+            assertNotEquals("top-secret", AesUtil.decrypt(cipher, "other-secret"));
+        } catch (IllegalStateException expected) {
+            // 预期内的失败路径
+        }
     }
 
     @Test

@@ -220,7 +220,8 @@ class WorkflowServiceImplTest {
         LambdaQueryWrapper<?> wrapper = (LambdaQueryWrapper<?>) cap.getValue();
         assertThat(wrapper.getTargetSql()).contains("name LIKE");
         assertThat(wrapper.getSqlSegment()).contains("ORDER BY create_time DESC");
-        assertThat(wrapper.getParamNameValuePairs().values()).containsExactly("客服");
+        // MyBatis-Plus 的 like 使用 SqlLike.DEFAULT，参数值两侧会补 %
+        assertThat(wrapper.getParamNameValuePairs().values()).containsExactly("%客服%");
     }
 
     @Test
@@ -321,7 +322,9 @@ class WorkflowServiceImplTest {
                 .contains("application_id")
                 .contains("status");
         assertThat(wrapper.getSqlSegment()).contains("ORDER BY version DESC").contains("LIMIT 1");
-        assertThat(wrapper.getParamNameValuePairs().values()).containsExactly("app-9", "published");
+        // paramNameValuePairs 底层是 HashMap，取值顺序不保证，这里只校验参数集合
+        assertThat(wrapper.getParamNameValuePairs().values())
+                .containsExactlyInAnyOrder("app-9", "published");
     }
 
     // ---------- execute 守卫 ----------

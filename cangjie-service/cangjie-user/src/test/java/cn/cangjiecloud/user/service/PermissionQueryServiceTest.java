@@ -161,10 +161,10 @@ class PermissionQueryServiceTest {
         when(roleMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
         when(roleMenuMapper.selectList(any(Wrapper.class)))
                 .thenReturn(List.of(roleMenu("r1", "m1"), roleMenu("r1", "m1"), roleMenu("r1", "m2")));
+        // mock 不执行 SQL，这里只返回角色已授权菜单（m1/m2）对应的行，模拟 .in(id, menuIds) 的过滤结果
         when(menuMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
                 menu("m1", "btn:x", "button", 1),
-                menu("m2", "menu:y", "menu", 2),
-                menu("m3", "btn:z", "button", 3)));
+                menu("m2", "menu:y", "menu", 2)));
 
         List<String> codes = service.getPermissionsByUserId("u3");
 
@@ -258,8 +258,9 @@ class PermissionQueryServiceTest {
         stubUserRoles(userRole("u3", "r1"));
         when(roleMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
         when(roleMenuMapper.selectList(any(Wrapper.class))).thenReturn(List.of(roleMenu("r1", "m9")));
-        when(menuMapper.selectList(any(Wrapper.class)))
-                .thenReturn(List.of(menu("m9", "btn", "button", 5)));
+        MenuEntity mapped = menu("m9", "btn", "button", 5);
+        mapped.setParentId("root");
+        when(menuMapper.selectList(any(Wrapper.class))).thenReturn(List.of(mapped));
 
         List<MenuVO> menus = service.getMenusByUserId("u3");
 

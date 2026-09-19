@@ -98,7 +98,7 @@ class ChatRequestTest {
 
         @Test
         void allArgsConstructorShouldFollowFieldOrder() {
-            ChatRequest request = new ChatRequest("m", List.of(), 0.2, 10, 0.3, true, null, null, "none", null, null);
+            ChatRequest request = new ChatRequest("m", List.of(), 0.2, 10, 0.3, true, null, null, "none", null, null, null);
 
             assertThat(request.getModel()).isEqualTo("m");
             assertThat(request.getMessages()).isEmpty();

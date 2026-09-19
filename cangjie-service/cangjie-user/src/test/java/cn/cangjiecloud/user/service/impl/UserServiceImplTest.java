@@ -249,11 +249,17 @@ class UserServiceImplTest {
         doReturn(1L).when(service).count(any(Wrapper.class));
         doReturn(null).when(service).getOne(any(Wrapper.class));
 
-        service.login(loginDTO("anyone", RAW_PASSWORD));
+        // 用户不存在时登录必然失败，此处只关心 count 的查询参数用的是配置里的默认用户名
+        ApiException ex = catchThrowableOfType(
+                () -> service.login(loginDTO("anyone", RAW_PASSWORD)), ApiException.class);
+        assertThat(ex).hasMessage("用户名或密码错误");
 
         ArgumentCaptor<Wrapper<UserEntity>> countCap = ArgumentCaptor.forClass(Wrapper.class);
         verify(service).count(countCap.capture());
-        assertThat(((LambdaQueryWrapper<?>) countCap.getValue()).getParamNameValuePairs().values())
+        // LambdaQueryWrapper 的查询参数要生成 SQL 片段时才落入 paramNameValuePairs，故先取 SQL 再断言
+        LambdaQueryWrapper<?> wrapper = (LambdaQueryWrapper<?>) countCap.getValue();
+        assertThat(wrapper.getTargetSql()).contains("username");
+        assertThat(wrapper.getParamNameValuePairs().values())
                 .containsExactly(systemProperties.getDefaultUsername());
     }
 

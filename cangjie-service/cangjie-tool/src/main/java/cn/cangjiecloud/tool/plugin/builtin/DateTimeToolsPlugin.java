@@ -107,8 +107,8 @@ public class DateTimeToolsPlugin extends AbstractBuiltinPlugin {
     // ------------------------------------------------------------------
 
     /**
-     * 时间戳互转：value 为纯数字时按时间戳解析（10 位秒 / 13 位毫秒），
-     * 否则按日期字符串解析并输出对应时间戳。
+     * 时间戳互转：value 为 10 位 / 13 位纯数字时按时间戳解析（秒 / 毫秒），
+     * 其余（含 yyyyMMdd、yyyyMMddHHmmss 这类纯数字日期）按日期字符串解析并输出对应时间戳。
      */
     private ObjectNode timestampConvert(Map<String, Object> params) {
         String value = str(params.get("value"));
@@ -121,23 +121,18 @@ public class DateTimeToolsPlugin extends AbstractBuiltinPlugin {
         }
         Instant instant;
         String inputType;
-        if (value.matches("[+-]?\\d+")) {
+        int digits = digitCount(value);
+        if (digits == 10 || digits == 13) {
             long number = Long.parseLong(value);
-            int digits = String.valueOf(Math.abs(number)).length();
-            if (digits > 13) {
-                return error("无法识别的时间戳位数: " + digits + " 位（支持 10 位秒级或 13 位毫秒级）");
-            }
-            if (digits > 10) {
-                instant = Instant.ofEpochMilli(number);
-                inputType = "timestamp_millis";
-            } else {
-                instant = Instant.ofEpochSecond(number);
-                inputType = "timestamp_seconds";
-            }
+            instant = digits == 13 ? Instant.ofEpochMilli(number) : Instant.ofEpochSecond(number);
+            inputType = digits == 13 ? "timestamp_millis" : "timestamp_seconds";
         } else {
             ParseResult parsed = parseDateTime(value, str(params.get("format")));
             if (parsed.error() != null) {
-                return error(parsed.error());
+                // 纯数字但不属于 10/13 位、也不符合任何日期格式（如 yyyyMMdd）时，仍按位数报错
+                return error(digits > 0
+                        ? "无法识别的时间戳位数: " + digits + " 位（支持 10 位秒级或 13 位毫秒级）"
+                        : parsed.error());
             }
             instant = parsed.toInstant(zone.zoneId());
             inputType = "datetime";
@@ -288,6 +283,14 @@ public class DateTimeToolsPlugin extends AbstractBuiltinPlugin {
 
     private static String orDefault(String value, String def) {
         return value == null || value.isEmpty() ? def : value;
+    }
+
+    /** 纯数字（可带符号）去掉符号后的位数，非纯数字返回 0 */
+    private static int digitCount(String value) {
+        if (!value.matches("[+-]?\\d+")) {
+            return 0;
+        }
+        return String.valueOf(Math.abs(Long.parseLong(value))).length();
     }
 
     private record ZoneResult(ZoneId zoneId, String error) {}

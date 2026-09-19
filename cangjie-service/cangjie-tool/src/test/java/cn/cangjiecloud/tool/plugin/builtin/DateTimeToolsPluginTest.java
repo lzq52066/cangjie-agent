@@ -379,10 +379,10 @@ class DateTimeToolsPluginTest {
         void hugeSpanSkipsWorkdayCount() {
             ObjectNode r = call(DIFF, "start", "0001-01-01", "end", "2026-01-01", "timezone", "UTC");
             assertThat(r.path("success").asBoolean()).isTrue();
-            assertThat(r.path("totalDays").asLong()).isEqualTo(740116L);
+            assertThat(r.path("totalDays").asLong()).isEqualTo(739616L);
             assertThat(r.has("workdays")).isFalse();
-            // 740116 = 2027*365 + 261；261 = 8*30 + 21
-            assertThat(r.path("summary").asText()).isEqualTo("相差 2027 年 8 个月 21 天（共 740116 天）");
+            // 739616 = 2026*365 + 126；126 = 4*30 + 6
+            assertThat(r.path("summary").asText()).isEqualTo("相差 2026 年 4 个月 6 天（共 739616 天）");
         }
 
         @Test

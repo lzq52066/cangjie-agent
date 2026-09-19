@@ -81,20 +81,21 @@ class WorkflowExecutionEngineTest {
         return dto(id, id, type, config);
     }
 
-    private static ArrayNode edges(Object... triples) {
+    /**
+     * 构造边数组。形参声明为 {@code String[]...}：若用 {@code Object...}，
+     * 单条边 {@code edges(new String[]{"s","l"})} 会被当作变长参数数组本身（Java 变长参数陷阱），
+     * 导致把 "s"、"l" 当成两条 String 边写进数组。
+     */
+    private static ArrayNode edges(String[]... triples) {
         ArrayNode array = JsonUtils.newArray();
-        for (Object t : triples) {
-            if (t instanceof String[] parts) {
-                ObjectNode e = JsonUtils.newObject();
-                e.put("source", parts[0]);
-                e.put("target", parts[1]);
-                if (parts.length > 2 && parts[2] != null) {
-                    e.put("condition", parts[2]);
-                }
-                array.add(e);
-            } else {
-                array.add(JsonUtils.mapper().valueToTree(t));
+        for (String[] parts : triples) {
+            ObjectNode e = JsonUtils.newObject();
+            e.put("source", parts[0]);
+            e.put("target", parts[1]);
+            if (parts.length > 2 && parts[2] != null) {
+                e.put("condition", parts[2]);
             }
+            array.add(e);
         }
         return array;
     }
