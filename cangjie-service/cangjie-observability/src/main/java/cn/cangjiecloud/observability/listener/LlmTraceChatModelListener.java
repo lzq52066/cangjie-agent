@@ -91,6 +91,7 @@ public class LlmTraceChatModelListener implements ChatModelListener {
         ChatTraceContext traceContext = ChatTraceContext.fromListenerAttributes(attributes);
         if (traceContext != null) {
             builder.traceId(traceContext.getTraceId())
+                    .runId(traceContext.getRunId())
                     .appId(traceContext.getAppId())
                     .appName(traceContext.getAppName())
                     .sessionId(traceContext.getSessionId())

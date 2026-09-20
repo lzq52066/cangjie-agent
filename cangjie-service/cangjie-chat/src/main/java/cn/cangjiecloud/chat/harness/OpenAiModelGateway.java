@@ -157,6 +157,8 @@ public class OpenAiModelGateway implements ModelGateway {
                 // 业务上下文随请求透传，由 ChatModelListener 统一落 trace（含真实 usage）
                 .traceContext(ChatTraceContext.builder()
                         .traceId(request.getTraceId())
+                        // runId 由 startRun 回填到请求上，使本次 run 的模型调用可从 traceId 中精确分离
+                        .runId(request.getRunId())
                         .appId(request.getApplicationId())
                         .appName(request.getApplicationName())
                         .sessionId(request.getSessionId())

@@ -94,51 +94,104 @@
         <el-alert v-if="detail.run.errorMessage" type="error" :closable="false" show-icon
                   :title="detail.run.errorMessage" style="margin:12px 0" />
 
-        <el-divider content-position="left">执行步骤（{{ detail.steps?.length || 0 }}）</el-divider>
-        <el-table :data="detail.steps || []" size="small" border stripe>
-          <el-table-column type="expand">
-            <template #default="{ row }">
-              <div class="step-io">
-                <div v-if="row.input">
-                  <div class="step-io-label">入参</div>
-                  <pre class="code-block">{{ prettyJson(row.input) }}</pre>
-                </div>
-                <div v-if="row.output">
-                  <div class="step-io-label">产出</div>
-                  <pre class="code-block">{{ prettyJson(row.output) }}</pre>
-                </div>
-                <el-alert v-if="row.errorMessage" type="error" :closable="false" show-icon
-                          :title="row.errorMessage" style="margin-top:8px" />
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="#" prop="stepNo" width="48" align="center" />
-          <el-table-column label="轮" prop="round" width="48" align="center" />
-          <el-table-column label="类型" width="80" align="center">
-            <template #default="{ row }">
-              <el-tag size="small" :type="stepTagType(row.type)">{{ row.type }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="名称" prop="name" min-width="150" show-overflow-tooltip />
-          <el-table-column label="Token" width="100" align="center">
-            <template #default="{ row }">
-              <span v-if="row.inputTokens != null" style="font-size:12px">
-                {{ row.inputTokens }} / {{ row.outputTokens }}
-              </span>
-              <span v-else>-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="耗时" width="80" align="center">
-            <template #default="{ row }">{{ fmtDuration(row.duration) }}</template>
-          </el-table-column>
-          <el-table-column label="状态" width="80" align="center">
-            <template #default="{ row }">
-              <el-tag size="small" :type="row.status === 'success' || row.status === 'completed' ? 'success' : 'danger'">
-                {{ row.status }}
+        <el-divider content-position="left">
+          执行过程（{{ roundGroups.length }} 轮 · {{ detail.steps?.length || 0 }} 步 · {{ llmCallCount }} 次模型调用）
+        </el-divider>
+
+        <!-- 上下文装配：还原"模型这一轮到底收到了哪些片段、各占多少预算" -->
+        <div v-if="contextSlots.length" class="tl-node tl-node--context">
+          <div class="tl-head" @click="toggle('ctx')">
+            <el-tag size="small" type="info">context</el-tag>
+            <span class="tl-name">上下文装配</span>
+            <span class="tl-meta">{{ contextSlots.length }} 个槽位 · 约 {{ contextTokens }} tokens</span>
+            <span class="tl-caret">{{ caret('ctx') }}</span>
+          </div>
+          <div v-if="isOpen('ctx')" class="tl-body">
+            <el-table :data="contextSlots" size="small" border>
+              <el-table-column label="槽位" prop="slot" width="130" />
+              <el-table-column label="来源" prop="source" min-width="120" show-overflow-tooltip />
+              <el-table-column label="消息" prop="messages" width="66" align="center" />
+              <el-table-column label="占用" prop="estTokens" width="76" align="center" />
+              <el-table-column label="预算" prop="budgetTokens" width="76" align="center" />
+              <el-table-column label="丢弃" width="76" align="center">
+                <template #default="{ row }">
+                  <span :style="row.droppedTokens ? 'color:#f56c6c' : ''">{{ row.droppedTokens || 0 }}</span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </div>
+
+        <div v-for="(g, gi) in roundGroups" :key="gi" class="tl-round">
+          <div class="tl-round-head">
+            <span class="tl-round-title">{{ g.round == null ? '未归属轮次' : `第 ${g.round} 轮` }}</span>
+            <span class="tl-meta">
+              {{ g.nodes.length }} 步 · {{ g.totalTokens }} tokens · {{ fmtDuration(g.duration) }}
+            </span>
+          </div>
+
+          <div v-for="n in g.nodes" :key="n.key" class="tl-node" :class="`tl-node--${n.type}`">
+            <div class="tl-head" @click="toggle(n.key)">
+              <el-tag size="small" :type="stepTagType(n.type)">{{ n.type }}</el-tag>
+              <span class="tl-name">{{ n.name || '-' }}</span>
+              <span v-if="n.inputTokens != null" class="tl-meta">{{ n.inputTokens }}/{{ n.outputTokens }} tok</span>
+              <span class="tl-meta">{{ fmtDuration(n.duration) }}</span>
+              <el-tag v-if="n.calls.length > 1" size="small" type="warning" effect="plain">
+                {{ n.calls.length }} 次调用
               </el-tag>
-            </template>
-          </el-table-column>
-        </el-table>
+              <el-tag v-if="n.truncated" size="small" type="info" effect="plain">增量已截断</el-tag>
+              <el-tag size="small" :type="n.status === 'success' || n.status === 'completed' ? 'success' : 'danger'"
+                      effect="plain">{{ n.status }}</el-tag>
+              <span class="tl-caret">{{ caret(n.key) }}</span>
+            </div>
+
+            <div v-if="isOpen(n.key)" class="tl-body">
+              <template v-if="n.input">
+                <div class="step-io-label">入参{{ n.type === 'llm' ? '（本轮增量）' : '' }}</div>
+                <pre class="code-block">{{ prettyJson(n.input) }}</pre>
+              </template>
+              <template v-if="n.output">
+                <div class="step-io-label">产出</div>
+                <pre class="code-block">{{ prettyJson(n.output) }}</pre>
+              </template>
+              <el-alert v-if="n.errorMessage" type="error" :closable="false" show-icon
+                        :title="n.errorMessage" style="margin-top:8px" />
+
+              <!-- 该步骤名下的真实模型调用：完整 prompt、厂商 requestId、重试与降级都在这层 -->
+              <div v-if="n.calls.length" class="tl-calls">
+                <div class="step-io-label">模型调用（{{ n.calls.length }}）</div>
+                <div v-for="(c, ci) in n.calls" :key="c.id" class="tl-call">
+                  <div class="tl-call-head" @click="toggleCall(c)">
+                    <el-tag size="small" :type="c.status === 'success' ? 'success' : 'danger'" effect="plain">
+                      {{ ci + 1 }}
+                    </el-tag>
+                    <span class="tl-name">{{ c.modelName || '-' }}</span>
+                    <span class="tl-meta">
+                      {{ c.inputTokens ?? '-' }}/{{ c.outputTokens ?? '-' }} tok · {{ fmtDuration(c.duration) }}
+                      · {{ c.finishReason || '-' }}
+                    </span>
+                    <span class="tl-meta">req {{ c.requestId || '-' }}</span>
+                    <span class="tl-caret">{{ caret(c.id) }}</span>
+                  </div>
+                  <div v-if="isOpen(c.id)" class="tl-call-body" v-loading="!!traceLoading[c.id]">
+                    <el-alert v-if="c.errorMessage" type="error" :closable="false" show-icon
+                              :title="c.errorMessage" style="margin-bottom:8px" />
+                    <div class="step-io-label">完整 Prompt</div>
+                    <pre class="code-block">{{ renderPrompt(traceFull[c.id]?.promptContent) }}</pre>
+                    <div class="step-io-label">模型响应</div>
+                    <pre class="code-block">{{ traceFull[c.id]?.responseContent || '-' }}</pre>
+                  </div>
+                </div>
+              </div>
+              <div v-else-if="n.type === 'llm'" class="tl-hint">
+                无模型调用明细：该 run 早于 run 关联上线，或步骤留痕未开启
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <el-empty v-if="!roundGroups.length && !contextSlots.length"
+                  description="无步骤明细（agent-run.record-steps 已关闭）" :image-size="60" />
 
         <template v-if="detail.approvals?.length">
           <el-divider content-position="left">审批单（{{ detail.approvals.length }}）</el-divider>
@@ -194,7 +247,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import QueryBar from '@admin/components/QueryBar.vue'
 import DataPager from '@admin/components/DataPager.vue'
 import { prettyJson } from '@admin/utils/format'
@@ -322,16 +375,155 @@ function resetQuery() {
 
 const drawer = ref(false)
 const detail = ref<any>(null)
+const openKeys = ref<string[]>([])
+/** 模型调用正文按需拉取后的缓存：正文可达数万字符，不随详情一次性下发 */
+const traceFull = ref<Record<string, any>>({})
+const traceLoading = ref<Record<string, boolean>>({})
+
 async function showDetail(runId: string) {
   detail.value = null
+  openKeys.value = []
+  traceFull.value = {}
   drawer.value = true
   detail.value = await observabilityApi.agentRunDetail(runId)
+}
+
+function isOpen(key: string) {
+  return openKeys.value.includes(key)
+}
+function toggle(key: string) {
+  openKeys.value = isOpen(key) ? openKeys.value.filter(k => k !== key) : [...openKeys.value, key]
+}
+function caret(key: string) {
+  return isOpen(key) ? '−' : '+'
+}
+
+function toggleCall(c: any) {
+  toggle(c.id)
+  if (isOpen(c.id) && !traceFull.value[c.id]) loadTrace(c.id)
+}
+
+async function loadTrace(id: string) {
+  traceLoading.value[id] = true
+  try {
+    traceFull.value[id] = await observabilityApi.llmTraceDetail(id)
+  } finally {
+    delete traceLoading.value[id]
+  }
+}
+
+/** 步骤时间按后端 @JsonFormat 为 'yyyy-MM-dd HH:mm:ss'，模型调用为 ISO，统一折算为毫秒 */
+function toMs(t?: string | null): number {
+  if (!t) return 0
+  const ms = Date.parse(String(t).replace(' ', 'T'))
+  return Number.isNaN(ms) ? 0 : ms
+}
+
+const contextSlots = computed<any[]>(() => {
+  const raw = detail.value?.run?.contextUsage
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+})
+const contextTokens = computed(() =>
+  contextSlots.value.reduce((sum, s) => sum + (s.estTokens || 0), 0))
+
+const llmCallCount = computed(() => detail.value?.llmTraces?.length || 0)
+
+/**
+ * 步骤与模型调用按时间窗对齐：一轮 exchange 只写一个 llm 步骤，
+ * 但重试与供应商降级会在该窗口内产生多条调用，所以是一对多，不做压缩。
+ */
+const roundGroups = computed<any[]>(() => {
+  const steps: any[] = detail.value?.steps || []
+  const traces: any[] = detail.value?.llmTraces || []
+  const claimed = new Set<string>()
+  const groups: any[] = []
+  let current: any = null
+
+  for (const s of steps) {
+    if (!current || current.round !== s.round) {
+      current = { round: s.round ?? 0, nodes: [] }
+      groups.push(current)
+    }
+    const node: any = { ...s, key: `s-${s.stepNo ?? s.id}`, calls: [] }
+    if (s.type === 'llm') {
+      // 留痕时间各自取整，两端各放宽 1s；已认领的调用不再被后面的步骤抢走
+      const from = toMs(s.startTime) - 1000
+      const to = toMs(s.endTime) + 1000
+      node.calls = traces.filter((t: any) => {
+        if (claimed.has(t.id)) return false
+        const at = toMs(t.startTime)
+        if (at < from || at > to) return false
+        claimed.add(t.id)
+        return true
+      })
+    }
+    current.nodes.push(node)
+  }
+
+  const leftovers = traces.filter((t: any) => !claimed.has(t.id))
+  if (leftovers.length) {
+    groups.push({
+      round: null,
+      nodes: leftovers.map((t: any) => ({
+        key: `t-${t.id}`,
+        type: 'llm',
+        name: t.modelName,
+        status: t.status,
+        inputTokens: t.inputTokens,
+        outputTokens: t.outputTokens,
+        duration: t.duration,
+        input: '',
+        output: '',
+        errorMessage: t.errorMessage,
+        truncated: 0,
+        calls: [t]
+      }))
+    })
+  }
+
+  return groups.map(g => ({
+    ...g,
+    totalTokens: g.nodes.reduce(
+      (n: number, x: any) => n + (x.inputTokens || 0) + (x.outputTokens || 0), 0),
+    duration: g.nodes.reduce((n: number, x: any) => n + (x.duration || 0), 0)
+  }))
+})
+
+/** promptContent 存的是完整消息数组 JSON；可解析则按角色分段，否则原样输出 */
+function renderPrompt(raw?: string): string {
+  if (!raw) return '-'
+  let parsed: any
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    // 正文超长按字符数截断过，尾部不是合法 JSON，只能原样展示
+    return raw
+  }
+  if (!Array.isArray(parsed)) return prettyJson(raw)
+  return parsed.map((m: any, i: number) => {
+    const role = m.type || m.role || '?'
+    const text = [m.text, m.content].find((v: any) => typeof v === 'string')
+      ?? (Array.isArray(m.contents)
+        ? m.contents.map((c: any) => c?.text ?? `[${c?.type ?? '附件'}]`).join('\n')
+        : JSON.stringify(m))
+    // 工具调用：langchain4j 用 toolExecutionRequests，旧数据用 toolCalls
+    const reqs: any[] = m.toolExecutionRequests || m.toolCalls || []
+    const calls = reqs.map((t: any) =>
+      `\n→ ${t.name || t.functionName || '?'}(${t.arguments ?? t.args ?? ''})`).join('')
+    const toolName = m.toolName ? ` ${m.toolName}` : ''
+    return `[${i + 1}] ${role}${toolName}${calls}${text ? `\n${text}` : ''}`
+  }).join('\n\n')
 }
 </script>
 
 <style lang="scss" scoped>
 .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
-.step-io { padding: 8px 16px; }
 .step-io-label { font-size: 12px; color: #909399; margin: 6px 0 4px; }
 .code-block {
   background: #f9fafc; border: 1px solid #ebeef5; border-radius: 8px; padding: 10px;
@@ -342,4 +534,36 @@ async function showDetail(runId: string) {
   background: #fafafa; border: 1px solid #ebeef5; border-radius: 6px; padding: 12px;
   white-space: pre-wrap; word-break: break-all; font-size: 13px; line-height: 1.8;
 }
+
+.tl-round { margin-bottom: 14px; }
+.tl-round-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 0; border-bottom: 1px dashed #ebeef5;
+}
+.tl-round-title { font-size: 13px; font-weight: 600; color: #303133; }
+
+.tl-node {
+  display: flex; flex-direction: column; margin-top: 8px;
+  background: #fff; border: 1px solid #ebeef5; border-radius: 8px;
+}
+.tl-node--llm { border-left: 3px solid #409eff; }
+.tl-node--tool { border-left: 3px solid #e6a23c; }
+.tl-node--error { border-left: 3px solid #f56c6c; }
+.tl-node--hook, .tl-node--context { border-left: 3px solid #909399; }
+
+.tl-head, .tl-call-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; cursor: pointer; font-size: 12px;
+}
+.tl-head:hover, .tl-call-head:hover { background: #f9fafc; }
+.tl-name { font-size: 12px; font-weight: 600; color: #303133; }
+.tl-meta { font-size: 12px; color: #909399; }
+.tl-caret { margin-left: auto; font-size: 14px; line-height: 1; color: #c0c4cc; }
+.tl-body { padding: 0 12px 12px; border-top: 1px solid #f2f3f5; }
+
+.tl-calls { margin-top: 10px; }
+.tl-call { margin-bottom: 6px; border: 1px solid #ebeef5; border-radius: 6px; }
+.tl-call-head { padding: 6px 8px; }
+.tl-call-body { padding: 0 10px 10px; border-top: 1px solid #f2f3f5; }
+.tl-hint { margin-top: 8px; font-size: 12px; color: #a8abb2; }
 </style>

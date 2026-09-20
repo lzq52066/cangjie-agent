@@ -1,6 +1,7 @@
 package cn.cangjiecloud.observability.service;
 
 import cn.cangjiecloud.observability.entity.LlmTraceEntity;
+import dev.langchain4j.data.message.ChatMessage;
 
 import java.util.List;
 
@@ -27,6 +28,8 @@ public interface ILlmTraceRecorder {
     class LlmTraceRecord {
         /** 链路 ID（可选，不传时从 TraceContext 获取） */
         private String traceId;
+        /** 所属 Agent 执行 run ID（可选，非 Harness 场景为空） */
+        private String runId;
         /** OpenAI request ID */
         private String requestId;
         /** 应用 ID */
@@ -57,7 +60,7 @@ public interface ILlmTraceRecorder {
         private Long duration;
         /** 开始时间戳（毫秒） */
         private Long startTimeMs;
-        /** 消息列表（与 promptContent 二选一，List 会被序列化为 JSON） */
-        private List<?> messages;
+        /** 请求消息列表（与 promptContent 二选一，List 会被序列化为 JSON） */
+        private List<ChatMessage> messages;
     }
 }

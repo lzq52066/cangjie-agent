@@ -18,6 +18,9 @@ public class LlmTraceEntity extends BaseEntity {
     /** 链路 ID（关联 trace_record） */
     private String traceId;
 
+    /** 所属 Agent 执行 run ID（关联 agent_run）；非 Harness 调用为空 */
+    private String runId;
+
     /** OpenAI request ID（如 chatcmpl-xxx） */
     private String requestId;
 

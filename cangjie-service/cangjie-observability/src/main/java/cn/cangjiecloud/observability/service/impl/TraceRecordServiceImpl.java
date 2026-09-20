@@ -10,11 +10,14 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 
 @Slf4j
 @Service
@@ -22,12 +25,24 @@ import java.util.UUID;
 public class TraceRecordServiceImpl extends ServiceImpl<TraceRecordMapper, TraceRecordEntity>
         implements ITraceRecordService {
 
+    @Autowired
+    @Qualifier("businessExecutor")
+    private Executor businessExecutor;
+
     @Override
     public void record(TraceRecordEntity entity) {
         if (entity == null) {
             return;
         }
-        save(entity);
+        // 异步独立落库：span 不能跟着业务事务一起回滚，否则失败调用反而查不到
+        businessExecutor.execute(() -> {
+            try {
+                save(entity);
+            } catch (Exception ex) {
+                log.warn("trace_record 写入失败: module={}, action={}, {}",
+                        entity.getModule(), entity.getAction(), ex.getMessage());
+            }
+        });
     }
 
     @Override

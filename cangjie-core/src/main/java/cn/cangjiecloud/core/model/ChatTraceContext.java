@@ -25,6 +25,7 @@ public class ChatTraceContext {
 
     /** listener attributes 的键名前缀：避免与 langchain4j 自身或其它监听器冲突 */
     public static final String KEY_TRACE_ID = "cangjie.traceId";
+    public static final String KEY_RUN_ID = "cangjie.runId";
     public static final String KEY_REQUEST_ID = "cangjie.requestId";
     public static final String KEY_APP_ID = "cangjie.appId";
     public static final String KEY_APP_NAME = "cangjie.appName";
@@ -35,6 +36,12 @@ public class ChatTraceContext {
 
     /** 链路 ID */
     private String traceId;
+
+    /**
+     * 所属 Agent 执行 run ID（agent_run.id）。
+     * 仅 Harness 链路携带；后台摘要、记忆合并、工作流直调模型等非 Agent 执行场景为空。
+     */
+    private String runId;
 
     /**
      * 业务请求 ID（如 chatcmpl-xxx、session-summary-xxx）。
@@ -66,6 +73,7 @@ public class ChatTraceContext {
     public Map<Object, Object> toListenerAttributes() {
         Map<Object, Object> attributes = new LinkedHashMap<>();
         put(attributes, KEY_TRACE_ID, traceId);
+        put(attributes, KEY_RUN_ID, runId);
         put(attributes, KEY_REQUEST_ID, requestId);
         put(attributes, KEY_APP_ID, appId);
         put(attributes, KEY_APP_NAME, appName);
@@ -85,6 +93,7 @@ public class ChatTraceContext {
         }
         ChatTraceContext context = ChatTraceContext.builder()
                 .traceId(asString(attributes.get(KEY_TRACE_ID)))
+                .runId(asString(attributes.get(KEY_RUN_ID)))
                 .requestId(asString(attributes.get(KEY_REQUEST_ID)))
                 .appId(asString(attributes.get(KEY_APP_ID)))
                 .appName(asString(attributes.get(KEY_APP_NAME)))
@@ -97,7 +106,7 @@ public class ChatTraceContext {
     }
 
     private boolean isEmpty() {
-        return traceId == null && requestId == null && appId == null && appName == null
+        return traceId == null && runId == null && requestId == null && appId == null && appName == null
                 && sessionId == null && userId == null && modelId == null && modelName == null;
     }
 

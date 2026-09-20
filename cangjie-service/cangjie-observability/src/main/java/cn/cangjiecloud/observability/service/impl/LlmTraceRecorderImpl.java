@@ -4,7 +4,8 @@ import cn.cangjiecloud.observability.context.TraceContext;
 import cn.cangjiecloud.observability.entity.LlmTraceEntity;
 import cn.cangjiecloud.observability.service.ILlmTraceRecorder;
 import cn.cangjiecloud.observability.service.ILlmTraceService;
-import cn.cangjiecloud.common.util.JsonUtils;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ChatMessageSerializer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.List;
 
 /**
  * LLM 调用追踪记录器实现
@@ -54,6 +56,7 @@ public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
         try {
             LlmTraceEntity trace = new LlmTraceEntity();
             trace.setTraceId(resolveTraceId(record));
+            trace.setRunId(record.getRunId());
             trace.setRequestId(record.getRequestId());
             trace.setAppId(record.getAppId());
             trace.setAppName(record.getAppName());
@@ -62,10 +65,11 @@ public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
             trace.setModelId(record.getModelId());
             trace.setModelName(record.getModelName());
 
-            // promptContent
+            // promptContent：优先用调用方给定的文本；消息列表必须走 langchain4j 编解码器，
+            // 否则会抛异常并把整条 trace 一起丢掉。
             String promptContent = record.getPromptContent();
             if (promptContent == null && record.getMessages() != null) {
-                promptContent = JsonUtils.toJSONString(record.getMessages());
+                promptContent = serializeMessages(record.getMessages());
             }
             trace.setPromptContent(applyContentPolicy(promptContent));
 
@@ -83,7 +87,22 @@ public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
 
             llmTraceService.save(trace);
         } catch (Exception ex) {
-            log.warn("LLM trace 记录失败: {}", ex.getMessage());
+            log.warn("LLM trace 记录失败", ex);
+        }
+    }
+
+    /**
+     * 用 langchain4j 自带编解码器序列化请求消息。
+     * <p>
+     * 不能用通用 ObjectMapper：langchain4j 的消息类型没有 public getter，
+     * 裸 Jackson 会抛 InvalidDefinitionException，导致整条 trace 静默丢失。
+     */
+    private String serializeMessages(List<ChatMessage> messages) {
+        try {
+            return ChatMessageSerializer.messagesToJson(messages);
+        } catch (Exception ex) {
+            log.warn("LLM trace 消息序列化失败，本次仅记录元信息: {}", ex.toString());
+            return null;
         }
     }
 

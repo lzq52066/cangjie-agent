@@ -86,7 +86,17 @@ public class ChatServiceImpl implements IChatService {
     public ChatResponseDTO chat(ChatRequestDTO request) {
         long start = System.currentTimeMillis();
         String traceId = UUID.randomUUID().toString().replace("-", "");
+        try {
+            return doChat(request, traceId, start);
+        } catch (RuntimeException e) {
+            // 失败也要在「调用追踪」留一行：span 由 businessExecutor 独立落库，不随本事务回滚
+            recordTrace("chat", "send", traceId, System.currentTimeMillis() - start, "fail",
+                    e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            throw e;
+        }
+    }
 
+    private ChatResponseDTO doChat(ChatRequestDTO request, String traceId, long start) {
         ApplicationEntity application = getApplication(request.getApplicationId());
         checkChatAccess(application);
         ChatSessionEntity session = getOrCreateSession(request, application);
@@ -129,9 +139,10 @@ public class ChatServiceImpl implements IChatService {
                     UserContext.getUserId(), application, session.getSessionId(), userMessage, aiMessage);
         }
 
-        // 记录追踪
+        // 端到端请求级 span：口径含上下文装配与落库，比 agent_run.duration（仅模型循环）宽
         recordTrace("chat", "send", traceId, duration, "success",
-                "应用: " + application.getName() + ", 总tokens: " + chatResponse.getTotalTokens());
+                "应用: " + application.getName() + ", 总tokens: " + chatResponse.getTotalTokens()
+                        + "（端到端，含装配与落库）");
 
         log.info("对话完成: app={}, session={}, duration={}ms, tokens={}",
                 application.getName(), session.getSessionId(), duration, chatResponse.getTotalTokens());
@@ -204,17 +215,18 @@ public class ChatServiceImpl implements IChatService {
             ChatMessageEntity userMessage = saveUserMessage(session, application, request.getMessage());
 
             // 调用模型（流式，支持多轮 Function Calling）
-            long llmStart = System.currentTimeMillis();
             String modelName = getModelName(application.getModelId());
             String requestId = "chatcmpl-" + traceId;
             long created = System.currentTimeMillis() / 1000;
 
             chatStreamViaHarness(application, session, userMessage, context, retrievalSources,
                     emitter, openAiFormat, requestId, modelName, created, traceId, userId, chatStart,
-                    llmStart, cancelled);
+                    cancelled);
 
         } catch (Exception e) {
             log.error("流式对话初始化失败: traceId={}", traceId, e);
+            recordTrace("chat", "send", traceId, System.currentTimeMillis() - chatStart, "fail",
+                    e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
             try {
                 emitter.send(SseEmitter.event()
                         .name("error")
@@ -349,9 +361,6 @@ public class ChatServiceImpl implements IChatService {
      */
     private ChatResponse callModel(ApplicationEntity application, String sessionId, String userId,
                                    ContextResult context, String traceId) {
-        String modelName = getModelName(application.getModelId());
-        long llmStart = System.currentTimeMillis();
-
         HarnessRequest request = harnessContextFactory.newRequest(application, context, false, null,
                 sessionId, userId, traceId);
         HarnessOutcome outcome = agentHarness.run(request, HarnessListener.NOOP);
@@ -368,12 +377,6 @@ public class ChatServiceImpl implements IChatService {
         if (outcome.getStatus() != RunStatus.COMPLETED) {
             String error = outcome.getErrorMessage() == null ? "模型调用失败" : outcome.getErrorMessage();
             boolean timeout = HarnessTimeoutException.isTimeoutMessage(error);
-            if (traceCollector != null) {
-                recordTrace("chat", "llm_call", traceId,
-                        System.currentTimeMillis() - llmStart, "fail",
-                        timeout ? "Agent 循环总超时（>" + request.getLoopPolicy().getTimeoutSeconds() + "s），已终止"
-                                : "模型调用失败: " + error);
-            }
             if (!timeout) {
                 // llm_trace 由 ChatModelListener 按每次模型调用统一落库（含真实 usage 与异常分类）
                 log.warn("对话失败: traceId={}, app={}, error={}", traceId,
@@ -382,31 +385,24 @@ public class ChatServiceImpl implements IChatService {
             throw new ApiException(timeout ? error : "模型调用失败: " + error);
         }
 
-        ChatResponse response = ChatResponse.builder()
+        return ChatResponse.builder()
                 .content(outcome.getFinalText())
                 .finishReason(outcome.getFinishReason())
                 .promptTokens((int) outcome.getInputTokens())
                 .completionTokens((int) outcome.getOutputTokens())
                 .totalTokens((int) outcome.getTotalTokens())
                 .build();
-
-        if (traceCollector != null) {
-            recordTrace("chat", "llm_call", traceId,
-                    System.currentTimeMillis() - llmStart, "success",
-                    "模型: " + modelName + ", tokens: " + response.getTotalTokens());
-        }
-        return response;
     }
 
     /**
-     * 流式对话：SSE 帧由 {@link SseHarnessListener} 逐帧推送——失败只记 trace 不落库，
-     * 成功先落库再发终止帧，等待审批时不发终止帧（由恢复运行接口继续产出）。
+     * 流式对话：SSE 帧由 {@link SseHarnessListener} 逐帧推送——失败时已吐出的部分正文仍落库，
+     * 原因记在 agent_run 与 llm_trace；成功先落库再发终止帧，等待审批时不发终止帧（由恢复运行接口继续产出）。
      */
     private void chatStreamViaHarness(ApplicationEntity application, ChatSessionEntity session,
                                       ChatMessageEntity userMessage, ContextResult context,
                                       List<Map<String, Object>> retrievalSources, SseEmitter emitter,
                                       boolean openAiFormat, String requestId, String modelName, long created,
-                                      String traceId, String userId, long chatStart, long llmStart,
+                                      String traceId, String userId, long chatStart,
                                       AtomicBoolean cancelled) {
         SseHarnessListener listener = new SseHarnessListener(emitter, openAiFormat, requestId, modelName, created,
                 session.getSessionId(), retrievalSources, harnessConfigResolver.isSseToolEvents());
@@ -436,7 +432,11 @@ public class ChatServiceImpl implements IChatService {
         }
 
         if (outcome.getStatus() != RunStatus.COMPLETED) {
-            String error = outcome.getErrorMessage() == null ? "对话处理失败" : outcome.getErrorMessage();
+            // 客户端主动断开不是故障：已产出的正文照常落库，取消留痕只在 agent_run.status=cancelled，
+            // 否则用户关掉页面就会在「调用追踪」里留下一条失败
+            boolean runCancelled = outcome.getStatus() == RunStatus.CANCELLED;
+            String error = outcome.getErrorMessage() == null
+                    ? (runCancelled ? "客户端已断开" : "对话处理失败") : outcome.getErrorMessage();
             // 流式中断前可能已吐出部分正文：保留落库，页面与历史记录都能看到已产出的内容
             String partial = outcome.getFinalText();
             if (partial != null && !partial.isBlank()) {
@@ -451,18 +451,11 @@ public class ChatServiceImpl implements IChatService {
                 updateSessionStats(session, partialMessage);
                 addApplicationTokens(application.getId(), outcome.getTotalTokens());
             }
-            // 错误帧已由 listener 推送；llm_trace 由 ChatModelListener 按每次模型调用统一落库
-            if (traceCollector != null) {
-                recordTrace("chat", "llm_call", traceId,
-                        System.currentTimeMillis() - llmStart, "fail", "模型调用失败: " + error);
+            // 错误帧已由 listener 推送；失败详情已落 agent_run.error_message，模型调用成败落 llm_trace
+            if (!runCancelled) {
+                recordTrace("chat", "send", traceId, System.currentTimeMillis() - chatStart, "fail", error);
             }
             return;
-        }
-
-        if (traceCollector != null) {
-            recordTrace("chat", "llm_call", traceId,
-                    System.currentTimeMillis() - llmStart, "success",
-                    "模型: " + modelName + ", 流式推送完成");
         }
 
         long duration = System.currentTimeMillis() - chatStart;
@@ -485,6 +478,11 @@ public class ChatServiceImpl implements IChatService {
         }
 
         listener.sendTerminal();
+
+        // 端到端请求级 span，与同步对话的 chat/send 同口径
+        recordTrace("chat", "send", traceId, duration, "success",
+                "应用: " + application.getName() + ", 总tokens: " + outcome.getTotalTokens()
+                        + "（端到端，含装配与落库）");
     }
 
     private String getModelName(String modelId) {

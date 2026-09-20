@@ -16,6 +16,7 @@ import cn.cangjiecloud.observability.mapper.AgentApprovalMapper;
 import cn.cangjiecloud.observability.mapper.AgentRunMapper;
 import cn.cangjiecloud.observability.mapper.AgentRunStepMapper;
 import cn.cangjiecloud.observability.service.IAgentRunService;
+import cn.cangjiecloud.observability.service.ILlmTraceService;
 import cn.hutool.core.util.IdUtil;
 import cn.cangjiecloud.common.util.JsonUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -51,6 +52,7 @@ public class AgentRunServiceImpl extends ServiceImpl<AgentRunMapper, AgentRunEnt
 
     private final AgentRunStepMapper stepMapper;
     private final AgentApprovalMapper approvalMapper;
+    private final ILlmTraceService llmTraceService;
     private final Executor businessExecutor;
 
     /** 步骤内容最大存储长度（0 表示不限制） */
@@ -69,9 +71,11 @@ public class AgentRunServiceImpl extends ServiceImpl<AgentRunMapper, AgentRunEnt
 
     public AgentRunServiceImpl(AgentRunStepMapper stepMapper,
                               AgentApprovalMapper approvalMapper,
+                              ILlmTraceService llmTraceService,
                               @Qualifier("businessExecutor") Executor businessExecutor) {
         this.stepMapper = stepMapper;
         this.approvalMapper = approvalMapper;
+        this.llmTraceService = llmTraceService;
         this.businessExecutor = businessExecutor;
     }
 
@@ -306,6 +310,7 @@ public class AgentRunServiceImpl extends ServiceImpl<AgentRunMapper, AgentRunEnt
         AgentRunDetailVO vo = new AgentRunDetailVO();
         vo.setRun(run);
         vo.setSteps(listSteps(runId));
+        vo.setLlmTraces(llmTraceService.listByRun(runId));
         vo.setApprovals(approvalMapper.selectList(new LambdaQueryWrapper<AgentApprovalEntity>()
                 .eq(AgentApprovalEntity::getRunId, runId)
                 .orderByAsc(AgentApprovalEntity::getCreateTime)));

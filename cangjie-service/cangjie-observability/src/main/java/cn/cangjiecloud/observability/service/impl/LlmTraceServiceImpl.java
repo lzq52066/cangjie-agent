@@ -54,4 +54,21 @@ public class LlmTraceServiceImpl extends ServiceImpl<LlmTraceMapper, LlmTraceEnt
                 .orderByAsc(LlmTraceEntity::getStartTime);
         return list(wrapper);
     }
+
+    @Override
+    public List<LlmTraceEntity> listByRun(String runId) {
+        if (!StringUtils.hasText(runId)) {
+            return List.of();
+        }
+        LambdaQueryWrapper<LlmTraceEntity> wrapper = new LambdaQueryWrapper<LlmTraceEntity>()
+                // 只取时间线需要的列：正文可能各占数万字符，展开时再按 id 单条拉
+                .select(LlmTraceEntity::getId, LlmTraceEntity::getRunId, LlmTraceEntity::getTraceId,
+                        LlmTraceEntity::getRequestId, LlmTraceEntity::getModelId, LlmTraceEntity::getModelName,
+                        LlmTraceEntity::getInputTokens, LlmTraceEntity::getOutputTokens, LlmTraceEntity::getTotalTokens,
+                        LlmTraceEntity::getFinishReason, LlmTraceEntity::getDuration, LlmTraceEntity::getStatus,
+                        LlmTraceEntity::getErrorMessage, LlmTraceEntity::getStartTime)
+                .eq(LlmTraceEntity::getRunId, runId)
+                .orderByAsc(LlmTraceEntity::getStartTime);
+        return list(wrapper);
+    }
 }
