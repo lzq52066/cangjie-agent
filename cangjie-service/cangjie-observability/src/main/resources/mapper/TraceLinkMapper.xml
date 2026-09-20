@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.cangjiecloud.observability.mapper.TraceLinkMapper">
+
+    <!--
+      链路节点归一化：把三类留痕压成同一种"节点"行，再由外层按 link_id 聚合。
+
+      - span : trace_record 的请求级 span（对话端到端 / 工作流执行 / 知识库检索）
+      - llm  : llm_trace 的每次模型调用（含重试与供应商降级产生的多条）
+      - run  : agent_run 的每次 Agent 执行（含子 Agent）
+
+      link_id：有 traceId 时用 traceId；后台任务（会话摘要、记忆合并、模型连通性测试）不带
+      traceId，用 #kind# + 记录 ID 自成一条链路，保证它们在统一视图里不隐身。
+      时间条件留在各分支内，让 start_time DESC 索引各自裁剪扫描量。
+    -->
+    <sql id="linkNodes">
+        SELECT coalesce(nullif(t.trace_id, ''), '#span#' || t.id)                   AS link_id,
+               'span'                                                               AS node_kind,
+               t.start_time                                                         AS start_time,
+               t.start_time + coalesce(t.duration, 0) * interval '1 millisecond'    AS end_time,
+               t.duration                                                           AS duration,
+               NULL::bigint                                                         AS total_tokens,
+               NULL::varchar                                                        AS app_id,
+               NULL::varchar                                                        AS app_name,
+               NULL::varchar                                                        AS session_id,
+               NULL::varchar                                                        AS user_id,
+               NULL::varchar                                                        AS model_name,
+               t.status                                                             AS node_status,
+               t.message                                                            AS error_message,
+               ((t.span_id = t.trace_id) OR t.trace_id IS NULL OR t.trace_id = '')   AS is_entry,
+               nullif(coalesce(nullif(t.module, ''), '')
+                          || coalesce('/' || nullif(t.action, ''), ''), '')         AS entry_label
+        FROM trace_record t
+        WHERE t.deleted = 0
+        <if test="q.orphanId != null and q.orphanId != ''">AND t.id = #{q.orphanId}</if>
+        <if test="q.linkId != null and q.linkId != '' and q.orphanId == null">AND t.trace_id = #{q.linkId}</if>
+        <if test="q.startTime != null">AND t.start_time &gt;= #{q.startTime}</if>
+        <if test="q.endTime != null">AND t.start_time &lt;= #{q.endTime}</if>
+
+        UNION ALL
+
+        SELECT coalesce(nullif(l.trace_id, ''), '#llm#' || l.id)                    AS link_id,
+               'llm'                                                                AS node_kind,
+               l.start_time                                                         AS start_time,
+               l.start_time + coalesce(l.duration, 0) * interval '1 millisecond'    AS end_time,
+               l.duration                                                           AS duration,
+               l.total_tokens                                                       AS total_tokens,
+               l.app_id                                                             AS app_id,
+               l.app_name                                                           AS app_name,
+               l.session_id                                                         AS session_id,
+               l.user_id                                                            AS user_id,
+               l.model_name                                                         AS model_name,
+               l.status                                                             AS node_status,
+               l.error_message                                                      AS error_message,
+               (l.trace_id IS NULL OR l.trace_id = '')                              AS is_entry,
+               l.model_name                                                         AS entry_label
+        FROM llm_trace l
+        WHERE l.deleted = 0
+        <if test="q.orphanId != null and q.orphanId != ''">AND l.id = #{q.orphanId}</if>
+        <if test="q.linkId != null and q.linkId != '' and q.orphanId == null">AND l.trace_id = #{q.linkId}</if>
+        <if test="q.startTime != null">AND l.start_time &gt;= #{q.startTime}</if>
+        <if test="q.endTime != null">AND l.start_time &lt;= #{q.endTime}</if>
+
+        UNION ALL
+
+        SELECT coalesce(nullif(r.trace_id, ''), '#run#' || r.id)                    AS link_id,
+               'run'                                                                AS node_kind,
+               r.start_time                                                         AS start_time,
+               coalesce(r.end_time,
+                        r.start_time + coalesce(r.duration, 0) * interval '1 millisecond') AS end_time,
+               r.duration                                                           AS duration,
+               r.total_tokens                                                       AS total_tokens,
+               r.app_id                                                             AS app_id,
+               r.app_name                                                           AS app_name,
+               r.session_id                                                         AS session_id,
+               r.user_id                                                            AS user_id,
+               r.model_name                                                         AS model_name,
+               r.status                                                             AS node_status,
+               r.error_message                                                      AS error_message,
+               (r.parent_run_id IS NULL)                                            AS is_entry,
+               r.harness_type                                                       AS entry_label
+        FROM agent_run r
+        WHERE r.deleted = 0
+        <if test="q.orphanId != null and q.orphanId != ''">AND r.id = #{q.orphanId}</if>
+        <if test="q.linkId != null and q.linkId != '' and q.orphanId == null">AND r.trace_id = #{q.linkId}</if>
+        <if test="q.startTime != null">AND r.start_time &gt;= #{q.startTime}</if>
+        <if test="q.endTime != null">AND r.start_time &lt;= #{q.endTime}</if>
+    </sql>
+
+    <!--
+      链路聚合列。入口优先取 span（一次请求的端到端 span 才是真正的入口），
+      其次 run（改造前的老数据没有入口 span，靠根 run 判定），最后落到 llm。
+      归属字段用 max()：同一链路内应用/会话/用户一致，且 max 会跳过 span 分支的 NULL。
+    -->
+    <sql id="linkAggregation">
+        SELECT node.link_id                                                                  AS trace_id,
+               (array_agg(node.node_kind ORDER BY CASE node.node_kind
+                        WHEN 'span' THEN 1 WHEN 'run' THEN 2 ELSE 3 END)
+                   FILTER (WHERE node.is_entry))[1]                                          AS entry_kind,
+               (array_agg(node.entry_label ORDER BY CASE node.node_kind
+                        WHEN 'span' THEN 1 WHEN 'run' THEN 2 ELSE 3 END)
+                   FILTER (WHERE node.is_entry))[1]                                          AS entry_label,
+               min(node.start_time)                                                          AS start_time,
+               max(node.end_time)                                                            AS end_time,
+               max(node.duration)                                                            AS duration,
+               max(node.app_id)                                                              AS app_id,
+               max(node.app_name)                                                            AS app_name,
+               max(node.session_id)                                                          AS session_id,
+               max(node.user_id)                                                             AS user_id,
+               max(node.model_name)                                                          AS model_name,
+               count(*) FILTER (WHERE node.node_kind = 'run')                                AS run_count,
+               count(*) FILTER (WHERE node.node_kind = 'llm')                                AS llm_call_count,
+               count(*) FILTER (WHERE node.node_kind = 'span')                               AS span_count,
+               coalesce(sum(node.total_tokens) FILTER (WHERE node.node_kind = 'llm'), 0)::bigint AS total_tokens,
+               <include refid="linkStatusExpr"/>,
+               (array_agg(node.error_message ORDER BY node.start_time)
+                   FILTER (WHERE node.node_status IN ('fail', 'failed')))[1]                 AS error_message
+        FROM (<include refid="linkNodes"/>) node
+    </sql>
+
+    <!--
+      链路状态判定：run 用 completed / running / waiting_*，span 与 llm 用 success / fail，
+      这里统一收敛成四态。优先级 失败 > 进行中 > 已取消 > 成功。
+    -->
+    <sql id="linkStatusExpr">
+        CASE
+            WHEN count(*) FILTER (WHERE node.node_status IN ('fail', 'failed')) &gt; 0
+                THEN 'fail'
+            WHEN count(*) FILTER (WHERE node.node_status IN ('running', 'waiting_approval', 'waiting_local')) &gt; 0
+                THEN 'running'
+            WHEN count(*) FILTER (WHERE node.node_status = 'cancelled') &gt; 0
+                THEN 'cancelled'
+            ELSE 'success'
+        END                                                                                 AS status
+    </sql>
+
+    <!--
+      与 linkStatusExpr 同优先级的链路级筛选条件。归属与状态都放在 HAVING：
+      条件只筛"哪些链路入选"，不裁剪入选链路自身的节点行。
+    -->
+    <sql id="linkHaving">
+        <trim prefix="HAVING" prefixOverrides="AND">
+            <if test="q.sessionId != null and q.sessionId != ''">
+                AND max(node.session_id) = #{q.sessionId}
+            </if>
+            <if test="q.appId != null and q.appId != ''">
+                AND max(node.app_id) = #{q.appId}
+            </if>
+            <if test="q.userId != null and q.userId != ''">
+                AND max(node.user_id) = #{q.userId}
+            </if>
+            <choose>
+                <when test='q.status != null and q.status == "fail"'>
+                    AND count(*) FILTER (WHERE node.node_status IN ('fail', 'failed')) &gt; 0
+                </when>
+                <when test='q.status != null and q.status == "running"'>
+                    AND count(*) FILTER (WHERE node.node_status IN ('fail', 'failed')) = 0
+                    AND count(*) FILTER (WHERE node.node_status IN ('running', 'waiting_approval', 'waiting_local')) &gt; 0
+                </when>
+                <when test='q.status != null and q.status == "cancelled"'>
+                    AND count(*) FILTER (WHERE node.node_status IN ('fail', 'failed')) = 0
+                    AND count(*) FILTER (WHERE node.node_status IN ('running', 'waiting_approval', 'waiting_local')) = 0
+                    AND count(*) FILTER (WHERE node.node_status = 'cancelled') &gt; 0
+                </when>
+                <when test='q.status != null and q.status == "success"'>
+                    AND count(*) FILTER (WHERE node.node_status IN
+                        ('fail', 'failed', 'running', 'waiting_approval', 'waiting_local', 'cancelled')) = 0
+                </when>
+            </choose>
+        </trim>
+    </sql>
+
+    <select id="selectTraceLinks" resultType="cn.cangjiecloud.observability.dto.TraceLinkVO">
+        <include refid="linkAggregation"/>
+        <where>
+            <if test="q.traceId != null and q.traceId != ''">
+                AND node.link_id LIKE concat('%', #{q.traceId}, '%')
+            </if>
+        </where>
+        GROUP BY node.link_id
+        <include refid="linkHaving"/>
+        ORDER BY min(node.start_time) DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countTraceLinks" resultType="java.lang.Long">
+        SELECT count(*)
+        FROM (<include refid="linkAggregation"/>
+              <where>
+                  <if test="q.traceId != null and q.traceId != ''">
+                      AND node.link_id LIKE concat('%', #{q.traceId}, '%')
+                  </if>
+              </where>
+              GROUP BY node.link_id
+              <include refid="linkHaving"/>
+        ) links
+    </select>
+
+    <!-- 单条链路摘要：详情抽屉打开时取一次概览，不套用列表的时间与归属筛选 -->
+    <select id="selectTraceLink" resultType="cn.cangjiecloud.observability.dto.TraceLinkVO">
+        <include refid="linkAggregation"/>
+        WHERE node.link_id = #{q.linkId}
+        GROUP BY node.link_id
+    </select>
+
+</mapper>

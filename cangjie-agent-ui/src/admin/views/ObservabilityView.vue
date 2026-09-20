@@ -13,9 +13,8 @@
       <el-tabs v-model="activeTab" @tab-change="onTabChange">
         <el-tab-pane label="操作日志" name="logs" />
         <el-tab-pane label="系统指标" name="metrics" />
-        <el-tab-pane label="调用追踪" name="traces" />
-        <el-tab-pane label="LLM 调用" name="llm-traces" />
-        <el-tab-pane label="Agent 执行" name="agent-runs" />
+        <el-tab-pane label="链路追踪" name="trace-links" />
+        <el-tab-pane label="会话记录" name="sessions" />
         <el-tab-pane label="审批单" name="agent-approvals" />
       </el-tabs>
 
@@ -102,115 +101,17 @@
         </template>
       </template>
 
-      <!-- 调用追踪 -->
-      <template v-else-if="activeTab === 'traces'">
-        <QueryBar :loading="loading" @search="loadTraces" @reset="resetTraces">
-          <el-input v-model="traceQuery.traceId" placeholder="TraceId" clearable style="width:220px"
-                    @keyup.enter="loadTraces" />
-          <el-input v-model="traceQuery.module" placeholder="模块" clearable style="width:150px"
-                    @keyup.enter="loadTraces" />
-          <el-input v-model="traceQuery.action" placeholder="操作" clearable style="width:150px"
-                    @keyup.enter="loadTraces" />
-        </QueryBar>
-        <el-table :data="callTraces" v-loading="loading" stripe>
-          <el-table-column label="开始时间" width="180">
-            <template #default="{ row }">{{ formatTime(row.startTime) }}</template>
-          </el-table-column>
-          <el-table-column label="TraceId" prop="traceId" min-width="220" show-overflow-tooltip>
-            <template #default="{ row }">
-              <el-link type="primary" @click="filterByTrace(row.traceId)">{{ row.traceId }}</el-link>
-            </template>
-          </el-table-column>
-          <el-table-column label="模块" prop="module" width="130" />
-          <el-table-column label="操作" prop="action" width="150" />
-          <el-table-column label="服务" prop="serviceName" width="140" />
-          <el-table-column label="耗时" width="100" align="center">
-            <template #default="{ row }">{{ row.duration != null ? row.duration + ' ms' : '-' }}</template>
-          </el-table-column>
-          <el-table-column label="状态" width="90" align="center">
-            <template #default="{ row }">
-              <el-tag size="small" :type="row.status === 'success' ? 'success' : 'danger'">
-                {{ row.status === 'success' ? '成功' : '失败' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="信息" prop="message" min-width="200" show-overflow-tooltip />
-        </el-table>
-      </template>
+      <!-- 链路追踪：span + Agent 执行 + 模型调用按 traceId 归并 -->
+      <TraceLinksPanel v-else-if="activeTab === 'trace-links'" :preset-trace-id="presetTraceId"
+                       :preset-session-id="presetSessionId" />
 
-      <!-- LLM 调用追踪 -->
-      <template v-else-if="activeTab === 'llm-traces'">
-        <QueryBar :loading="loading" @search="loadLlmTraces" @reset="resetLlmTraces">
-          <el-input v-model="llmTraceQuery.traceId" placeholder="TraceId" clearable style="width:200px"
-                    @keyup.enter="loadLlmTraces" />
-          <el-input v-model="llmTraceQuery.appName" placeholder="应用名称" clearable style="width:150px"
-                    @keyup.enter="loadLlmTraces" />
-          <el-input v-model="llmTraceQuery.modelName" placeholder="模型名称" clearable style="width:150px"
-                    @keyup.enter="loadLlmTraces" />
-          <el-input v-model="llmTraceQuery.sessionId" placeholder="会话ID" clearable style="width:180px"
-                    @keyup.enter="loadLlmTraces" />
-          <el-input v-model="llmTraceQuery.promptKeyword" placeholder="输入关键词" clearable style="width:140px"
-                    @keyup.enter="loadLlmTraces" />
-          <el-input v-model="llmTraceQuery.responseKeyword" placeholder="输出关键词" clearable style="width:140px"
-                    @keyup.enter="loadLlmTraces" />
-          <el-select v-model="llmTraceQuery.status" placeholder="全部状态" clearable style="width:120px">
-            <el-option label="成功" value="success" />
-            <el-option label="失败" value="fail" />
-          </el-select>
-          <el-date-picker
-            v-model="llmTraceQuery.timeRange"
-            type="datetimerange"
-            range-separator="至"
-            start-placeholder="开始时间"
-            end-placeholder="结束时间"
-            format="YYYY-MM-DD HH:mm"
-            value-format="YYYY-MM-DDTHH:mm:ss"
-            class="cj-daterange"
-          />
-        </QueryBar>
-        <el-table :data="llmTraces" v-loading="loading" stripe @row-click="showLlmDetail">
-          <el-table-column label="开始时间" width="170">
-            <template #default="{ row }">{{ formatTime(row.startTime) }}</template>
-          </el-table-column>
-          <el-table-column label="TraceId" prop="traceId" min-width="180" show-overflow-tooltip />
-          <el-table-column label="应用名称" prop="appName" min-width="120" />
-          <el-table-column label="模型" prop="modelName" min-width="100" />
-          <el-table-column label="输入" min-width="180" show-overflow-tooltip>
-            <template #default="{ row }">{{ truncateContent(row.promptContent) }}</template>
-          </el-table-column>
-          <el-table-column label="输出" min-width="180" show-overflow-tooltip>
-            <template #default="{ row }">{{ truncateContent(row.responseContent) }}</template>
-          </el-table-column>
-          <el-table-column label="Token" width="130" align="center">
-            <template #default="{ row }">
-              <span style="font-size:12px">{{ row.inputTokens ?? '-' }} / {{ row.outputTokens ?? '-' }} / {{ row.totalTokens ?? '-' }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="耗时" width="90" align="center">
-            <template #default="{ row }">{{ row.duration != null ? row.duration + ' ms' : '-' }}</template>
-          </el-table-column>
-          <el-table-column label="状态" width="80" align="center">
-            <template #default="{ row }">
-              <el-tag size="small" :type="row.status === 'success' ? 'success' : 'danger'">
-                {{ row.status === 'success' ? '成功' : '失败' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="70" align="center" fixed="right">
-            <template #default="{ row }">
-              <el-button size="small" link type="primary" @click.stop="showLlmDetail(row)">详情</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </template>
-
-      <!-- Agent 执行记录 -->
-      <AgentRunsPanel v-else-if="activeTab === 'agent-runs'" />
+      <!-- 会话记录：chat_session / chat_message 审计，可按会话跳到链路视图 -->
+      <SessionsPanel v-else-if="activeTab === 'sessions'" @view-links="viewSessionLinks" />
 
       <!-- Agent 审批单 -->
       <AgentApprovalsPanel v-else-if="activeTab === 'agent-approvals'" />
 
-      <DataPager v-if="activeTab !== 'metrics' && activeTab !== 'agent-runs' && activeTab !== 'agent-approvals'"
+      <DataPager v-if="activeTab === 'logs'"
                  v-model:current-page="pageNum" v-model:page-size="pageSize"
                  :total="total" :page-sizes="[10, 20, 50, 100]" @change="reload" />
     </el-card>
@@ -224,7 +125,12 @@
         <el-descriptions-item label="耗时">{{ currentLog.duration ?? '-' }} ms</el-descriptions-item>
         <el-descriptions-item label="用户">{{ currentLog.username || '-' }}</el-descriptions-item>
         <el-descriptions-item label="IP">{{ currentLog.ip || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="TraceId" :span="2">{{ currentLog.traceId || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="TraceId" :span="2">
+          <el-link v-if="currentLog.traceId" type="primary" @click="viewLink(currentLog.traceId)">
+            {{ currentLog.traceId }}
+          </el-link>
+          <span v-else>-</span>
+        </el-descriptions-item>
       </el-descriptions>
       <el-alert v-if="currentLog?.errorMessage" type="error" :closable="false" show-icon
                 :title="currentLog.errorMessage" style="margin-top:12px" />
@@ -236,41 +142,12 @@
       </template>
     </el-dialog>
 
-    <!-- LLM 调用详情抽屉 -->
-    <el-drawer v-model="llmDetailDrawer" title="LLM 调用详情" size="720px" destroy-on-close>
-      <template v-if="currentLlmTrace">
-        <el-descriptions :column="2" border size="small" class="llm-detail-desc">
-          <el-descriptions-item label="开始时间">{{ formatTime(currentLlmTrace.startTime) }}</el-descriptions-item>
-          <el-descriptions-item label="耗时">{{ currentLlmTrace.duration != null ? currentLlmTrace.duration + ' ms' : '-' }}</el-descriptions-item>
-          <el-descriptions-item label="应用">{{ currentLlmTrace.appName || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="模型">{{ currentLlmTrace.modelName || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="会话 ID">{{ currentLlmTrace.sessionId || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="用户">{{ currentLlmTrace.userId || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="TraceId" :span="2">{{ currentLlmTrace.traceId || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="RequestId" :span="2">{{ currentLlmTrace.requestId || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="输入 Token">{{ currentLlmTrace.inputTokens ?? '-' }}</el-descriptions-item>
-          <el-descriptions-item label="输出 Token">{{ currentLlmTrace.outputTokens ?? '-' }}</el-descriptions-item>
-          <el-descriptions-item label="总 Token">{{ currentLlmTrace.totalTokens ?? '-' }}</el-descriptions-item>
-          <el-descriptions-item label="FinishReason">{{ currentLlmTrace.finishReason || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="状态" :span="2">
-            <el-tag size="small" :type="currentLlmTrace.status === 'success' ? 'success' : 'danger'">
-              {{ currentLlmTrace.status === 'success' ? '成功' : '失败' }}
-            </el-tag>
-          </el-descriptions-item>
-        </el-descriptions>
-        <el-alert v-if="currentLlmTrace.errorMessage" type="error" :closable="false" show-icon
-                  :title="currentLlmTrace.errorMessage" style="margin-top:12px" />
-        <el-divider>输入（Prompt）</el-divider>
-        <div class="llm-content-block">{{ currentLlmTrace.promptContent || '-' }}</div>
-        <el-divider>输出（Response）</el-divider>
-        <div class="llm-content-block">{{ currentLlmTrace.responseContent || '-' }}</div>
-      </template>
-    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Refresh, Odometer } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
@@ -278,7 +155,8 @@ import { observabilityApi } from '@admin/api/observability-api'
 import QueryBar from '@admin/components/QueryBar.vue'
 import DataPager from '@admin/components/DataPager.vue'
 import { prettyJson } from '@admin/utils/format'
-import AgentRunsPanel from '@admin/components/observability/AgentRunsPanel.vue'
+import TraceLinksPanel from '@admin/components/observability/TraceLinksPanel.vue'
+import SessionsPanel from '@admin/components/observability/SessionsPanel.vue'
 import AgentApprovalsPanel from '@admin/components/observability/AgentApprovalsPanel.vue'
 import { useTheme, getChartPalette } from '@admin/utils/theme'
 
@@ -296,7 +174,18 @@ const metricTypes = [
   { label: 'GC', value: 'gc' },
 ]
 
-const activeTab = ref<'logs' | 'metrics' | 'traces' | 'llm-traces' | 'agent-runs' | 'agent-approvals'>('logs')
+type TabName = 'logs' | 'metrics' | 'trace-links' | 'sessions' | 'agent-approvals'
+const TAB_NAMES: TabName[] = ['logs', 'metrics', 'trace-links', 'sessions', 'agent-approvals']
+const route = useRoute()
+const router = useRouter()
+/** 初始 tab 取自 ?tab=，便于从其它页面（如操作日志）直接跳到指定视图 */
+const activeTab = ref<TabName>(
+  TAB_NAMES.includes(route.query.tab as TabName) ? (route.query.tab as TabName) : 'logs'
+)
+/** 要定位的链路 ID，由操作日志详情或 ?traceId= 深链设置 */
+const presetTraceId = ref(String(route.query.traceId || ''))
+/** 要定位的会话 ID，由会话记录的「查看链路」或 ?sessionId= 深链设置 */
+const presetSessionId = ref(String(route.query.sessionId || ''))
 const loading = ref(false)
 const collecting = ref(false)
 const pageNum = ref(1)
@@ -310,16 +199,12 @@ const stats = computed(() => [
   { key: 'error', label: '今日错误', value: dashboard.value.todayErrorCount ?? 0, unit: '条', color: '#f56c6c' },
   { key: 'avg', label: '平均耗时', value: formatNumber(dashboard.value.avgDuration), unit: 'ms', color: '#e6a23c' },
   { key: 'log', label: '操作日志', value: dashboard.value.todayLogCount ?? 0, unit: '条', color: '#909399' },
-  { key: 'trace', label: '调用追踪', value: dashboard.value.todayTraceCount ?? 0, unit: '条', color: '#7c4dff' }
+  { key: 'trace', label: '今日 Span', value: dashboard.value.todayTraceCount ?? 0, unit: '条', color: '#7c4dff' }
 ])
 
 const operationLogs = ref<any[]>([])
 const logQuery = reactive({ module: '', action: '', status: '' })
 const metricQuery = reactive({ metricType: '', dateRange: null as [string, string] | null })
-const callTraces = ref<any[]>([])
-const traceQuery = reactive({ traceId: '', module: '', action: '' })
-const llmTraces = ref<any[]>([])
-const llmTraceQuery = reactive({ traceId: '', appName: '', modelName: '', sessionId: '', promptKeyword: '', responseKeyword: '', status: '', timeRange: null as [string, string] | null })
 
 // 图表相关
 interface ChartGroup {
@@ -616,15 +501,6 @@ function formatNumber(value: any) {
   return Number.isInteger(num) ? String(num) : num.toFixed(2)
 }
 
-// 时间格式化为 年-月-日 时:分:秒
-function formatTime(value?: string) {
-  if (!value) return '-'
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return value
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-}
-
 async function loadDashboard() {
   try {
     dashboard.value = await observabilityApi.dashboard()
@@ -676,41 +552,10 @@ async function loadMetricCharts() {
   }
 }
 
-async function loadTraces() {
-  loading.value = true
-  try {
-    const page = await observabilityApi.traces({ ...traceQuery, pageNum: pageNum.value, pageSize: pageSize.value })
-    callTraces.value = page?.records || []
-    total.value = page?.total || 0
-  } finally {
-    loading.value = false
-  }
-}
-
-async function loadLlmTraces() {
-  loading.value = true
-  try {
-    const params: any = { ...llmTraceQuery, pageNum: pageNum.value, pageSize: pageSize.value }
-    if (llmTraceQuery.timeRange) {
-      params.startTime = llmTraceQuery.timeRange[0]
-      params.endTime = llmTraceQuery.timeRange[1]
-    }
-    delete params.timeRange
-    const page = await observabilityApi.llmTraces(params)
-    llmTraces.value = page?.records || []
-    total.value = page?.total || 0
-  } finally {
-    loading.value = false
-  }
-}
-
 function reload() {
-  // Agent 执行/审批单为自包含面板，各自维护查询与分页
-  if (activeTab.value === 'agent-runs' || activeTab.value === 'agent-approvals') return
+  // 链路追踪/审批单为自包含面板，各自维护查询与分页
   if (activeTab.value === 'logs') loadLogs()
   else if (activeTab.value === 'metrics') loadMetricCharts()
-  else if (activeTab.value === 'llm-traces') loadLlmTraces()
-  else loadTraces()
 }
 
 /** 重置筛选条件并重新查询 */
@@ -729,34 +574,17 @@ function resetMetrics() {
   loadMetricCharts()
 }
 
-/** 重置筛选条件并重新查询 */
-function resetTraces() {
-  traceQuery.traceId = ''
-  traceQuery.module = ''
-  traceQuery.action = ''
-  pageNum.value = 1
-  loadTraces()
-}
-
-/** 重置筛选条件并重新查询 */
-function resetLlmTraces() {
-  llmTraceQuery.traceId = ''
-  llmTraceQuery.appName = ''
-  llmTraceQuery.modelName = ''
-  llmTraceQuery.sessionId = ''
-  llmTraceQuery.promptKeyword = ''
-  llmTraceQuery.responseKeyword = ''
-  llmTraceQuery.status = ''
-  llmTraceQuery.timeRange = null
-  pageNum.value = 1
-  loadLlmTraces()
-}
-
 function onTabChange() {
   pageNum.value = 1
   total.value = 0
-  if (activeTab.value === 'metrics') loadMetricCharts()
-  else reload()
+  // 手动切 tab 表示要看全量列表，之前的链路/会话定位条件不该跟着回来
+  presetTraceId.value = ''
+  presetSessionId.value = ''
+  reload()
+  const query: Record<string, any> = { ...route.query, tab: activeTab.value }
+  delete query.traceId
+  delete query.sessionId
+  router.replace({ query })
 }
 
 function refresh() {
@@ -775,12 +603,6 @@ async function handleCollect() {
   }
 }
 
-function filterByTrace(traceId: string) {
-  traceQuery.traceId = traceId
-  pageNum.value = 1
-  loadTraces()
-}
-
 const logDialog = ref(false)
 const currentLog = ref<any>(null)
 function showLog(row: any) {
@@ -788,37 +610,26 @@ function showLog(row: any) {
   logDialog.value = true
 }
 
-// LLM 调用详情抽屉
-const llmDetailDrawer = ref(false)
-const currentLlmTrace = ref<any>(null)
-
-/** 从列表行直接展示（已有完整数据） */
-function showLlmDetail(row: any) {
-  currentLlmTrace.value = row
-  llmDetailDrawer.value = true
+/** 从操作日志跳到链路追踪并定位这条链路 */
+function viewLink(traceId: string) {
+  logDialog.value = false
+  presetSessionId.value = ''
+  presetTraceId.value = traceId
+  activeTab.value = 'trace-links'
+  router.replace({ query: { ...route.query, tab: 'trace-links', traceId } })
 }
 
-/** 截断内容用于列表预览（取 JSON 摘要） */
-function truncateContent(content: string | null | undefined): string {
-  if (!content) return '-'
-  let text = content
-  try {
-    // 尝试解析 JSON 列表，提取每条消息的 role + content 摘要
-    const arr = JSON.parse(content)
-    if (Array.isArray(arr)) {
-      text = arr.map((m: any) => {
-        const role = m.role || '?'
-        const c = typeof m.content === 'string' ? m.content : (m.content ? JSON.stringify(m.content) : '')
-        return `[${role}] ${c}`
-      }).join('  ')
-    }
-  } catch { /* 不是 JSON 或不需解析 */ }
-  return text.length > 120 ? text.substring(0, 120) + '...' : text
+/** 会话记录里看到整段对话后，直接到链路视图按 sessionId 展开这一会话的全部请求 */
+function viewSessionLinks(sessionId: string) {
+  presetTraceId.value = ''
+  presetSessionId.value = sessionId
+  activeTab.value = 'trace-links'
+  router.replace({ query: { ...route.query, tab: 'trace-links', sessionId } })
 }
 
 onMounted(() => {
   loadDashboard()
-  loadLogs()
+  if (activeTab.value === 'logs') loadLogs()
   window.addEventListener('resize', handleResize)
 })
 
@@ -886,22 +697,6 @@ function handleResize() {
 }
 .empty-hint {
   padding: 40px 0;
-}
-.llm-detail-desc {
-  margin-bottom: 4px;
-}
-.llm-content-block {
-  background: #fafafa;
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
-  padding: 12px;
-  max-height: 360px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-  font-size: 13px;
-  line-height: 1.8;
-  font-family: 'Menlo', 'Consolas', monospace;
 }
 @media (max-width: 1200px) {
   .metrics-charts { grid-template-columns: 1fr; }

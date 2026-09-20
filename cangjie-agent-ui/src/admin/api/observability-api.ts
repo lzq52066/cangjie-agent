@@ -8,6 +8,50 @@ export interface MpPage<T> {
   current: number
 }
 
+/** 链路摘要查询条件 */
+export interface TraceLinkQuery {
+  traceId?: string
+  sessionId?: string
+  appId?: string
+  userId?: string
+  status?: string
+  startTime?: string
+  endTime?: string
+  pageNum?: number
+  pageSize?: number
+}
+
+/** 一条链路的聚合摘要 */
+export interface TraceLink {
+  /** 链路 ID；无 traceId 的孤立留痕为 #kind#记录ID */
+  traceId: string
+  /** span / run / llm */
+  entryKind?: string
+  entryLabel?: string
+  startTime?: string
+  endTime?: string
+  duration?: number
+  appId?: string
+  appName?: string
+  sessionId?: string
+  userId?: string
+  modelName?: string
+  runCount?: number
+  llmCallCount?: number
+  spanCount?: number
+  totalTokens?: number
+  status?: string
+  errorMessage?: string
+}
+
+/** 链路明细：概览 + 请求级 span + 各次 Agent 执行 + 无 run 归属的模型调用 */
+export interface TraceLinkDetail {
+  summary: TraceLink
+  spans: any[]
+  runs: any[]
+  backgroundLlmTraces: any[]
+}
+
 export const observabilityApi = {
   /** 汇总面板 */
   dashboard() {
@@ -27,16 +71,13 @@ export const observabilityApi = {
   collectMetrics() {
     return request<any[]>({ method: 'GET', url: '/observability/metrics/collect' })
   },
-  traces(params: {
-    traceId?: string
-    module?: string
-    action?: string
-    startTime?: string
-    endTime?: string
-    pageNum?: number
-    pageSize?: number
-  }) {
-    return request<MpPage<any>>({ method: 'GET', url: '/observability/traces', params })
+  /** 链路摘要分页：一次 traceId 下的 span + Agent 执行 + 模型调用归并成一行 */
+  traceLinks(params: TraceLinkQuery) {
+    return request<MpPage<TraceLink>>({ method: 'GET', url: '/observability/trace-links', params })
+  },
+  /** 单条链路明细；linkId 可能是 #kind#记录ID 形式的孤立链路键，故走查询参数 */
+  traceLinkDetail(linkId: string) {
+    return request<TraceLinkDetail>({ method: 'GET', url: '/observability/trace-links/detail', params: { linkId } })
   },
   /** LLM 调用追踪分页 */
   llmTraces(params: {
@@ -61,14 +102,6 @@ export const observabilityApi = {
   /** 会话 LLM 调用时间线 */
   llmTraceTimeline(sessionId: string) {
     return request<any[]>({ method: 'GET', url: '/observability/llm-traces/timeline', params: { sessionId } })
-  },
-  /** Agent 执行记录分页 */
-  agentRuns(params: Record<string, any>) {
-    return request<MpPage<any>>({ method: 'GET', url: '/observability/agent-runs', params })
-  },
-  /** Agent run 详情（run + steps + approvals + children） */
-  agentRunDetail(runId: string) {
-    return request<any>({ method: 'GET', url: `/observability/agent-runs/${runId}` })
   },
   /** Agent 审批单分页 */
   agentApprovals(params: { status?: string; appId?: string; userId?: string; pageNum?: number; pageSize?: number }) {

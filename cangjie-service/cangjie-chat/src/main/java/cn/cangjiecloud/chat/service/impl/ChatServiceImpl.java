@@ -507,9 +507,10 @@ public class ChatServiceImpl implements IChatService {
         return message.length() > 30 ? message.substring(0, 30) + "..." : message;
     }
 
+    /** 记录请求级端到端 span：chat/send 恒为一条链路的入口，同链路内的检索等子 span 挂在它下面 */
     private void recordTrace(String module, String operation, String traceId, long duration, String status, String detail) {
         if (traceCollector != null) {
-            traceCollector.record(module, operation, traceId, duration, status, detail);
+            traceCollector.recordEntry(module, operation, traceId, duration, status, detail);
         }
     }
 

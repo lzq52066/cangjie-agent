@@ -34,4 +34,16 @@ public interface ILlmTraceService extends IService<LlmTraceEntity> {
      * 这里不返回 promptContent / responseContent，正文由调用方按需调 {@link #getDetail(String)} 单条拉取。
      */
     List<LlmTraceEntity> listByRun(String runId);
+
+    /**
+     * 查询某条链路下不归属任何 Agent 执行的模型调用（会话摘要、记忆合并等后台任务），按开始时间升序。
+     * <p>
+     * 同样只返回精简列，正文按需单条拉取。
+     */
+    List<LlmTraceEntity> listBackgroundByTrace(String traceId);
+
+    /**
+     * 按 ID 查询单条精简行（无 traceId 的孤立链路展开时使用）
+     */
+    LlmTraceEntity getBrief(String id);
 }

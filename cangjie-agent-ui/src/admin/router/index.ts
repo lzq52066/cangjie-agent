@@ -34,7 +34,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'application', component: () => import('../views/ApplicationView.vue'), meta: { title: '智能应用' } },
       { path: 'template', component: () => import('../views/TemplateView.vue'), meta: { title: '应用模板' } },
       { path: 'channel', component: () => import('../views/ChannelView.vue'), meta: { title: '渠道接入' } },
-      { path: 'session', component: () => import('../views/SessionView.vue'), meta: { title: '会话记录' } },
+      // 会话记录已并入可观测性的 tab，老链接按深链跳转到对应视图
+      { path: 'session', redirect: { path: '/observability', query: { tab: 'sessions' } } },
       { path: 'observability', component: () => import('../views/ObservabilityView.vue'), meta: { title: '可观测性' } },
       { path: 'observability/eval', component: () => import('../views/EvalView.vue'), meta: { title: '评估体系' } },
       { path: 'file', component: () => import('../views/FileView.vue'), meta: { title: '文件管理' } },

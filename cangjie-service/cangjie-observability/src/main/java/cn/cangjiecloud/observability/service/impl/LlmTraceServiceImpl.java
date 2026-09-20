@@ -60,15 +60,39 @@ public class LlmTraceServiceImpl extends ServiceImpl<LlmTraceMapper, LlmTraceEnt
         if (!StringUtils.hasText(runId)) {
             return List.of();
         }
-        LambdaQueryWrapper<LlmTraceEntity> wrapper = new LambdaQueryWrapper<LlmTraceEntity>()
-                // 只取时间线需要的列：正文可能各占数万字符，展开时再按 id 单条拉
+        return list(lightColumns().eq(LlmTraceEntity::getRunId, runId)
+                .orderByAsc(LlmTraceEntity::getStartTime));
+    }
+
+    @Override
+    public List<LlmTraceEntity> listBackgroundByTrace(String traceId) {
+        if (!StringUtils.hasText(traceId)) {
+            return List.of();
+        }
+        return list(lightColumns().eq(LlmTraceEntity::getTraceId, traceId)
+                .isNull(LlmTraceEntity::getRunId)
+                .orderByAsc(LlmTraceEntity::getStartTime));
+    }
+
+    @Override
+    public LlmTraceEntity getBrief(String id) {
+        if (!StringUtils.hasText(id)) {
+            return null;
+        }
+        return getOne(lightColumns().eq(LlmTraceEntity::getId, id).last("LIMIT 1"));
+    }
+
+    /**
+     * 时间线用的精简列：正文可能各占数万字符，展开某条调用时再按 id 单条拉。
+     */
+    private LambdaQueryWrapper<LlmTraceEntity> lightColumns() {
+        return new LambdaQueryWrapper<LlmTraceEntity>()
                 .select(LlmTraceEntity::getId, LlmTraceEntity::getRunId, LlmTraceEntity::getTraceId,
-                        LlmTraceEntity::getRequestId, LlmTraceEntity::getModelId, LlmTraceEntity::getModelName,
+                        LlmTraceEntity::getRequestId, LlmTraceEntity::getAppId, LlmTraceEntity::getAppName,
+                        LlmTraceEntity::getSessionId, LlmTraceEntity::getUserId,
+                        LlmTraceEntity::getModelId, LlmTraceEntity::getModelName,
                         LlmTraceEntity::getInputTokens, LlmTraceEntity::getOutputTokens, LlmTraceEntity::getTotalTokens,
                         LlmTraceEntity::getFinishReason, LlmTraceEntity::getDuration, LlmTraceEntity::getStatus,
-                        LlmTraceEntity::getErrorMessage, LlmTraceEntity::getStartTime)
-                .eq(LlmTraceEntity::getRunId, runId)
-                .orderByAsc(LlmTraceEntity::getStartTime);
-        return list(wrapper);
+                        LlmTraceEntity::getErrorMessage, LlmTraceEntity::getStartTime);
     }
 }

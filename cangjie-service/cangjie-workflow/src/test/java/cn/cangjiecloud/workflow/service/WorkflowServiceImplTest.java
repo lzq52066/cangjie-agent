@@ -378,7 +378,7 @@ class WorkflowServiceImplTest {
                 ArgumentCaptor.forClass(WorkflowExecutionEntity.class);
         verify(workflowExecutionService).save(saveCap.capture());
         verify(workflowExecutionService).updateById(execution);
-        verify(traceCollector).record(eq("workflow"), eq("execute"), any(), anyLong(),
+        verify(traceCollector).recordEntry(eq("workflow"), eq("execute"), any(), anyLong(),
                 eq("success"), contains("测试工作流"));
     }
 
@@ -395,7 +395,7 @@ class WorkflowServiceImplTest {
         assertThat(execution.getStatus()).isEqualTo("failed");
         assertThat(execution.getErrorMessage()).isEqualTo("节点 [大模型] 执行失败: boom");
         verify(workflowExecutionService).updateById(execution);
-        verify(traceCollector).record(eq("workflow"), eq("execute"), any(), anyLong(),
+        verify(traceCollector).recordEntry(eq("workflow"), eq("execute"), any(), anyLong(),
                 eq("fail"), contains("boom"));
     }
 

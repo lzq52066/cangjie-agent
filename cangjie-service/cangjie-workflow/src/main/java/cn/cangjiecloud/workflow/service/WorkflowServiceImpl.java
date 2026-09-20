@@ -203,9 +203,9 @@ public class WorkflowServiceImpl extends ServiceImpl<WorkflowMapper, WorkflowEnt
             execution.setDuration(System.currentTimeMillis() - start);
             workflowExecutionService.updateById(execution);
 
-            // 记录工作流执行成功追踪
+            // 记录工作流执行成功追踪：执行自带独立 traceId，是本条链路的入口 span
             if (traceCollector != null) {
-                traceCollector.record("workflow", "execute", traceId, execution.getDuration(), "success",
+                traceCollector.recordEntry("workflow", "execute", traceId, execution.getDuration(), "success",
                         "工作流: " + workflow.getName() + ", 耗时: " + execution.getDuration() + "ms");
             }
 
@@ -220,7 +220,7 @@ public class WorkflowServiceImpl extends ServiceImpl<WorkflowMapper, WorkflowEnt
 
             // 记录工作流执行失败追踪
             if (traceCollector != null) {
-                traceCollector.record("workflow", "execute", traceId, execution.getDuration(), "fail",
+                traceCollector.recordEntry("workflow", "execute", traceId, execution.getDuration(), "fail",
                         "工作流执行失败: " + e.getMessage());
             }
 

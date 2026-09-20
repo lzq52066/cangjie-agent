@@ -245,14 +245,30 @@ async function handleCmd(cmd: string) {
 }
 .brand-name { font-size: 15px; font-weight: 600; color: #fff; }
 .brand-slogan { font-size: 11px; color: #909399; margin-top: 2px; }
-.menu { flex: 1; border: none; padding-top: 12px; width: 100%; }
+.menu {
+  flex: 1;
+  /* flex 子项默认 min-height:auto，展开项变多后会撑过视口被 aside 裁掉，
+     必须显式允许收缩并自行滚动，否则底部菜单点不到 */
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border: none;
+  padding: 12px 0;
+  width: 100%;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
 :deep(.el-menu--collapse) { width: 64px; }
-:deep(.el-menu-item) {
+/* 顶层普通项与分组标题必须同一套缩进/圆角，否则图标横向差 8px 不在一条线 */
+:deep(.el-menu-item),
+:deep(.el-sub-menu__title) {
   height: 48px; line-height: 48px;
   margin: 4px 8px; border-radius: 8px;
 }
-:deep(.el-menu--collapse .el-menu-item) { margin: 4px auto; justify-content: center; }
-:deep(.el-menu-item:hover) { background: rgba(255,255,255,0.08); }
+:deep(.el-menu--collapse .el-menu-item),
+:deep(.el-menu--collapse .el-sub-menu__title) { margin: 4px auto; justify-content: center; }
+:deep(.el-menu-item:hover),
+:deep(.el-sub-menu__title:hover) { background: rgba(255,255,255,0.08); }
 :deep(.el-menu-item.is-active) { background: rgba(var(--cj-primary-rgb), 0.15); }
 .header {
   background: #fff;

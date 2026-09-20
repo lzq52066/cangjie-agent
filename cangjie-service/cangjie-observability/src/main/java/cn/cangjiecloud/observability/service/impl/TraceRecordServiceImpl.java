@@ -59,20 +59,39 @@ public class TraceRecordServiceImpl extends ServiceImpl<TraceRecordMapper, Trace
     }
 
     /**
-     * TraceCollector 实现：将 span 信息写入 trace_record 表，供 AOP / 手动调用
+     * TraceCollector 实现：将子 span 写入 trace_record 表，供 AOP / 手动调用。
+     * <p>
+     * 父子关系靠「入口 span 的 spanId == traceId」这一约定还原，无需额外的线程上下文：
+     * 同链路内的子 span 直接把 parentSpanId 指回 traceId 即可挂到入口 span 下。
      */
     @Override
     public void record(String module, String action, String traceId, long duration, String status, String message) {
+        TraceRecordEntity entity = buildSpan(module, action, traceId, duration, status, message);
+        entity.setSpanId(UUID.randomUUID().toString().replace("-", ""));
+        entity.setParentSpanId(traceId);
+        record(entity);
+    }
+
+    @Override
+    public void recordEntry(String module, String action, String traceId, long duration,
+                            String status, String message) {
+        TraceRecordEntity entity = buildSpan(module, action, traceId, duration, status, message);
+        // 入口 span 用 traceId 自身作 spanId：子 span 只带着 traceId 也能定位到父节点
+        entity.setSpanId(StringUtils.hasText(traceId) ? traceId : UUID.randomUUID().toString().replace("-", ""));
+        record(entity);
+    }
+
+    private TraceRecordEntity buildSpan(String module, String action, String traceId, long duration,
+                                        String status, String message) {
         TraceRecordEntity entity = new TraceRecordEntity();
         entity.setTraceId(traceId);
         entity.setModule(module);
         entity.setAction(action);
-        entity.setSpanId(UUID.randomUUID().toString().replace("-", ""));
         entity.setDuration(duration);
         entity.setStatus(status);
         entity.setMessage(message);
         entity.setServiceName("cangjie-agent");
         entity.setStartTime(LocalDateTime.now());
-        record(entity);
+        return entity;
     }
 }
