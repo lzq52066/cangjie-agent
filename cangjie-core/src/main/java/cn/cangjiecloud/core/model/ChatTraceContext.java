@@ -34,6 +34,14 @@ public class ChatTraceContext {
     public static final String KEY_MODEL_ID = "cangjie.modelId";
     public static final String KEY_MODEL_NAME = "cangjie.modelName";
 
+    /**
+     * 流式调用首个 token 到达的时间戳（毫秒），由模型客户端写入、监听器读出算首字延迟。
+     * <p>
+     * 它不是业务字段而是同一次调用内的传递通道，因此不由 {@link #toListenerAttributes()} 生成：
+     * 业务侧给不出这个值，它只能在流式回调真的吐出第一个 token 时写进去。
+     */
+    public static final String KEY_FIRST_TOKEN_MS = "cangjie.stream.firstTokenMs";
+
     /** 链路 ID */
     private String traceId;
 

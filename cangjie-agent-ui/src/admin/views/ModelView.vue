@@ -29,6 +29,17 @@
               </template>
             </el-table-column>
             <el-table-column label="模型标识" prop="modelName" min-width="150" />
+            <el-table-column label="单价（元/千token）" width="160" align="center">
+              <template #default="{ row }">
+                <span v-if="hasPrice(row)" class="cell-sm">
+                  入 {{ row.inputPrice ?? 0 }} / 出 {{ row.outputPrice ?? 0 }}
+                </span>
+                <el-tooltip v-else placement="top"
+                            content="没配单价的模型不计入成本，观测面板的成本因此可能偏低">
+                  <span class="text-muted">未配置</span>
+                </el-tooltip>
+              </template>
+            </el-table-column>
             <el-table-column label="嵌入" width="70" align="center">
               <template #default="{ row }">
                 <el-tag v-if="row.supportEmbedding" size="small" type="success">支持</el-tag>
@@ -158,6 +169,27 @@
             </el-form-item>
           </el-col>
         </el-row>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="输入单价">
+              <el-input-number v-model="form.inputPrice" :min="0" :step="0.001" :precision="4"
+                               :value-on-clear="null" controls-position="right" placeholder="元/千token"
+                               style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="输出单价">
+              <el-input-number v-model="form.outputPrice" :min="0" :step="0.001" :precision="4"
+                               :value-on-clear="null" controls-position="right" placeholder="元/千token"
+                               style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <div class="price-hint">
+          单价用于观测面板与链路里的成本估算（元 / 千 token）。不填就是不计成本：
+          那个模型的调用会从成本合计里消失，而不是算成 0。编辑时清空也不会把已存的单价抹掉，
+          要改成免费请直接填 0。
+        </div>
         <el-form-item label="支持嵌入">
           <el-switch v-model="form.supportEmbedding" />
           <template v-if="form.supportEmbedding">
@@ -272,6 +304,9 @@ const form = reactive({
   isDefault: false,
   supportEmbedding: false,
   embeddingDimension: 1536,
+  // 单价不填则后端不估算成本，所以这里要能表示「没填」，不能用 0 占位（那会读成免费）
+  inputPrice: null as number | null,
+  outputPrice: null as number | null,
   description: ''
 })
 
@@ -366,7 +401,8 @@ function openCreate() {
   Object.assign(form, {
     id: '', name: '', providerId: '',
     modelName: '', temperature: 0.7, maxTokens: 4096, topP: 1.0,
-    isDefault: false, supportEmbedding: false, embeddingDimension: 1536, description: ''
+    isDefault: false, supportEmbedding: false, embeddingDimension: 1536,
+    inputPrice: null, outputPrice: null, description: ''
   })
   showDialog.value = true
 }
@@ -378,9 +414,17 @@ function openEdit(row: any) {
     modelName: row.modelName,
     temperature: row.temperature ?? 0.7, maxTokens: row.maxTokens ?? 4096, topP: row.topP ?? 1.0,
     isDefault: row.isDefault, supportEmbedding: row.supportEmbedding,
-    embeddingDimension: row.embeddingDimension || 1536, description: row.description || ''
+    embeddingDimension: row.embeddingDimension || 1536,
+    inputPrice: row.inputPrice != null ? Number(row.inputPrice) : null,
+    outputPrice: row.outputPrice != null ? Number(row.outputPrice) : null,
+    description: row.description || ''
   })
   showDialog.value = true
+}
+
+/** 列表上的单价列：两侧都没填才算「未配置」，只填了输入侧也是有用的一半 */
+function hasPrice(row: any) {
+  return row?.inputPrice != null || row?.outputPrice != null
 }
 
 /** 当前选中厂商（凭证唯一来源） */
@@ -509,6 +553,8 @@ onMounted(async () => {
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .header-left { display: flex; gap: 12px; }
 .form-hint { margin-left: 8px; color: #909399; font-size: 12px; }
+.price-hint { margin: -6px 0 12px; color: #909399; font-size: 12px; line-height: 1.7; }
+.cell-sm { font-size: 12px; }
 .text-muted { color: #909399; font-size: 12px; }
 .provider-tip { margin-bottom: 12px; }
 .test-area { padding: 8px 0; }

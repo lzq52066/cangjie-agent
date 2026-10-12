@@ -144,6 +144,30 @@ cangjie:
   observability:
     metrics:
       enabled: true
+    trace:
+      # span 保留天数，<=0 表示不清理。载荷三列只能靠物理删除回收空间，
+      # 不然 trace_record 会随对话量单调增长
+      retention-days: 30
+    # 检索载荷开关：是否把用户 query 与知识库正文写进 span 载荷。
+    # 默认跟着模型载荷的 store-content 走 —— 同一套链路里不能留一条绕过闸门的写入路径
+    trace-payload:
+      enabled: ${cangjie.observability.llm-trace.store-content:true}
+    # span 外导（OTLP/HTTP）：把链路推给已有的观测体系，默认整个出口不装配
+    exporter:
+      otlp:
+        enabled: false
+        # Collector / Jaeger / Tempo 的 OTLP HTTP 地址，只给主机端口也会自动补 /v1/traces
+        endpoint: ${OTLP_ENDPOINT:}
+        # 附加请求头，形如 authorization=Bearer xxx,x-tenant=acme
+        headers: ${OTLP_HEADERS:}
+        timeout-ms: 3000
+        # 是否把 query 与知识库正文一起外发。默认关：开了就等于把内容送出内网，
+        # 这个决定必须由部署方显式做出，不能跟着「开启链路导出」顺手带上
+        include-payload: false
+        # 出口只入队、后台批量发送：对端抖动绝不回压到对话主链路
+        queue-capacity: 5000
+        batch-size: 200
+        flush-interval-ms: 5000
     llm-trace:
       # 是否对 prompt/response 内容脱敏（默认 false，全量明文存储）
       mask:
@@ -152,8 +176,36 @@ cangjie:
       store-content: true
       # 内容最大存储长度（字符，0 表示不限制），超长自动截断
       max-content-length: 20000
+      # 成功调用的采样率（0~1）：失败永远留档，采样只削成功的那部分。
+      # 0 不等于全丢，而是「只留失败」；高流量应用降到 0.1 就能把表写速降一个量级
+      sample-rate: 1.0
+      # 异步批量落库：实体仍在请求线程组装（traceId/userId 靠 ThreadLocal），只把写库推到后台
+      async:
+        enabled: true
+        # 缓冲容量：满了就丢弃新来的并计数，绝不拖住对话线程
+        queue-capacity: 2000
+        # 单批行数与定时冲刷间隔
+        batch-size: 200
+        flush-interval-ms: 2000
+      # 保留天数，<=0 表示不清理；与 agent_run 对齐，避免「有链路无正文」
+      retention-days: 30
+
+  eval:
+    regress:
+      # 回归门禁阈值：与上一次运行对比时，任一指标均值跌幅超过这个绝对值（0.05 即 5 个百分点）就告警。
+      # 只写日志与对比结果、不把 run 标成失败：要拦的是「这次改动要不要上」，不是这行读数本身。配 0 即关闭。
+      threshold: 0.05
+    online:
+      # 定时抽样打分（默认关）：开着它就等于默认同意持续花判定 token，必须由部署方显式打开
+      enabled: false
+      # 每轮最多评多少条（单轮硬上限 200）：在线评测每条样本要跑 2~4 次判定调用
+      limit: 20
+      # 每天凌晨 3:30 跑一轮
+      cron: "0 30 3 * * ?"
 
   rag:
+    # 对话主链路默认检索条数（应用侧显式配置时以应用配置为准）
+    top-k: 5
     query-rewrite:
       enabled: false
       type: none
@@ -163,6 +215,21 @@ cangjie:
         model: gpt-4o-mini
         temperature: 0.3
         max-tokens: 200
+
+  retrieval:
+    # 融合方式：rrf（默认，只取名次，跨批次稳定）/ weighted（加权分数，依赖各通道分数尺度）
+    fusion: rrf
+    # RRF 平滑常数 k（业界惯例 60）
+    rrf-k: 60
+    # weighted 融合下的通道权重（fusion=weighted 时生效）
+    vector-weight: 0.7
+    fulltext-weight: 0.3
+    # 融合前每个通道多取的候选倍数
+    candidate-multiplier: 3
+    rerank:
+      enabled: false
+      # none / bge / cohere
+      type: none
 
   workflow:
     execution:

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
@@ -45,6 +46,9 @@ public class LlmTraceEntity extends BaseEntity {
     /** 提示词内容（完整消息 JSON） */
     private String promptContent;
 
+    /** 本次调用参数（JSON：temperature / topP / maxTokens） */
+    private String modelParams;
+
     /** 输入 token 数 */
     private Long inputTokens;
 
@@ -62,6 +66,23 @@ public class LlmTraceEntity extends BaseEntity {
 
     /** 耗时（毫秒） */
     private Long duration;
+
+    /**
+     * 首字延迟（毫秒）：仅流式调用有值。
+     * <p>
+     * duration 在流式场景是「整段生成完」的时间，用它评估体验会把长回答误判成很慢；
+     * 用户等的是第一个字，那个数只能单列。
+     */
+    private Long ttft;
+
+    /** 本次调用成本（元）：按 model_config 单价 × token 估算，没定价则空 */
+    private BigDecimal cost;
+
+    /** 是否已被在线评测打过标 */
+    private Boolean evaluated;
+
+    /** 在线评测得分（JSON：指标名 → 0~1 分数），趋势直接按此列聚合 */
+    private String evalScores;
 
     /** 状态：success / fail */
     private String status;

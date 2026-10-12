@@ -1,5 +1,6 @@
 package cn.cangjiecloud.observability.listener;
 
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.core.model.ChatTraceContext;
 import cn.cangjiecloud.core.model.LlmErrorMapper;
 import cn.cangjiecloud.observability.service.ILlmTraceRecorder;
@@ -14,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -87,6 +89,8 @@ public class LlmTraceChatModelListener implements ChatModelListener {
                 ILlmTraceRecorder.LlmTraceRecord.builder()
                         .duration(System.currentTimeMillis() - startMs)
                         .startTimeMs(startMs)
+                        .firstTokenMs(resolveFirstTokenMs(attributes))
+                        .modelParams(toModelParams(lcRequest))
                         .messages(lcRequest == null ? null : lcRequest.messages());
         ChatTraceContext traceContext = ChatTraceContext.fromListenerAttributes(attributes);
         if (traceContext != null) {
@@ -122,5 +126,45 @@ public class LlmTraceChatModelListener implements ChatModelListener {
     private long resolveStartMs(Map<Object, Object> attributes) {
         Object startMs = attributes.get(KEY_START_MS);
         return startMs instanceof Long value ? value : System.currentTimeMillis();
+    }
+
+    /**
+     * 流式调用首个 token 的时间戳（非流式没有这个中间点，留空而不是拿 duration 当首字延迟）。
+     */
+    private static Long resolveFirstTokenMs(Map<Object, Object> attributes) {
+        Object firstTokenMs = attributes.get(ChatTraceContext.KEY_FIRST_TOKEN_MS);
+        return firstTokenMs instanceof Long value ? value : null;
+    }
+
+    /**
+     * 采样本次调用的生成参数（只记非 null 项）。
+     * <p>
+     * 调参与效果对不上号是排障时常碰到的问题：光看 prompt 与 token 看不出是不是 temperature 拉高导致的跑偏。
+     */
+    private String toModelParams(ChatRequest request) {
+        if (request == null) {
+            return null;
+        }
+        Map<String, Object> params = new LinkedHashMap<>();
+        putIfNotNull(params, "temperature", request.temperature());
+        putIfNotNull(params, "topP", request.topP());
+        // LangChain4j 1.x 把 maxTokens 改名为 maxOutputTokens，对外字段名仍沿用习惯叫法
+        putIfNotNull(params, "maxTokens", request.maxOutputTokens());
+        putIfNotNull(params, "topK", request.topK());
+        if (params.isEmpty()) {
+            return null;
+        }
+        try {
+            return JsonUtils.toJSONString(params);
+        } catch (Exception e) {
+            log.warn("LLM 调用参数序列化失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private static void putIfNotNull(Map<String, Object> params, String key, Object value) {
+        if (value != null) {
+            params.put(key, value);
+        }
     }
 }

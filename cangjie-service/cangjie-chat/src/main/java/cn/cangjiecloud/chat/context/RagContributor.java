@@ -1,13 +1,16 @@
 package cn.cangjiecloud.chat.context;
 
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.core.harness.context.ContextContributor;
 import cn.cangjiecloud.core.harness.context.ContextFragment;
 import cn.cangjiecloud.core.harness.context.ContextRequest;
 import cn.cangjiecloud.core.harness.context.ContextSlot;
 import cn.cangjiecloud.core.model.ChatMessage;
 import cn.cangjiecloud.core.observability.TraceCollector;
+import cn.cangjiecloud.core.observability.TraceSpan;
 import cn.cangjiecloud.core.rag.HybridRetriever;
 import cn.cangjiecloud.core.rag.QueryRewriterFactory;
+import cn.cangjiecloud.core.rag.RetrievalOptions;
 import cn.cangjiecloud.core.rag.RetrievalResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,9 +18,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 知识库检索（RAG 槽位，可压缩）。
@@ -26,19 +34,27 @@ import java.util.Map;
  * 可以整段丢弃知识库内容而不影响人设。查询改写（默认关闭）在此完成，历史经
  * {@link ContextAttrs#HISTORY_MESSAGES} 复用不再二次查库；agentic 模式跳过预处理检索，
  * 由 LLM 自主调用检索工具。
+ * <p>
+ * 检索 span 除耗时外还落本次输入（原 query / 改写后 query / 检索口径）与输出（召回片段的
+ * 各通道分数与名次）：「为什么没查到」只能靠这些证据回答，光有一句「检索 5 条结果」等于没留痕。
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class RagContributor implements ContextContributor {
 
-    private static final int DEFAULT_TOP_K = 5;
+    /** 片段正文写入留痕时的截断长度：够定位「召回的是哪一段」，又不至于把 trace 表撑爆 */
+    private static final int MAX_SNIPPET_CHARS = 500;
 
     private final HybridRetriever hybridRetriever;
     private final QueryRewriterFactory queryRewriterFactory;
 
     @Autowired(required = false)
     private TraceCollector traceCollector;
+
+    /** 检索条数（可配置：cangjie.rag.top-k）；此前写死 5，改配置要动代码 */
+    @Value("${cangjie.rag.top-k:5}")
+    private int topK = 5;
 
     /** 查询改写开关（默认关闭，关闭时行为与改造前完全一致） */
     @Value("${cangjie.rag.query-rewrite.enabled:false}")
@@ -47,6 +63,16 @@ public class RagContributor implements ContextContributor {
     /** 查询改写器类型（none / llm） */
     @Value("${cangjie.rag.query-rewrite.type:none}")
     private String queryRewriteType;
+
+    /**
+     * 是否把用户 query 与知识库正文写进检索载荷。
+     * <p>
+     * 模型载荷已经有 {@code llm-trace.store-content} 这道闸门，载荷留痕不能再背后开一条绕过它的
+     * 写入路径，否则「关掉正文存储」这个开关说了不算。默认与那道闸门对齐。
+     * 关闭后仍然落下长度与指纹：「用的是哪一句 query、改写过没」这类诊断信息不能一起丢。
+     */
+    @Value("${cangjie.observability.trace-payload.enabled:${cangjie.observability.llm-trace.store-content:true}}")
+    private boolean tracePayloadEnabled;
 
     @Override
     public String name() {
@@ -68,7 +94,8 @@ public class RagContributor implements ContextContributor {
     @Override
     @SuppressWarnings("unchecked")
     public ContextFragment contribute(ContextRequest request) {
-        String query = request.getUserQuery();
+        String originalQuery = request.getUserQuery();
+        String query = originalQuery;
         if (queryRewriteEnabled) {
             Object history = request.getAttributes().get(ContextAttrs.HISTORY_MESSAGES);
             query = queryRewriterFactory.get(queryRewriteType)
@@ -76,17 +103,24 @@ public class RagContributor implements ContextContributor {
         }
 
         long retrievalStart = System.currentTimeMillis();
+        // 只给知识库与 topK，其余口径（模式/融合/重排）由检索侧按知识库配置解析，
+        // 并把实际生效的口径回写进 span，否则「线上这次到底怎么检的」在链路里看不到
+        RetrievalOptions options = RetrievalOptions.builder()
+                .knowledgeBaseIds(request.getKnowledgeBaseIds())
+                .topK(topK)
+                .build();
         List<RetrievalResult> results;
         try {
-            results = hybridRetriever.retrieve(query, request.getKnowledgeBaseIds(), DEFAULT_TOP_K);
+            results = hybridRetriever.retrieve(query, options);
         } catch (Exception e) {
-            recordTrace(request.getTraceId(), System.currentTimeMillis() - retrievalStart, "fail",
-                    "知识库检索失败: " + e.getMessage());
+            // 失败时同样把输入落库：不知道用了什么 query 的失败检索无法复现
+            recordTrace(request, originalQuery, query, options, retrievalStart, "fail",
+                    "知识库检索失败: " + e.getMessage(), List.of());
             log.warn("知识库检索失败: {}", e.getMessage());
             return ContextFragment.empty(slot(), name());
         }
-        recordTrace(request.getTraceId(), System.currentTimeMillis() - retrievalStart, "success",
-                "知识库检索: " + results.size() + " 条结果");
+        recordTrace(request, originalQuery, query, options, retrievalStart, "success",
+                "知识库检索: " + results.size() + " 条结果", results);
         if (results.isEmpty()) {
             return ContextFragment.empty(slot(), name());
         }
@@ -115,10 +149,102 @@ public class RagContributor implements ContextContributor {
         return ContextFragment.of(slot(), name(), List.of(ChatMessage.system(prompt.toString().trim())));
     }
 
-    private void recordTrace(String traceId, long duration, String status, String detail) {
-        if (traceCollector != null) {
-            traceCollector.record("retrieval", "search", traceId, duration, status, detail);
+    /**
+     * 把一次检索写为带载荷的 span。
+     * <p>
+     * 留痕失败绝不能影响对话：载荷序列化异常在此兜住，只记日志。
+     */
+    private void recordTrace(ContextRequest request, String originalQuery, String effectiveQuery,
+                            RetrievalOptions options, long startMs, String status, String message,
+                            List<RetrievalResult> results) {
+        if (traceCollector == null) {
+            return;
         }
+        long duration = System.currentTimeMillis() - startMs;
+        try {
+            Map<String, Object> input = new LinkedHashMap<>();
+            if (tracePayloadEnabled) {
+                input.put("query", originalQuery);
+                input.put("effectiveQuery", effectiveQuery);
+            } else {
+                // 不落正文也要能判断「是不是同一句 query / 改写有效没」：留长度与指纹
+                input.put("queryLength", lengthOf(originalQuery));
+                input.put("queryFingerprint", fingerprint(originalQuery));
+                input.put("effectiveQueryLength", lengthOf(effectiveQuery));
+                input.put("effectiveQueryFingerprint", fingerprint(effectiveQuery));
+            }
+            input.put("queryRewritten", !Objects.equals(originalQuery, effectiveQuery));
+            input.put("knowledgeBaseIds", options.getKnowledgeBaseIds());
+            input.put("topK", options.getTopK());
+
+            TraceSpan span = TraceSpan.builder()
+                    .module("retrieval").action("search").traceId(request.getTraceId())
+                    .duration(duration).status(status).message(message)
+                    .input(JsonUtils.toJSONString(input))
+                    .output(results.isEmpty() ? null : JsonUtils.toJSONString(toPayload(results)))
+                    .metadata(Map.of("candidateCount", results.size()))
+                    .build();
+            traceCollector.record(span);
+        } catch (Exception e) {
+            log.warn("检索 span 载荷写入失败，仅记耗时: {}", e.getMessage());
+            traceCollector.record(TraceSpan.of("retrieval", "search", request.getTraceId(),
+                    duration, status, message));
+        }
+    }
+
+    /**
+     * 片段留痕只留诊断必需字段，正文开关控制下才落、落也按需截断。
+     * <p>
+     * 关闭正文时 paragraphId / 分数 / 名次照旧入库：足够回答「召回了哪一段、排第几」，
+     * 只是看不到这一段写了什么。
+     */
+    private List<Map<String, Object>> toPayload(List<RetrievalResult> results) {
+        List<Map<String, Object>> candidates = new ArrayList<>(results.size());
+        for (int i = 0; i < results.size(); i++) {
+            RetrievalResult r = results.get(i);
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("rank", i + 1);
+            item.put("paragraphId", r.getParagraphId());
+            item.put("documentId", r.getDocumentId());
+            item.put("documentName", getDocumentName(r));
+            item.put("score", r.getFinalScore());
+            item.put("vectorScore", r.getVectorScore());
+            item.put("fullTextScore", r.getFullTextScore());
+            if (tracePayloadEnabled) {
+                item.put("content", truncate(r.getContent()));
+            }
+            candidates.add(item);
+        }
+        return candidates;
+    }
+
+    private static Integer lengthOf(String text) {
+        return text == null ? null : text.length();
+    }
+
+    /** 取 SHA-256 前 8 字节的十六进制：能比对同一句 query，又不把原文留下来 */
+    private static String fingerprint(String text) {
+        if (text == null) {
+            return null;
+        }
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(16);
+            for (int i = 0; i < 8 && i < digest.length; i++) {
+                hex.append(String.format("%02x", digest[i]));
+            }
+            return hex.toString();
+        } catch (Exception e) {
+            // 没 SHA-256 的环境退化到 hashCode，只是一个相关性提示，不影响主流程
+            return Integer.toHexString(text.hashCode());
+        }
+    }
+
+    private String truncate(String content) {
+        if (content == null || content.length() <= MAX_SNIPPET_CHARS) {
+            return content;
+        }
+        return content.substring(0, MAX_SNIPPET_CHARS) + "...[truncated]";
     }
 
     private String getDocumentName(RetrievalResult r) {

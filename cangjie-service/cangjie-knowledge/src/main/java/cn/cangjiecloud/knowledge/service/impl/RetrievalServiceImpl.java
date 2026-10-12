@@ -2,10 +2,10 @@ package cn.cangjiecloud.knowledge.service.impl;
 
 import cn.cangjiecloud.core.rag.HybridRetriever;
 import cn.cangjiecloud.core.rag.QueryRewriterFactory;
+import cn.cangjiecloud.core.rag.RetrievalOptions;
 import cn.cangjiecloud.core.rag.RetrievalResult;
 import cn.cangjiecloud.knowledge.api.dto.RetrievalQueryDTO;
 import cn.cangjiecloud.knowledge.api.dto.RetrievalResultDTO;
-import cn.cangjiecloud.knowledge.entity.KnowledgeBaseEntity;
 import cn.cangjiecloud.knowledge.rag.PgVectorStore;
 import cn.cangjiecloud.knowledge.service.IKnowledgeBaseService;
 import cn.cangjiecloud.knowledge.service.IKnowledgeProblemService;
@@ -55,16 +55,17 @@ public class RetrievalServiceImpl implements IRetrievalService {
                     .rewrite(retrievalQuery, java.util.List.of());
         }
 
-        List<RetrievalResult> results;
-        String searchMode = resolveSearchMode(query);
         List<String> kbIds = resolveKbIds(query);
-        if (kbIds.size() > 1) {
-            results = hybridRetriever.retrieve(retrievalQuery, kbIds, topK, similarityThreshold, searchMode);
-        } else if (kbIds.size() == 1) {
-            results = hybridRetriever.retrieve(retrievalQuery, kbIds.get(0), topK, similarityThreshold);
-        } else {
+        if (kbIds.isEmpty()) {
             throw new IllegalArgumentException("必须指定 knowledgeBaseId 或 knowledgeBaseIds");
         }
+        // 模式不再在这里自己查库解析：检索侧已按知识库配置解析（且多库一致才启用），
+        // 这里只透传调用方显式指定的模式，命中测试与对话走的是同一套口径
+        List<RetrievalResult> results = hybridRetriever.retrieve(retrievalQuery, RetrievalOptions.builder()
+                .knowledgeBaseIds(kbIds).topK(topK)
+                .similarityThreshold(similarityThreshold)
+                .searchMode(query.getSearchMode())
+                .build());
 
         List<RetrievalResultDTO> dtos = new ArrayList<>();
         Set<String> seenParagraphIds = new HashSet<>();
@@ -139,25 +140,5 @@ public class RetrievalServiceImpl implements IRetrievalService {
             return List.of(query.getKnowledgeBaseId());
         }
         return List.of();
-    }
-
-    /**
-     * 从知识库配置中解析检索模式
-     */
-    private String resolveSearchMode(RetrievalQueryDTO query) {
-        String kbId = query.getKnowledgeBaseId();
-        if (kbId == null && query.getKnowledgeBaseIds() != null && query.getKnowledgeBaseIds().size() == 1) {
-            kbId = query.getKnowledgeBaseIds().get(0);
-        }
-        if (kbId == null) return "simple";
-        try {
-            KnowledgeBaseEntity kb = knowledgeBaseService.getById(kbId);
-            if (kb != null && "two_stage".equalsIgnoreCase(kb.getSearchMode())) {
-                return "two_stage";
-            }
-        } catch (Exception e) {
-            log.warn("读取知识库检索模式失败，降级为 simple: {}", e.getMessage());
-        }
-        return "simple";
     }
 }

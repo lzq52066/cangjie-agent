@@ -28,4 +28,80 @@
         WHERE deleted = 0
     </select>
 
+    <!--
+      时间窗口内的模型调用汇总（一次扫描）。
+      分位数用 P95 而不是平均值：平均值会被少数几次超时洗得很干净，而体感差的恰好就是那几次。
+      duration 用 NULLS LAST 把缺耗时的异常行挤到尾部，不让它们落到分位区间里。
+      ttft 单独一次查询：只有流式调用有首字延迟，混在这一批行里大半是 NULL，分位数会被 NULL 顶歪。
+      没单价时 cost 为空，SUM 出来是 0 —— 与「真的没花钱」同形，前端把 calls 与 cost 一起看就能识破。
+    -->
+    <select id="llmTraceSummary" resultType="java.util.LinkedHashMap">
+        SELECT COUNT(*)                                        AS calls,
+               COUNT(*) FILTER (WHERE status = 'fail')         AS failures,
+               COALESCE(SUM(cost), 0)                          AS cost,
+               COALESCE(SUM(total_tokens), 0)                  AS tokens,
+               COALESCE(AVG(duration), 0)::float8              AS avg_duration,
+               COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration NULLS LAST), 0)::float8  AS p50_duration,
+               COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration NULLS LAST), 0)::float8 AS p95_duration
+        FROM llm_trace
+        WHERE deleted = 0
+          AND start_time &gt;= #{start}
+    </select>
+
+    <!-- 首字延迟只看流式调用（ttft 非空的那一部分） -->
+    <select id="llmTraceTtftSummary" resultType="java.util.LinkedHashMap">
+        SELECT COUNT(*)                                        AS ttft_calls,
+               COALESCE(AVG(ttft), 0)::float8                  AS avg_ttft,
+               COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY ttft), 0)::float8 AS p95_ttft
+        FROM llm_trace
+        WHERE deleted = 0
+          AND start_time &gt;= #{start}
+          AND ttft IS NOT NULL
+    </select>
+
+    <!-- 按模型切片：总量回答不了「钱花在哪个模型上」 -->
+    <select id="llmTraceByModel" resultType="java.util.LinkedHashMap">
+        SELECT COALESCE(NULLIF(model_name, ''), '未知模型')      AS model_name,
+               COUNT(*)                                        AS calls,
+               COUNT(*) FILTER (WHERE status = 'fail')         AS failures,
+               COALESCE(SUM(cost), 0)                          AS cost,
+               COALESCE(SUM(total_tokens), 0)                  AS tokens,
+               COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration NULLS LAST), 0)::float8 AS p95_duration
+        FROM llm_trace
+        WHERE deleted = 0
+          AND start_time &gt;= #{start}
+        GROUP BY 1
+        ORDER BY cost DESC, calls DESC
+        LIMIT #{limit}
+    </select>
+
+    <!--
+      在线评测的按天覆盖度。
+      只算成功的调用：失败的那部分没回答可评，把它们计入分母会把覆盖率永远拖低。
+    -->
+    <select id="llmTraceEvalCoverage" resultType="java.util.LinkedHashMap">
+        SELECT to_char(start_time, 'YYYY-MM-DD')            AS day,
+               COUNT(*) FILTER (WHERE evaluated)            AS scored,
+               COUNT(*) FILTER (WHERE NOT evaluated)        AS pending
+        FROM llm_trace
+        WHERE deleted = 0
+          AND status = 'success'
+          AND start_time &gt;= #{start}
+        GROUP BY 1
+        ORDER BY 1
+    </select>
+
+    <!-- 已评样本的分数原文：指标名不固定，均值在 Java 侧汇总 -->
+    <select id="llmTraceScoredScores" resultType="java.util.LinkedHashMap">
+        SELECT start_time                                    AS start_time,
+               eval_scores                                   AS eval_scores
+        FROM llm_trace
+        WHERE deleted = 0
+          AND evaluated
+          AND eval_scores IS NOT NULL
+          AND start_time &gt;= #{start}
+        ORDER BY start_time DESC
+        LIMIT #{limit}
+    </select>
+
 </mapper>

@@ -9,11 +9,16 @@
       </el-card>
     </div>
 
+    <!-- 近 N 天的模型调用：P95 / 错误率 / 成本与按模型切片 -->
+    <LlmStatsPanel :stats="llmStats" :days="statsDays" :loading="dashLoading"
+                   @change-days="onStatsDaysChange" />
+
     <el-card>
       <el-tabs v-model="activeTab" @tab-change="onTabChange">
         <el-tab-pane label="操作日志" name="logs" />
         <el-tab-pane label="系统指标" name="metrics" />
         <el-tab-pane label="链路追踪" name="trace-links" />
+        <el-tab-pane label="在线评测" name="online-eval" />
         <el-tab-pane label="会话记录" name="sessions" />
         <el-tab-pane label="审批单" name="agent-approvals" />
       </el-tabs>
@@ -105,6 +110,9 @@
       <TraceLinksPanel v-else-if="activeTab === 'trace-links'" :preset-trace-id="presetTraceId"
                        :preset-session-id="presetSessionId" />
 
+      <!-- 在线评测：线上回答的分数水位与抽样积压，自包含面板 -->
+      <OnlineEvalPanel v-else-if="activeTab === 'online-eval'" />
+
       <!-- 会话记录：chat_session / chat_message 审计，可按会话跳到链路视图 -->
       <SessionsPanel v-else-if="activeTab === 'sessions'" @view-links="viewSessionLinks" />
 
@@ -158,6 +166,9 @@ import { prettyJson } from '@admin/utils/format'
 import TraceLinksPanel from '@admin/components/observability/TraceLinksPanel.vue'
 import SessionsPanel from '@admin/components/observability/SessionsPanel.vue'
 import AgentApprovalsPanel from '@admin/components/observability/AgentApprovalsPanel.vue'
+import LlmStatsPanel from '@admin/components/observability/LlmStatsPanel.vue'
+import OnlineEvalPanel from '@admin/components/observability/OnlineEvalPanel.vue'
+import type { LlmTraceStats } from '@admin/api/observability-api'
 import { useTheme, getChartPalette } from '@admin/utils/theme'
 
 const { themeColor } = useTheme()
@@ -174,8 +185,8 @@ const metricTypes = [
   { label: 'GC', value: 'gc' },
 ]
 
-type TabName = 'logs' | 'metrics' | 'trace-links' | 'sessions' | 'agent-approvals'
-const TAB_NAMES: TabName[] = ['logs', 'metrics', 'trace-links', 'sessions', 'agent-approvals']
+type TabName = 'logs' | 'metrics' | 'trace-links' | 'online-eval' | 'sessions' | 'agent-approvals'
+const TAB_NAMES: TabName[] = ['logs', 'metrics', 'trace-links', 'online-eval', 'sessions', 'agent-approvals']
 const route = useRoute()
 const router = useRouter()
 /** 初始 tab 取自 ?tab=，便于从其它页面（如操作日志）直接跳到指定视图 */
@@ -193,6 +204,9 @@ const pageSize = ref(10)
 const total = ref(0)
 
 const dashboard = ref<Record<string, any>>({})
+/** 模型统计的窗口天数：只作用于 llmStats，今日那几个计数不受它影响 */
+const statsDays = ref(7)
+const dashLoading = ref(false)
 const stats = computed(() => [
   { key: 'chat', label: '今日对话', value: dashboard.value.todayChatCount ?? 0, unit: '次', color: '#409eff' },
   { key: 'model', label: '模型调用', value: dashboard.value.todayModelCallCount ?? 0, unit: '次', color: themeColor.value },
@@ -201,6 +215,9 @@ const stats = computed(() => [
   { key: 'log', label: '操作日志', value: dashboard.value.todayLogCount ?? 0, unit: '条', color: '#909399' },
   { key: 'trace', label: '今日 Span', value: dashboard.value.todayTraceCount ?? 0, unit: '条', color: '#7c4dff' }
 ])
+
+/** 后端没接上时为 null，面板自己走空态，不拿 undefined 当「零调用」 */
+const llmStats = computed<LlmTraceStats | null>(() => dashboard.value.llmStats || null)
 
 const operationLogs = ref<any[]>([])
 const logQuery = reactive({ module: '', action: '', status: '' })
@@ -502,11 +519,21 @@ function formatNumber(value: any) {
 }
 
 async function loadDashboard() {
+  dashLoading.value = true
   try {
-    dashboard.value = await observabilityApi.dashboard()
+    dashboard.value = await observabilityApi.dashboard(statsDays.value)
+    // 以后端实际生效的窗口为准：days 会被夹到 1~365，标题跟着回显走才不会说一个没用的数
+    if (dashboard.value.statsDays) statsDays.value = Number(dashboard.value.statsDays)
   } catch {
     dashboard.value = {}
+  } finally {
+    dashLoading.value = false
   }
+}
+
+function onStatsDaysChange(days: number) {
+  statsDays.value = days
+  loadDashboard()
 }
 
 async function loadLogs() {
@@ -580,7 +607,8 @@ function onTabChange() {
   // 手动切 tab 表示要看全量列表，之前的链路/会话定位条件不该跟着回来
   presetTraceId.value = ''
   presetSessionId.value = ''
-  reload()
+  // 在线评测面板自包含（挂载时自己拉数），跟着 reload 只会把它已经发出去的请求再发一遍
+  if (activeTab.value !== 'online-eval') reload()
   const query: Record<string, any> = { ...route.query, tab: activeTab.value }
   delete query.traceId
   delete query.sessionId

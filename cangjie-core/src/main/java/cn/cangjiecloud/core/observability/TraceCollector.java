@@ -24,6 +24,20 @@ public interface TraceCollector {
     void record(String module, String action, String traceId, long duration, String status, String message);
 
     /**
+     * 记录一条带输入 / 输出载荷的子 span。
+     * <p>
+     * 载荷用于把「一次节点执行」变成可复现的证据（检索用了什么 query、召回了什么、分数如何），
+     * 默认实现忽略载荷退化成纯耗时 span，因此未升级的实现方照样能跑，只是排障信息少一截。
+     */
+    default void record(TraceSpan span) {
+        if (span == null) {
+            return;
+        }
+        record(span.getModule(), span.getAction(), span.getTraceId(), span.getDuration(),
+                span.getStatus(), span.getMessage());
+    }
+
+    /**
      * 记录一条链路的入口 span（请求级端到端 span，如一次对话、一次工作流执行）。
      * <p>
      * 与 {@link #record} 的唯一区别是它在 span 树上没有父节点。老实现未覆写时退化为普通 span，

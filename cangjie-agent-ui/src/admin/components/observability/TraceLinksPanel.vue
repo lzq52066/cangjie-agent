@@ -125,11 +125,26 @@
         </el-table-column>
         <el-table-column label="应用" prop="appName" min-width="120" show-overflow-tooltip />
         <el-table-column label="模型" prop="modelName" min-width="110" show-overflow-tooltip />
-        <el-table-column label="输入" min-width="180" show-overflow-tooltip>
-          <template #default="{ row }">{{ truncateContent(row.promptContent) }}</template>
+        <!-- 正文列已从列表裁掉（一条调用两三万字符），这一排换成不拉正文也能算的体感与钱 -->
+        <el-table-column label="首字" width="90" align="center">
+          <template #default="{ row }">
+            <span v-if="row.ttft != null">{{ fmtDuration(row.ttft) }}</span>
+            <span v-else class="no-trace">非流式</span>
+          </template>
         </el-table-column>
-        <el-table-column label="输出" min-width="180" show-overflow-tooltip>
-          <template #default="{ row }">{{ truncateContent(row.responseContent) }}</template>
+        <el-table-column label="成本" width="95" align="center">
+          <template #default="{ row }">{{ fmtCost(row.cost) }}</template>
+        </el-table-column>
+        <el-table-column label="评测" width="80" align="center">
+          <template #default="{ row }">
+            <el-tooltip v-if="evalOf(row).list.length" placement="top">
+              <template #content>
+                <div v-for="m in evalOf(row).list" :key="m.name">{{ m.name }}: {{ m.text }}</div>
+              </template>
+              <span :style="{ color: scoreColor(evalOf(row).avg) }">{{ fmtScore(evalOf(row).avg) }}</span>
+            </el-tooltip>
+            <span v-else class="no-trace">未评</span>
+          </template>
         </el-table-column>
         <el-table-column label="Token（入/出/总）" width="140" align="center">
           <template #default="{ row }">
@@ -169,6 +184,10 @@
         <el-descriptions :column="2" border size="small">
           <el-descriptions-item label="开始时间">{{ formatDateTime(currentLlm.startTime) }}</el-descriptions-item>
           <el-descriptions-item label="耗时">{{ fmtDuration(currentLlm.duration) }}</el-descriptions-item>
+          <el-descriptions-item label="首字延迟">
+            {{ currentLlm.ttft != null ? fmtDuration(currentLlm.ttft) : '非流式' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="成本">{{ fmtCost(currentLlm.cost) }}</el-descriptions-item>
           <el-descriptions-item label="应用">{{ currentLlm.appName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="模型">{{ currentLlm.modelName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="会话 ID">{{ currentLlm.sessionId || '-' }}</el-descriptions-item>
@@ -178,6 +197,15 @@
             {{ currentLlm.totalTokens ?? '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="FinishReason">{{ currentLlm.finishReason || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="在线评测" :span="2">
+            <template v-if="evalOf(currentLlm).list.length">
+              <el-tag v-for="m in evalOf(currentLlm).list" :key="m.name" size="small" effect="plain"
+                      :style="{ color: scoreColor(m.value), marginRight: '6px' }">
+                {{ m.name }} {{ m.text }}
+              </el-tag>
+            </template>
+            <span v-else class="no-trace">未评</span>
+          </el-descriptions-item>
           <el-descriptions-item label="链路 ID" :span="2">
             <el-link v-if="currentLlm.traceId" type="primary" @click="toLink(currentLlm)">
               {{ currentLlm.traceId }}
@@ -191,7 +219,7 @@
             </el-tag>
           </el-descriptions-item>
         </el-descriptions>
-        <!-- 列表行已带全文，预填缓存后正文组件不再重复请求 -->
+        <!-- 正文不在精简行上，只在行真带正文时才预填缓存，否则交给正文组件按 id 单条拉 -->
         <LlmCallBody :trace-id="currentLlm.id" :cache="llmCache" />
       </template>
     </el-drawer>
@@ -210,9 +238,10 @@ import TraceLinkDetail from '@admin/components/observability/TraceLinkDetail.vue
 import LlmCallBody from '@admin/components/observability/LlmCallBody.vue'
 import { formatDateTime } from '@admin/utils/format'
 import {
-  callStatusLabel, callStatusTagType, fmtDuration, LINK_STATUS_OPTIONS,
-  linkEntryLabel, linkStatusLabel, linkStatusTagType, truncateContent
+  avgScore, callStatusLabel, callStatusTagType, fmtCost, fmtDuration, LINK_STATUS_OPTIONS,
+  linkEntryLabel, linkStatusLabel, linkStatusTagType, parseEvalScores
 } from '@admin/utils/observability'
+import { fmtScore, metricLabel, scoreColor } from '@admin/utils/metrics'
 import { observabilityApi } from '@admin/api/observability-api'
 import { applicationApi } from '@admin/api/application-api'
 
@@ -398,8 +427,21 @@ const llmCache = reactive<Record<string, any>>({})
 
 function showLlm(row: any) {
   currentLlm.value = row
-  llmCache[row.id] = row
+  // 裁列后的列表行没有 prompt / response，把它当「已加载」写进缓存，正文组件就会跳过请求
+  // 而永远显示空正文；只有行上真带着正文时才值得预填
+  if (row.promptContent || row.responseContent) llmCache[row.id] = row
   llmDrawer.value = true
+}
+
+/**
+ * 一行的在线评测得分：列表只带 eval_scores 这一列小体积 JSON，展开前就能先看到分数水位。
+ * <p>
+ * 返回均分 + 逐指标明细：列上只放得下一个数，具体是哪一项拖后腿要能在悬浮层里看到。
+ */
+function evalOf(row: any): { avg: number | null, list: { name: string, text: string, value: number }[] } {
+  const scores = parseEvalScores(row?.evalScores)
+  const list = Object.entries(scores).map(([k, v]) => ({ name: metricLabel(k), text: fmtScore(v), value: v }))
+  return { avg: avgScore(scores), list }
 }
 </script>
 

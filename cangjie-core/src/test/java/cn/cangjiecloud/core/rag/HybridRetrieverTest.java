@@ -8,52 +8,40 @@ import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
  * {@link HybridRetriever} 单元测试。
  * <p>
- * 接口仅有两个 default 重载（3 参兼容方法），重点验证它们是否以 0.0 阈值委托到 4 参抽象方法，
- * 且不吞掉入参、不改变返回引用。纯 JVM 测试，不加载 Spring、不连库。
+ * 接口只有一个抽象方法 {@code retrieve(String, RetrievalOptions)}，其余重载都是把各自认识的
+ * 参数填进口径值对象的便捷入口。这里重点验证两件事：
+ * <ul>
+ *   <li>入口方法不吞参数、不越权补默认值（没传的字段必须是 null，交给实现方回落配置）</li>
+ *   <li>default 方法在 Mockito 代理下仍能被 callRealMethod 打通到抽象方法</li>
+ * </ul>
+ * 纯 JVM 测试，不加载 Spring、不连库。
  */
 class HybridRetrieverTest {
 
-    /** 记录被调用的重载签名与实参，并返回预设结果。 */
+    /** 记录抽象方法收到的实参，并返回预设结果。 */
     private static final class RecordingRetriever implements HybridRetriever {
 
-        private final List<String> invokedSignatures = new ArrayList<>();
-        private Object[] lastArgs;
+        private final List<RetrievalOptions> captured = new ArrayList<>();
         private List<RetrievalResult> canned = new ArrayList<>();
 
         @Override
-        public List<RetrievalResult> retrieve(String query, String knowledgeBaseId, int topK,
-                                              double similarityThreshold) {
-            invokedSignatures.add("single-kb-threshold");
-            lastArgs = new Object[]{query, knowledgeBaseId, topK, similarityThreshold};
+        public List<RetrievalResult> retrieve(String query, RetrievalOptions options) {
+            captured.add(options);
             return canned;
         }
 
-        @Override
-        public List<RetrievalResult> retrieve(String query, List<String> knowledgeBaseIds, int topK,
-                                              double similarityThreshold) {
-            invokedSignatures.add("multi-kb-threshold");
-            lastArgs = new Object[]{query, knowledgeBaseIds, topK, similarityThreshold};
-            return canned;
-        }
-
-        @Override
-        public List<RetrievalResult> retrieve(String query, List<String> knowledgeBaseIds, int topK,
-                                              double similarityThreshold, String searchMode) {
-            invokedSignatures.add("multi-kb-threshold-mode");
-            lastArgs = new Object[]{query, knowledgeBaseIds, topK, similarityThreshold, searchMode};
-            return canned;
+        RetrievalOptions last() {
+            return captured.get(captured.size() - 1);
         }
     }
 
@@ -65,56 +53,62 @@ class HybridRetrieverTest {
     class DefaultOverloads {
 
         @Test
-        void singleKnowledgeBaseShortcutShouldDelegateWithZeroThreshold() {
+        void singleKnowledgeBaseShortcutShouldWrapIdAsListAndLeaveThresholdUnset() {
             RecordingRetriever retriever = new RecordingRetriever();
             List<RetrievalResult> expected = List.of(result("p1", 0.9));
             retriever.canned = expected;
 
             List<RetrievalResult> actual = retriever.retrieve("问题", "kb-1", 5);
 
-            assertThat(retriever.invokedSignatures).containsExactly("single-kb-threshold");
-            assertThat(retriever.lastArgs).containsExactly("问题", "kb-1", 5, 0.0);
+            // 3 参入口不认识阈值，必须留 null 让实现方取知识库/全局配置，而不是补 0.0 覆盖掉
+            assertThat(retriever.last().getKnowledgeBaseIds()).containsExactly("kb-1");
+            assertThat(retriever.last().getTopK()).isEqualTo(5);
+            assertThat(retriever.last().getSimilarityThreshold()).isNull();
+            assertThat(retriever.last().getSearchMode()).isNull();
             assertThat(actual).isSameAs(expected);
         }
 
         @Test
-        void multiKnowledgeBaseShortcutShouldDelegateWithZeroThreshold() {
+        void multiKnowledgeBaseShortcutShouldPassIdListThrough() {
             RecordingRetriever retriever = new RecordingRetriever();
             List<String> ids = List.of("kb-1", "kb-2");
 
             retriever.retrieve("q", ids, 3);
 
-            assertThat(retriever.invokedSignatures).containsExactly("multi-kb-threshold");
-            assertThat(retriever.lastArgs).containsExactly("q", ids, 3, 0.0);
+            assertThat(retriever.last().getKnowledgeBaseIds()).isEqualTo(ids);
+            assertThat(retriever.last().getTopK()).isEqualTo(3);
         }
 
         @Test
-        void shortcutOverloadsShouldSelectDifferentAbstractions() {
+        void singleKnowledgeBaseIdShouldBecomeOneElementList() {
             RecordingRetriever retriever = new RecordingRetriever();
 
             retriever.retrieve("q", "kb", 1);
             retriever.retrieve("q", List.of("kb"), 1);
 
-            assertThat(retriever.invokedSignatures)
-                    .containsExactly("single-kb-threshold", "multi-kb-threshold");
+            assertThat(retriever.captured).hasSize(2);
+            assertThat(retriever.captured.get(0).getKnowledgeBaseIds()).containsExactly("kb");
+            assertThat(retriever.captured.get(1).getKnowledgeBaseIds()).containsExactly("kb");
         }
 
         @Test
-        void shortcutShouldPassThroughNullQueryAndNullKnowledgeBase() {
+        void nullKnowledgeBaseIdShouldDegradeToEmptyScopeInsteadOfThrowing() {
             RecordingRetriever retriever = new RecordingRetriever();
 
             retriever.retrieve(null, (String) null, 0);
 
-            assertThat(retriever.lastArgs).containsExactly(null, null, 0, 0.0);
+            assertThat(retriever.last().getKnowledgeBaseIds()).isEmpty();
+            assertThat(retriever.last().getTopK()).isZero();
         }
 
         @Test
-        void shortcutShouldPassThroughNullKnowledgeBaseIdList() {
+        void nullKnowledgeBaseIdListShouldPassThroughAsNullScope() {
             RecordingRetriever retriever = new RecordingRetriever();
 
             retriever.retrieve("q", (List<String>) null, 2);
 
-            assertThat(retriever.lastArgs).containsExactly("q", null, 2, 0.0);
+            assertThat(retriever.last().getKnowledgeBaseIds()).isNull();
+            assertThat(retriever.last().getTopK()).isEqualTo(2);
         }
 
         @Test
@@ -139,10 +133,10 @@ class HybridRetrieverTest {
             RecordingRetriever retriever = new RecordingRetriever();
 
             retriever.retrieve("q", "kb", -1);
-            assertThat(retriever.lastArgs[2]).isEqualTo(-1);
+            assertThat(retriever.last().getTopK()).isEqualTo(-1);
 
             retriever.retrieve("q", List.of("kb"), Integer.MAX_VALUE);
-            assertThat(retriever.lastArgs[2]).isEqualTo(Integer.MAX_VALUE);
+            assertThat(retriever.last().getTopK()).isEqualTo(Integer.MAX_VALUE);
         }
     }
 
@@ -150,15 +144,25 @@ class HybridRetrieverTest {
     class ExplicitOverloads {
 
         @Test
-        void thresholdAwareOverloadsShouldNotRouteThroughDefaults() {
+        void thresholdAwareOverloadsShouldCarryThreshold() {
             RecordingRetriever retriever = new RecordingRetriever();
 
             retriever.retrieve("q", "kb", 4, 0.85);
-            retriever.retrieve("q", List.of("kb"), 4, 0.75);
-            retriever.retrieve("q", List.of("kb"), 4, 0.65, "two_stage");
+            assertThat(retriever.last().getSimilarityThreshold()).isEqualTo(0.85);
+            assertThat(retriever.last().getSearchMode()).isNull();
 
-            assertThat(retriever.invokedSignatures)
-                    .containsExactly("single-kb-threshold", "multi-kb-threshold", "multi-kb-threshold-mode");
+            retriever.retrieve("q", List.of("kb"), 4, 0.75);
+            assertThat(retriever.last().getSimilarityThreshold()).isEqualTo(0.75);
+            assertThat(retriever.last().getKnowledgeBaseIds()).containsExactly("kb");
+        }
+
+        @Test
+        void zeroThresholdShouldBeCarriedAsExplicitZeroNotMissing() {
+            RecordingRetriever retriever = new RecordingRetriever();
+
+            retriever.retrieve("q", "kb", 4, 0.0);
+
+            assertThat(retriever.last().getSimilarityThreshold()).isEqualTo(0.0);
         }
 
         @Test
@@ -166,10 +170,27 @@ class HybridRetrieverTest {
             RecordingRetriever retriever = new RecordingRetriever();
 
             retriever.retrieve("q", List.of("kb"), 6, 0.5, "simple");
-            assertThat(retriever.lastArgs).containsExactly("q", List.of("kb"), 6, 0.5, "simple");
+            assertThat(retriever.last().getKnowledgeBaseIds()).containsExactly("kb");
+            assertThat(retriever.last().getTopK()).isEqualTo(6);
+            assertThat(retriever.last().getSimilarityThreshold()).isEqualTo(0.5);
+            assertThat(retriever.last().getSearchMode()).isEqualTo("simple");
 
             retriever.retrieve("q", List.of("kb"), 6, 0.5, null);
-            assertThat(retriever.lastArgs[4]).isNull();
+            assertThat(retriever.last().getSearchMode()).isNull();
+        }
+
+        @Test
+        void fullOptionsEntryShouldNotRewriteAnything() {
+            RetrievalOptions options = RetrievalOptions.builder()
+                    .knowledgeBaseIds(List.of("kb-1", "kb-2")).topK(8)
+                    .similarityThreshold(0.42).searchMode(RetrievalOptions.MODE_TWO_STAGE)
+                    .fusion(RetrievalOptions.FUSION_WEIGHTED).rerankType("bge")
+                    .rrfK(30).candidateMultiplier(2).build();
+            RecordingRetriever retriever = new RecordingRetriever();
+
+            retriever.retrieve("q", options);
+
+            assertThat(retriever.last()).isSameAs(options);
         }
     }
 
@@ -187,48 +208,42 @@ class HybridRetrieverTest {
         }
 
         @Test
-        void stubbedFourArgMethodShouldServeDefaultThreeArgCall() {
-            HybridRetriever retriever = mock(HybridRetriever.class, invocation -> {
-                if (invocation.getMethod().isDefault()) {
-                    return invocation.callRealMethod();
-                }
-                return List.of(result("p1", 0.2));
-            });
+        void stubbedAbstractionShouldServeDefaultShortcuts() {
+            HybridRetriever retriever = mock(HybridRetriever.class, invocation ->
+                    invocation.getMethod().isDefault()
+                            ? invocation.callRealMethod()
+                            : List.of(result("p1", 0.2)));
 
             assertThat(retriever.retrieve("q", "kb", 3)).hasSize(1);
-            verify(retriever).retrieve("q", "kb", 3, 0.0);
+            verify(retriever).retrieve(anyString(), any(RetrievalOptions.class));
         }
 
         @Test
-        void unstubbedDefaultsOnRealMethodMockShouldDelegateToStubbedAbstraction() {
-            HybridRetriever retriever = mock(HybridRetriever.class,
-                    invocation -> {
-                        if (invocation.getMethod().isDefault()) {
-                            return invocation.callRealMethod();
-                        }
-                        return java.util.Collections.emptyList();
-                    });
+        void defaultShouldCarryShortcutArgumentsIntoOptions() {
+            HybridRetriever retriever = mock(HybridRetriever.class, invocation ->
+                    invocation.getMethod().isDefault()
+                            ? invocation.callRealMethod()
+                            : java.util.Collections.emptyList());
+
+            retriever.retrieve("q", List.of("kb-1"), 5, 0.6);
+
+            org.mockito.ArgumentCaptor<RetrievalOptions> captor =
+                    org.mockito.ArgumentCaptor.forClass(RetrievalOptions.class);
+            verify(retriever).retrieve(anyString(), captor.capture());
+            assertThat(captor.getValue().getKnowledgeBaseIds()).containsExactly("kb-1");
+            assertThat(captor.getValue().getTopK()).isEqualTo(5);
+            assertThat(captor.getValue().getSimilarityThreshold()).isEqualTo(0.6);
+        }
+
+        @Test
+        void unstubbedDefaultsOnRealMethodMockShouldDelegateToAbstraction() {
+            HybridRetriever retriever = mock(HybridRetriever.class, invocation ->
+                    invocation.getMethod().isDefault()
+                            ? invocation.callRealMethod()
+                            : java.util.Collections.emptyList());
 
             assertThat(retriever.retrieve("q", List.of("kb-1"), 5)).isEmpty();
-            verify(retriever).retrieve("q", List.of("kb-1"), 5, 0.0);
-        }
-
-        @Test
-        void mockWithoutAnyCallShouldRecordNoInteractions() {
-            HybridRetriever retriever = mock(HybridRetriever.class);
-
-            verifyNoInteractions(retriever);
-        }
-
-        @Test
-        void defaultMethodShouldWorkForListBasedSignatureOnMock() {
-            HybridRetriever retriever = mock(HybridRetriever.class,
-                    invocation -> invocation.getMethod().isDefault()
-                            ? invocation.callRealMethod()
-                            : null);
-
-            assertThat(retriever.retrieve("q", List.of("kb"), 1)).isNull();
-            verify(retriever).retrieve(anyString(), anyList(), anyInt(), anyDouble());
+            verify(retriever).retrieve(anyString(), any(RetrievalOptions.class));
         }
     }
 
@@ -236,14 +251,15 @@ class HybridRetrieverTest {
     class InterfaceShape {
 
         @Test
-        void onlyThreeArgSignaturesShouldBeDefault() {
-            long defaults = Arrays.stream(HybridRetriever.class.getDeclaredMethods())
-                    .filter(java.lang.reflect.Method::isDefault)
-                    .count();
+        void shouldHaveExactlyOneAbstractionAndFiveDefaultEntries() {
+            java.lang.reflect.Method[] methods = HybridRetriever.class.getDeclaredMethods();
+            long defaults = Arrays.stream(methods).filter(java.lang.reflect.Method::isDefault).count();
 
             assertThat(HybridRetriever.class.isInterface()).isTrue();
-            assertThat(defaults).isEqualTo(2);
-            assertThat(HybridRetriever.class.getDeclaredMethods()).hasSize(5);
+            assertThat(methods).hasSize(6);
+            assertThat(defaults).isEqualTo(5);
+            assertThat(Arrays.stream(methods).filter(m -> !m.isDefault()).map(java.lang.reflect.Method::getName))
+                    .containsExactly("retrieve");
         }
     }
 }

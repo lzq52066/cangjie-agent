@@ -122,7 +122,10 @@ public class TraceLinkServiceImpl implements ITraceLinkService {
             return detail;
         }
 
+        // 载荷列不随详情下发（一条链路十几个检索 span 就能把响应体撑到 MB 级），展开时单条拉取
         detail.setSpans(traceRecordService.list(new LambdaQueryWrapper<TraceRecordEntity>()
+                .select(TraceRecordEntity.class,
+                        info -> !TraceRecordEntity.PAYLOAD_COLUMNS.contains(info.getColumn()))
                 .eq(TraceRecordEntity::getTraceId, linkId)
                 .orderByAsc(TraceRecordEntity::getStartTime)));
         List<AgentRunEntity> runs = agentRunService.list(new LambdaQueryWrapper<AgentRunEntity>()

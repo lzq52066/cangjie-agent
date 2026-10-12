@@ -2,8 +2,10 @@ package cn.cangjiecloud.observability.controller;
 
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.observability.dto.LlmTraceQueryDTO;
+import cn.cangjiecloud.observability.dto.OnlineEvalTrendDTO;
 import cn.cangjiecloud.observability.entity.LlmTraceEntity;
 import cn.cangjiecloud.observability.service.ILlmTraceService;
+import cn.cangjiecloud.observability.service.ILlmTraceStatsService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,13 +16,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * {@link LlmTraceController} 单元测试：验证分页/详情/时间线接口的委托与不存在分支。
+ * {@link LlmTraceController} 单元测试：验证分页/详情/时间线/评测趋势接口的委托与不存在分支。
  */
 @ExtendWith(MockitoExtension.class)
 class LlmTraceControllerTest {
@@ -28,11 +31,14 @@ class LlmTraceControllerTest {
     @Mock
     private ILlmTraceService llmTraceService;
 
+    @Mock
+    private ILlmTraceStatsService llmTraceStatsService;
+
     private LlmTraceController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new LlmTraceController(llmTraceService);
+        controller = new LlmTraceController(llmTraceService, llmTraceStatsService);
     }
 
     private static LlmTraceEntity trace(String id, String modelName, String status) {
@@ -143,6 +149,49 @@ class LlmTraceControllerTest {
             assertThat(response.isSuccess()).isTrue();
             assertThat(response.getData()).isEmpty();
             verify(llmTraceService).timeline("empty");
+        }
+    }
+
+    @Nested
+    class EvalTrend {
+
+        @Test
+        void shouldDelegateDaysAndWrapTrend() {
+            // 正常场景：窗口天数原样传给统计服务
+            OnlineEvalTrendDTO trend = OnlineEvalTrendDTO.builder()
+                    .scored(12L)
+                    .pending(3L)
+                    .coverage(0.8)
+                    .metrics(Map.of("faithfulness", OnlineEvalTrendDTO.MetricAvg.builder()
+                            .avg(0.91).cases(12).build()))
+                    .daily(List.of())
+                    .build();
+            when(llmTraceStatsService.onlineEvalTrend(14)).thenReturn(trend);
+
+            R<OnlineEvalTrendDTO> response = controller.evalTrend(14);
+
+            assertThat(response.isSuccess()).isTrue();
+            assertThat(response.getData()).isSameAs(trend);
+            assertThat(response.getData().getMetrics()).containsKey("faithfulness");
+            verify(llmTraceStatsService).onlineEvalTrend(14);
+        }
+
+        @Test
+        void shouldReturnZeroFilledTrendWhenNothingScored() {
+            // 边界场景：一条都没评时返回 0 而不是 null，面板不必修特例
+            OnlineEvalTrendDTO trend = OnlineEvalTrendDTO.builder()
+                    .scored(0L)
+                    .pending(0L)
+                    .coverage(0.0)
+                    .metrics(Map.of())
+                    .daily(List.of())
+                    .build();
+            when(llmTraceStatsService.onlineEvalTrend(7)).thenReturn(trend);
+
+            R<OnlineEvalTrendDTO> response = controller.evalTrend(7);
+
+            assertThat(response.getData().getScored()).isZero();
+            assertThat(response.getData().getMetrics()).isEmpty();
         }
     }
 }

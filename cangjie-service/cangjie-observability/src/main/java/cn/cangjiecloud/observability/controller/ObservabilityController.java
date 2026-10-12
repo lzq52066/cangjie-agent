@@ -2,10 +2,12 @@ package cn.cangjiecloud.observability.controller;
 
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
+import cn.cangjiecloud.observability.dto.LlmTraceStatsDTO;
 import cn.cangjiecloud.observability.dto.TraceQueryDTO;
 import cn.cangjiecloud.observability.entity.OperationLogEntity;
 import cn.cangjiecloud.observability.entity.SystemMetricEntity;
 import cn.cangjiecloud.observability.entity.TraceRecordEntity;
+import cn.cangjiecloud.observability.service.ILlmTraceStatsService;
 import cn.cangjiecloud.observability.service.IOperationLogService;
 import cn.cangjiecloud.observability.service.ISystemMetricService;
 import cn.cangjiecloud.observability.service.ITraceRecordService;
@@ -17,6 +19,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -47,6 +50,7 @@ public class ObservabilityController {
     private final ISystemMetricService systemMetricService;
     private final ITraceRecordService traceRecordService;
     private final cn.cangjiecloud.observability.mapper.ObservabilityStatsMapper observabilityStatsMapper;
+    private final ILlmTraceStatsService llmTraceStatsService;
 
     /**
      * 操作日志分页
@@ -87,6 +91,18 @@ public class ObservabilityController {
     @GetMapping("/traces")
     public R<IPage<TraceRecordEntity>> traces(TraceQueryDTO query) {
         return R.data(traceRecordService.pageQuery(query));
+    }
+
+    /**
+     * 单条 span 的完整载荷（检索 query / 召回片段与分数等）。
+     * <p>
+     * 链路详情只带精简列，正文在此按需拉取。
+     * 「span 不存在」与「没写载荷」一律按空数据返回：前端本身有灰字空态，
+     * 拿 R.fail 表达空态会让展开面板变成一次红条报错。
+     */
+    @GetMapping("/traces/{spanId}/payload")
+    public R<TraceRecordEntity> spanPayload(@PathVariable String spanId) {
+        return R.data(traceRecordService.payload(spanId));
     }
 
     /**
@@ -159,10 +175,12 @@ public class ObservabilityController {
     }
 
     /**
-     * 汇总面板数据（今日对话数、模型调用数、错误数、平均耗时等）
+     * 汇总面板数据（今日对话数、模型调用数、错误数、平均耗时等）+ 模型调用的成本与延迟分布。
+     *
+     * @param days 模型统计的窗口天数（自然日，含今天），默认近 7 天。今日计数不受它影响。
      */
     @GetMapping("/dashboard")
-    public R<Map<String, Object>> dashboard() {
+    public R<Map<String, Object>> dashboard(@RequestParam(defaultValue = "7") int days) {
         LocalDateTime todayStart = LocalDate.now().atStartOfDay();
         Map<String, Object> data = new LinkedHashMap<>();
 
@@ -189,6 +207,11 @@ public class ObservabilityController {
         data.put("avgDuration", avgDuration);
         data.put("todayLogCount", todayLogCount);
         data.put("todayTraceCount", todayTraceCount);
+
+        // 模型调用这一块单独成组：口径是「近 N 天」而不是「今日」，与上面几个今日数混在一个平面上会被读错
+        LlmTraceStatsDTO llmStats = llmTraceStatsService.stats(days);
+        data.put("statsDays", days);
+        data.put("llmStats", llmStats);
         return R.data(data);
     }
 }

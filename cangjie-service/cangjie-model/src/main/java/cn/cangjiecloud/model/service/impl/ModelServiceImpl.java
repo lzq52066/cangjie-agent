@@ -131,6 +131,9 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
         entity.setIsDefault(dto.getIsDefault() != null ? dto.getIsDefault() : false);
         entity.setSupportEmbedding(dto.getSupportEmbedding() != null ? dto.getSupportEmbedding() : false);
         entity.setEmbeddingDimension(dto.getEmbeddingDimension());
+        // 单价只影响成本估算，不填则该模型的调用不计成本（而不是计成 0）
+        entity.setInputPrice(dto.getInputPrice());
+        entity.setOutputPrice(dto.getOutputPrice());
         entity.setStatus("active");
         entity.setDescription(dto.getDescription());
         save(entity);
@@ -165,6 +168,8 @@ public class ModelServiceImpl extends ServiceImpl<ModelMapper, ModelEntity>
         if (dto.getTopP() != null) entity.setTopP(dto.getTopP());
         if (dto.getSupportEmbedding() != null) entity.setSupportEmbedding(dto.getSupportEmbedding());
         if (dto.getEmbeddingDimension() != null) entity.setEmbeddingDimension(dto.getEmbeddingDimension());
+        if (dto.getInputPrice() != null) entity.setInputPrice(dto.getInputPrice());
+        if (dto.getOutputPrice() != null) entity.setOutputPrice(dto.getOutputPrice());
         if (StringUtils.hasText(dto.getDescription())) entity.setDescription(dto.getDescription());
         if (StringUtils.hasText(dto.getStatus())) entity.setStatus(dto.getStatus());
         if (dto.getIsDefault() != null && dto.getIsDefault()) {

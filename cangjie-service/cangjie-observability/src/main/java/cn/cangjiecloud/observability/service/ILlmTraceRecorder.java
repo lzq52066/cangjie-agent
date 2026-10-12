@@ -46,6 +46,8 @@ public interface ILlmTraceRecorder {
         private String modelName;
         /** 提示词内容（完整消息 JSON） */
         private String promptContent;
+        /** 本次调用参数（JSON：temperature / topP / maxTokens） */
+        private String modelParams;
         /** 输入 token 数 */
         private Long inputTokens;
         /** 输出 token 数 */
@@ -58,6 +60,12 @@ public interface ILlmTraceRecorder {
         private String finishReason;
         /** 耗时（毫秒） */
         private Long duration;
+        /**
+         * 首个 token 到达时间戳（毫秒），仅流式调用携带。
+         * <p>
+         * 与 {@code startTimeMs} 相减即首字延迟；同步调用没有这个中间点，留空而不是拿 duration 顶上去。
+         */
+        private Long firstTokenMs;
         /** 开始时间戳（毫秒） */
         private Long startTimeMs;
         /** 请求消息列表（与 promptContent 二选一，List 会被序列化为 JSON） */

@@ -1,5 +1,9 @@
 package cn.cangjiecloud.observability.service.impl;
 
+import cn.cangjiecloud.common.util.JsonUtils;
+import cn.cangjiecloud.core.observability.ExportedSpan;
+import cn.cangjiecloud.core.observability.TraceExporter;
+import cn.cangjiecloud.core.observability.TraceSpan;
 import cn.cangjiecloud.observability.dto.TraceQueryDTO;
 import cn.cangjiecloud.observability.entity.TraceRecordEntity;
 import cn.cangjiecloud.observability.mapper.TraceRecordMapper;
@@ -12,10 +16,16 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 
@@ -29,11 +39,27 @@ public class TraceRecordServiceImpl extends ServiceImpl<TraceRecordMapper, Trace
     @Qualifier("businessExecutor")
     private Executor businessExecutor;
 
+    /** span 保留天数，<=0 表示不清理 */
+    @Value("${cangjie.observability.trace.retention-days:30}")
+    private int retentionDays;
+
+    /**
+     * 外部出口（OTLP 等）：没配就一个也不装，默认空列表。
+     * <p>
+     * 外导排在落库之前：出口自己缓冲，而库写失败时这条 span 在本地已经没了，
+     * 外部系统至少还能留下完整链路。
+     */
+    @Autowired(required = false)
+    private List<TraceExporter> traceExporters = Collections.emptyList();
+
+    private static final int PURGE_BATCH_SIZE = 2000;
+
     @Override
     public void record(TraceRecordEntity entity) {
         if (entity == null) {
             return;
         }
+        export(entity);
         // 异步独立落库：span 不能跟着业务事务一起回滚，否则失败调用反而查不到
         businessExecutor.execute(() -> {
             try {
@@ -45,9 +71,44 @@ public class TraceRecordServiceImpl extends ServiceImpl<TraceRecordMapper, Trace
         });
     }
 
+    /** 交给各出口：单个出口抛异常不能连带影响其他出口与落库 */
+    private void export(TraceRecordEntity entity) {
+        if (traceExporters == null || traceExporters.isEmpty()) {
+            return;
+        }
+        ExportedSpan span = new ExportedSpan(entity.getTraceId(), entity.getSpanId(), entity.getParentSpanId(),
+                entity.getServiceName(), entity.getModule(), entity.getAction(), entity.getStatus(),
+                entity.getMessage(), toEpochMs(entity.getStartTime()),
+                entity.getDuration() == null ? 0L : entity.getDuration(),
+                entity.getInputPayload(), entity.getOutputPayload(), parseMetadata(entity.getMetadata()));
+        for (TraceExporter exporter : traceExporters) {
+            try {
+                exporter.export(span);
+            } catch (Exception ex) {
+                log.warn("span 出口失败: exporter={}, {}", exporter.name(), ex.toString());
+            }
+        }
+    }
+
+    private static long toEpochMs(LocalDateTime time) {
+        return time == null ? System.currentTimeMillis() : time.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+    }
+
+    /** metadata 列本来就是 JSON 文本，解不成 Map 时交 null：出口拿不到维度不致命 */
+    private static Map<String, Object> parseMetadata(String json) {
+        if (!StringUtils.hasText(json)) {
+            return null;
+        }
+        try {
+            return JsonUtils.parseMap(json);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
     @Override
     public IPage<TraceRecordEntity> pageQuery(TraceQueryDTO query) {
-        LambdaQueryWrapper<TraceRecordEntity> wrapper = new LambdaQueryWrapper<TraceRecordEntity>()
+        LambdaQueryWrapper<TraceRecordEntity> wrapper = briefWrapper()
                 .eq(StringUtils.hasText(query.getTraceId()), TraceRecordEntity::getTraceId, query.getTraceId())
                 .eq(StringUtils.hasText(query.getModule()), TraceRecordEntity::getModule, query.getModule())
                 .eq(StringUtils.hasText(query.getAction()), TraceRecordEntity::getAction, query.getAction())
@@ -59,6 +120,16 @@ public class TraceRecordServiceImpl extends ServiceImpl<TraceRecordMapper, Trace
     }
 
     /**
+     * 只选精简列的 wrapper：载荷三列单条可达数十 KB，列表/详情都别带上，
+     * 正文由 {@link #payload(String)} 按 spanId 单条拉取。
+     */
+    private LambdaQueryWrapper<TraceRecordEntity> briefWrapper() {
+        return new LambdaQueryWrapper<TraceRecordEntity>()
+                .select(TraceRecordEntity.class,
+                        info -> !TraceRecordEntity.PAYLOAD_COLUMNS.contains(info.getColumn()));
+    }
+
+    /**
      * TraceCollector 实现：将子 span 写入 trace_record 表，供 AOP / 手动调用。
      * <p>
      * 父子关系靠「入口 span 的 spanId == traceId」这一约定还原，无需额外的线程上下文：
@@ -66,9 +137,26 @@ public class TraceRecordServiceImpl extends ServiceImpl<TraceRecordMapper, Trace
      */
     @Override
     public void record(String module, String action, String traceId, long duration, String status, String message) {
-        TraceRecordEntity entity = buildSpan(module, action, traceId, duration, status, message);
+        record(TraceSpan.of(module, action, traceId, duration, status, message));
+    }
+
+    /**
+     * 带载荷的子 span：除了耗时与状态，还把本次节点的输入 / 输出原样落库。
+     * <p>
+     * 载荷序列化失败不能把整个 span 一起丢掉，因此逐字段兜底：丢了正文至少还留着耗时。
+     */
+    @Override
+    public void record(TraceSpan span) {
+        if (span == null) {
+            return;
+        }
+        TraceRecordEntity entity = buildSpan(span.getModule(), span.getAction(), span.getTraceId(),
+                span.getDuration(), span.getStatus(), span.getMessage());
         entity.setSpanId(UUID.randomUUID().toString().replace("-", ""));
-        entity.setParentSpanId(traceId);
+        entity.setParentSpanId(span.getTraceId());
+        entity.setInputPayload(span.getInput());
+        entity.setOutputPayload(span.getOutput());
+        entity.setMetadata(toJsonQuietly(span.getMetadata()));
         record(entity);
     }
 
@@ -79,6 +167,53 @@ public class TraceRecordServiceImpl extends ServiceImpl<TraceRecordMapper, Trace
         // 入口 span 用 traceId 自身作 spanId：子 span 只带着 traceId 也能定位到父节点
         entity.setSpanId(StringUtils.hasText(traceId) ? traceId : UUID.randomUUID().toString().replace("-", ""));
         record(entity);
+    }
+
+    @Override
+    public TraceRecordEntity payload(String spanId) {
+        if (!StringUtils.hasText(spanId)) {
+            return null;
+        }
+        // 入口 span 的 spanId 就是 traceId，同链路内子 span 的 spanId 全局唯一，按 spanId 取即可
+        return getOne(new LambdaQueryWrapper<TraceRecordEntity>()
+                .eq(TraceRecordEntity::getSpanId, spanId)
+                .last("limit 1"));
+    }
+
+    /**
+     * 保留期清理：每天 03:45 分批物理删除超期 span。
+     * <p>
+     * 载荷三列（含用户 query 与知识库正文片段）只能靠物理删除回收空间，
+     * 不然 trace_record 会随对话量单调增长。
+     */
+    @Scheduled(cron = "0 45 3 * * ?")
+    public void scheduledPurge() {
+        if (retentionDays <= 0) {
+            return;
+        }
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(retentionDays);
+        int total = 0;
+        int removed;
+        do {
+            removed = baseMapper.purgeBatch(cutoff, PURGE_BATCH_SIZE);
+            total += removed;
+        } while (removed == PURGE_BATCH_SIZE);
+        if (total > 0) {
+            log.info("trace_record 保留期清理完成，删除 {} 条（开始时间早于 {}）", total, cutoff);
+        }
+    }
+
+    /** 载荷序列化失败时返回 null，仅丢正文不影响 span 本身 */
+    private String toJsonQuietly(Map<String, Object> metadata) {
+        if (metadata == null || metadata.isEmpty()) {
+            return null;
+        }
+        try {
+            return JsonUtils.toJSONString(metadata);
+        } catch (Exception ex) {
+            log.warn("span metadata 序列化失败: {}", ex.toString());
+            return null;
+        }
     }
 
     private TraceRecordEntity buildSpan(String module, String action, String traceId, long duration,

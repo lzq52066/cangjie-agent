@@ -48,6 +48,43 @@
         LIMIT #{topK}
     </select>
 
+    <!-- 向量相似度检索（多知识库单查）：全局排序，避免逐库拼接后名次各自从 1 开始 -->
+    <select id="searchByVectorKbs" resultType="java.util.Map">
+        SELECT id, document_id, knowledge_base_id, content, title,
+               1 - (embedding &lt;=&gt; #{vector}::vector) AS similarity
+        FROM knowledge_paragraph
+        WHERE deleted = 0
+          AND vector_status = 'embedded'
+          AND knowledge_base_id IN
+        <foreach collection="kbIds" item="k" open="(" separator="," close=")">
+            #{k}
+        </foreach>
+        ORDER BY embedding &lt;=&gt; #{vector}::vector
+        LIMIT #{topK}
+    </select>
+
+    <!-- 全文检索（多知识库 + 可选文档范围）：two_stage 把候选文档下推到 SQL，
+         不再先全库取 topK 再在内存过滤（那样范围内的命中可能被无关文档挤掉） -->
+    <select id="searchByFullTextScoped" resultType="java.util.Map">
+        SELECT id, document_id, knowledge_base_id, content, title,
+               pgroonga_score(tableoid, ctid) AS rank
+        FROM knowledge_paragraph
+        WHERE deleted = 0
+          AND content &amp;@~ #{query}
+          AND knowledge_base_id IN
+        <foreach collection="kbIds" item="k" open="(" separator="," close=")">
+            #{k}
+        </foreach>
+        <if test="docIds != null and docIds.size() > 0">
+            AND document_id IN
+            <foreach collection="docIds" item="d" open="(" separator="," close=")">
+                #{d}
+            </foreach>
+        </if>
+        ORDER BY rank DESC
+        LIMIT #{topK}
+    </select>
+
     <!-- 清空知识库下所有向量 -->
     <update id="clearEmbeddingByKb">
         UPDATE knowledge_paragraph
@@ -79,6 +116,20 @@
         WHERE deleted = 0
           AND knowledge_base_id = #{kbId}
           AND summary_embedding IS NOT NULL
+        ORDER BY summary_embedding &lt;=&gt; #{vector}::vector
+        LIMIT #{topK}
+    </select>
+
+    <!-- two-stage 第一阶段（多知识库）：按摘要向量归并出全局候选文档 -->
+    <select id="searchSummaryDocIdsKbs" resultType="java.lang.String">
+        SELECT id
+        FROM knowledge_document
+        WHERE deleted = 0
+          AND summary_embedding IS NOT NULL
+          AND knowledge_base_id IN
+        <foreach collection="kbIds" item="k" open="(" separator="," close=")">
+            #{k}
+        </foreach>
         ORDER BY summary_embedding &lt;=&gt; #{vector}::vector
         LIMIT #{topK}
     </select>

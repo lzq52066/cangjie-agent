@@ -80,6 +80,11 @@
 
       <el-divider content-position="left">调用 Span（{{ spans.length }}）</el-divider>
       <el-table v-if="spans.length" :data="spans" size="small" border row-key="spanId">
+        <el-table-column type="expand">
+          <template #default="{ row }">
+            <SpanPayload :span-id="row.spanId" :cache="bodyCache" />
+          </template>
+        </el-table-column>
         <el-table-column label="模块 / 动作" min-width="200">
           <template #default="{ row }">
             <span :style="{ paddingLeft: `${(row.treeDepth || 0) * 16}px` }">
@@ -175,6 +180,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import RunTimeline from '@admin/components/observability/RunTimeline.vue'
 import LlmCallBody from '@admin/components/observability/LlmCallBody.vue'
+import SpanPayload from '@admin/components/observability/SpanPayload.vue'
 import { formatDateTime } from '@admin/utils/format'
 import { observabilityApi } from '@admin/api/observability-api'
 import {
@@ -197,7 +203,7 @@ const runs = computed<any[]>(() => detail.value?.runs || [])
 const background = computed<any[]>(() => detail.value?.backgroundLlmTraces || [])
 const entryLabel = computed(() => linkEntryLabel(summary.value.entryKind, summary.value.entryLabel))
 
-/** 模型调用正文按需拉取后的缓存：正文可达数万字符，不随详情一次性下发 */
+/** 模型调用正文与 span 载荷按需拉取后的缓存：都可能很大，不随详情一次性下发 */
 const bodyCache = reactive<Record<string, any>>({})
 
 const openRuns = ref<string[]>([])

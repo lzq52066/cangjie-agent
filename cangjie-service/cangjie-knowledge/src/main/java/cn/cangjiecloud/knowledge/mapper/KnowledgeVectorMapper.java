@@ -42,6 +42,28 @@ public interface KnowledgeVectorMapper {
                                                @Param("topK") int topK);
 
     /**
+     * 向量相似度检索（多知识库单查，全局前 topK）
+     */
+    List<Map<String, Object>> searchByVectorKbs(@Param("vector") String vector,
+                                                @Param("kbIds") List<String> knowledgeBaseIds,
+                                                @Param("topK") int topK);
+
+    /**
+     * 全文检索（多知识库，docIds 非空时限定文档范围 —— two_stage 的下推版本）
+     */
+    List<Map<String, Object>> searchByFullTextScoped(@Param("query") String query,
+                                                     @Param("kbIds") List<String> knowledgeBaseIds,
+                                                     @Param("docIds") List<String> documentIds,
+                                                     @Param("topK") int topK);
+
+    /**
+     * two-stage 第一阶段：多知识库摘要检索，按相似度归并出候选文档 ID
+     */
+    List<String> searchSummaryDocIdsKbs(@Param("vector") String vector,
+                                        @Param("kbIds") List<String> knowledgeBaseIds,
+                                        @Param("topK") int topK);
+
+    /**
      * 清空知识库下所有向量
      */
     int clearEmbeddingByKb(@Param("kbId") String knowledgeBaseId);

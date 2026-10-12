@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +65,39 @@ public class PgVectorStore implements VectorStore {
         return mapRows(rows, false);
     }
 
+    /**
+     * 多知识库单查：一条 {@code IN} 查询拿回全局前 topK。
+     * <p>
+     * 逐库循环拼接会让每个库都从第 1 名开始，跨库名次无法比较，融合与阈值都会失真。
+     */
+    @Override
+    public List<RetrievalResult> search(float[] queryEmbedding, Collection<String> knowledgeBaseIds, int topK) {
+        if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()) {
+            return List.of();
+        }
+        if (knowledgeBaseIds.size() == 1) {
+            return search(queryEmbedding, knowledgeBaseIds.iterator().next(), topK);
+        }
+        List<Map<String, Object>> rows =
+                vectorMapper.searchByVectorKbs(toVectorString(queryEmbedding), new ArrayList<>(knowledgeBaseIds), topK);
+        return mapRows(rows, true);
+    }
+
+    /**
+     * 多知识库 + 限定文档范围的全文检索：documentIds 下推到 SQL。
+     */
+    @Override
+    public List<RetrievalResult> fullTextSearch(String query, Collection<String> knowledgeBaseIds,
+                                                Collection<String> documentIds, int topK) {
+        if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()) {
+            return List.of();
+        }
+        List<String> kbIds = new ArrayList<>(knowledgeBaseIds);
+        List<String> docIds = documentIds == null || documentIds.isEmpty() ? null : new ArrayList<>(documentIds);
+        List<Map<String, Object>> rows = vectorMapper.searchByFullTextScoped(query, kbIds, docIds, topK);
+        return mapRows(rows, false);
+    }
+
     @Override
     public void deleteByKnowledgeBase(String knowledgeBaseId) {
         vectorMapper.clearEmbeddingByKb(knowledgeBaseId);
@@ -90,6 +124,18 @@ public class PgVectorStore implements VectorStore {
      */
     public List<String> searchDocumentSummaries(float[] queryEmbedding, String knowledgeBaseId, int topK) {
         return vectorMapper.searchSummaryDocIds(toVectorString(queryEmbedding), knowledgeBaseId, topK);
+    }
+
+    @Override
+    public List<String> searchDocumentSummaries(float[] queryEmbedding, Collection<String> knowledgeBaseIds, int topK) {
+        if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()) {
+            return List.of();
+        }
+        List<String> kbIds = new ArrayList<>(knowledgeBaseIds);
+        if (kbIds.size() == 1) {
+            return searchDocumentSummaries(queryEmbedding, kbIds.get(0), topK);
+        }
+        return vectorMapper.searchSummaryDocIdsKbs(toVectorString(queryEmbedding), kbIds, topK);
     }
 
     /**

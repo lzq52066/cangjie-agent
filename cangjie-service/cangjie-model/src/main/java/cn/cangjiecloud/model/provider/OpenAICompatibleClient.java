@@ -38,6 +38,7 @@ import java.util.Map;
 import java.util.Spliterator;
 import java.util.Spliterators;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -254,7 +255,11 @@ public class OpenAICompatibleClient {
         }
 
         dev.langchain4j.model.chat.request.ChatRequest lcRequest = lcBuilder.build();
-        ChatRequestOptions lcOptions = buildRequestOptions(request);
+        // 与监听器共用同一个可变 attributes：第一个 token 到达时把时间戳写进去，监听器才拿得到首字延迟
+        Map<Object, Object> listenerAttributes = streamingAttributes(request);
+        ChatRequestOptions lcOptions = ChatRequestOptions.builder()
+                .listenerAttributes(listenerAttributes)
+                .build();
 
         Future<?> producer = streamExecutor.submit(() -> {
             // 累积正文用于 usage 缺失时兜底估算（仅生产者线程访问）
@@ -266,6 +271,8 @@ public class OpenAICompatibleClient {
                         if (Thread.currentThread().isInterrupted()) {
                             return;
                         }
+                        // 只认第一个：后续分片不得覆盖这个时间点，否则首字延迟会被最后的卡顿拉长
+                        listenerAttributes.putIfAbsent(ChatTraceContext.KEY_FIRST_TOKEN_MS, System.currentTimeMillis());
                         try {
                             streamedText.append(token);
                             queue.put(ChatChunk.builder().delta(token).done(false).build());
@@ -477,6 +484,22 @@ public class OpenAICompatibleClient {
             return ChatRequestOptions.EMPTY;
         }
         return ChatRequestOptions.builder().listenerAttributes(attributes).build();
+    }
+
+    /**
+     * 流式调用用的 attributes（始终可写）。
+     * <p>
+     * 必须是并发安全的 Map：写入发生在流式生产线程，读取发生在 langchain4j 的响应回调线程；
+     * 也不能直接拿 {@link ChatTraceContext#toListenerAttributes()} 的返回值改 —— 那个 Map 在没有业务
+     * 上下文时会被 {@link #buildRequestOptions} 换成 {@code ChatRequestOptions.EMPTY}，写了也丢。
+     */
+    private static Map<Object, Object> streamingAttributes(ChatRequest request) {
+        Map<Object, Object> attributes = new ConcurrentHashMap<>();
+        ChatTraceContext traceContext = request.getTraceContext();
+        if (traceContext != null) {
+            attributes.putAll(traceContext.toListenerAttributes());
+        }
+        return attributes;
     }
 
     private List<dev.langchain4j.data.message.ChatMessage> convertMessages(List<ChatMessage> messages) {

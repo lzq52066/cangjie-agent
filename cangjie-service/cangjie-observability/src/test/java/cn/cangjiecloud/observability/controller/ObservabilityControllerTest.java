@@ -1,11 +1,13 @@
 package cn.cangjiecloud.observability.controller;
 
 import cn.cangjiecloud.common.api.R;
+import cn.cangjiecloud.observability.dto.LlmTraceStatsDTO;
 import cn.cangjiecloud.observability.dto.TraceQueryDTO;
 import cn.cangjiecloud.observability.entity.OperationLogEntity;
 import cn.cangjiecloud.observability.entity.SystemMetricEntity;
 import cn.cangjiecloud.observability.entity.TraceRecordEntity;
 import cn.cangjiecloud.observability.mapper.ObservabilityStatsMapper;
+import cn.cangjiecloud.observability.service.ILlmTraceStatsService;
 import cn.cangjiecloud.observability.service.IOperationLogService;
 import cn.cangjiecloud.observability.service.ISystemMetricService;
 import cn.cangjiecloud.observability.service.ITraceRecordService;
@@ -27,6 +29,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -58,6 +61,9 @@ class ObservabilityControllerTest {
     @Mock
     private ObservabilityStatsMapper observabilityStatsMapper;
 
+    @Mock
+    private ILlmTraceStatsService llmTraceStatsService;
+
     private ObservabilityController controller;
 
     @BeforeAll
@@ -74,7 +80,7 @@ class ObservabilityControllerTest {
     @BeforeEach
     void setUp() {
         controller = new ObservabilityController(operationLogService, systemMetricService,
-                traceRecordService, observabilityStatsMapper);
+                traceRecordService, observabilityStatsMapper, llmTraceStatsService);
     }
 
     private static SystemMetricEntity metric(String type, String name, String unit,
@@ -315,8 +321,16 @@ class ObservabilityControllerTest {
             when(observabilityStatsMapper.avgOperationDuration()).thenReturn(3.5);
             when(operationLogService.count(any(Wrapper.class))).thenReturn(7L);
             when(traceRecordService.count(any(Wrapper.class))).thenReturn(9L);
+            when(llmTraceStatsService.stats(7)).thenReturn(LlmTraceStatsDTO.builder()
+                    .calls(100L).failures(4L)
+                    .errorRate(new BigDecimal("0.0400"))
+                    .cost(new BigDecimal("1.234567"))
+                    .p95Duration(2800.0).p95Ttft(600.0)
+                    .byModel(List.of(LlmTraceStatsDTO.ModelStat.builder()
+                            .modelName("gpt-4o-mini").calls(100L).build()))
+                    .build());
 
-            R<Map<String, Object>> response = controller.dashboard();
+            R<Map<String, Object>> response = controller.dashboard(7);
 
             assertThat(response.isSuccess()).isTrue();
             assertThat(response.getData())
@@ -350,6 +364,37 @@ class ObservabilityControllerTest {
             LambdaQueryWrapper<?> traceWrapper = (LambdaQueryWrapper<?>) traceCap.getValue();
             assertThat(traceWrapper.getTargetSql()).contains("start_time");
             assertThat(traceWrapper.getParamNameValuePairs().values()).contains(todayStart);
+        }
+
+        @Test
+        void shouldCarryWindowedLlmStatsAndDays() {
+            // 正常场景：模型统计成组返回，窗口天数原样回传给前端展示「近 N 天」
+            LlmTraceStatsDTO stats = LlmTraceStatsDTO.builder()
+                    .calls(5L).tokens(800L).p95Duration(1500.0).byModel(List.of()).build();
+            when(llmTraceStatsService.stats(30)).thenReturn(stats);
+
+            R<Map<String, Object>> response = controller.dashboard(30);
+
+            assertThat(response.getData())
+                    .containsEntry("statsDays", 30)
+                    .containsEntry("llmStats", stats);
+            verify(llmTraceStatsService).stats(30);
+        }
+
+        @Test
+        void shouldExposeTodayCountersEvenWhenNoLlmCallHappened() {
+            // 边界场景：新环境一笔模型调用都没有，今日计数不能被一个空统计块顶掉
+            when(llmTraceStatsService.stats(1)).thenReturn(LlmTraceStatsDTO.builder()
+                    .calls(0L).errorRate(BigDecimal.ZERO).cost(BigDecimal.ZERO)
+                    .byModel(List.of()).build());
+
+            R<Map<String, Object>> response = controller.dashboard(1);
+
+            assertThat(response.isSuccess()).isTrue();
+            assertThat(response.getData()).containsKeys("todayChatCount", "todayTraceCount", "llmStats");
+            LlmTraceStatsDTO stats = (LlmTraceStatsDTO) response.getData().get("llmStats");
+            assertThat(stats.getCalls()).isZero();
+            assertThat(stats.getP95Duration()).isNull();
         }
     }
 }

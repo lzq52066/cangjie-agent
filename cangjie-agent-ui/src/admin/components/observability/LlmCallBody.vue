@@ -2,6 +2,10 @@
   <div class="llm-call-body" v-loading="loading">
     <el-alert v-if="record?.errorMessage" type="error" :closable="false" show-icon
               :title="record.errorMessage" style="margin-bottom:8px" />
+    <div v-if="paramList.length" class="param-row">
+      <span>调用参数</span>
+      <el-tag v-for="p in paramList" :key="p.k" size="small" type="info" effect="plain">{{ p.k }}={{ p.v }}</el-tag>
+    </div>
     <div class="io-label">完整 Prompt</div>
     <pre class="code-block">{{ renderPrompt(record?.promptContent) }}</pre>
     <div class="io-label">模型响应</div>
@@ -28,6 +32,20 @@ const props = defineProps<{
 const loading = ref(false)
 const record = computed(() => props.cache[props.traceId])
 
+/** 采样参数：调参与效果对不上号是排障常见卡点，光看 prompt 与 token 看不出是不是 temperature 拉高导致的跑偏 */
+const paramList = computed(() => {
+  const raw = record.value?.modelParams
+  if (!raw) return []
+  try {
+    const params = JSON.parse(raw)
+    return Object.entries(params || {})
+      .filter(([, v]) => v != null)
+      .map(([k, v]) => ({ k, v: String(v) }))
+  } catch {
+    return []
+  }
+})
+
 onMounted(async () => {
   if (record.value) return
   loading.value = true
@@ -43,6 +61,10 @@ onMounted(async () => {
 
 <style lang="scss" scoped>
 .io-label { font-size: 12px; color: #909399; margin: 6px 0 4px; }
+.param-row {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  font-size: 12px; color: #909399; margin-bottom: 8px;
+}
 .code-block {
   background: #f9fafc; border: 1px solid #ebeef5; border-radius: 8px; padding: 10px;
   max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-all;

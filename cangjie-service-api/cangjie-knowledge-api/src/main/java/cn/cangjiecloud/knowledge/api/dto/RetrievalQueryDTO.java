@@ -17,8 +17,11 @@ public class RetrievalQueryDTO {
     /** 返回数量上限 */
     private Integer topK = 5;
 
-    /** 相似度阈值，低于此值的结果将被过滤（0.0 表示不过滤） */
+    /** 相似度阈值，只作用于向量通道，低于此值的向量命中将被过滤（0.0 表示不过滤） */
     private Double similarityThreshold = 0.0;
+
+    /** 检索模式：simple / two_stage；null 表示按知识库配置解析（命中测试可比对两种模式效果） */
+    private String searchMode;
 
     /** 是否启用全文检索 */
     private Boolean enableFullText = true;

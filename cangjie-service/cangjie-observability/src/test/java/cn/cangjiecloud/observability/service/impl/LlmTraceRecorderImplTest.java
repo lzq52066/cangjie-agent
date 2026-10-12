@@ -24,14 +24,17 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 /**
  * {@link LlmTraceRecorderImpl} 单元测试。
  * <p>
  * 覆盖元信息落库、traceId/sessionId/userId 解析优先级、消息序列化、
- * 内容脱敏/截断策略以及写入异常吞掉等核心逻辑，不连接真实数据库。
+ * 内容脱敏/截断策略、写入异常吞掉，以及异步批量写与采样，不连接真实数据库。
  */
 @ExtendWith(MockitoExtension.class)
 class LlmTraceRecorderImplTest {
@@ -47,6 +50,9 @@ class LlmTraceRecorderImplTest {
         ReflectionTestUtils.setField(recorder, "maskEnabled", false);
         ReflectionTestUtils.setField(recorder, "storeContent", true);
         ReflectionTestUtils.setField(recorder, "maxContentLength", 20000);
+        // 默认走同步逐条写：异步与采样单独在 AsyncAndSampling 里验
+        ReflectionTestUtils.setField(recorder, "asyncEnabled", false);
+        ReflectionTestUtils.setField(recorder, "sampleRate", 1.0);
     }
 
     @AfterEach
@@ -277,6 +283,142 @@ class LlmTraceRecorderImplTest {
             LlmTraceEntity trace = captureTrace();
             assertThat(trace.getPromptContent()).isNull();
             assertThat(trace.getResponseContent()).isNull();
+        }
+    }
+
+    /**
+     * 异步批量写与采样。
+     * <p>
+     * 这组的重点是「对话线程不等库」与「采样不能把错误采掉」：
+     * record 时只入队，真正写库发生在 flush 那一下。
+     */
+    @Nested
+    class AsyncAndSampling {
+
+        private LlmTraceRecorderImpl asyncRecorder(int queueCapacity, int batchSize) {
+            LlmTraceRecorderImpl instance = new LlmTraceRecorderImpl(llmTraceService);
+            ReflectionTestUtils.setField(instance, "storeContent", true);
+            ReflectionTestUtils.setField(instance, "maxContentLength", 0);
+            ReflectionTestUtils.setField(instance, "sampleRate", 1.0);
+            ReflectionTestUtils.setField(instance, "asyncEnabled", true);
+            ReflectionTestUtils.setField(instance, "queueCapacity", queueCapacity);
+            ReflectionTestUtils.setField(instance, "batchSize", batchSize);
+            // 不起定时线程：间隔给到极大，本组自己控排空时机
+            ReflectionTestUtils.setField(instance, "flushIntervalMs", Long.MAX_VALUE);
+            instance.init();
+            return instance;
+        }
+
+        private static ILlmTraceRecorder.LlmTraceRecord record(String traceId) {
+            return ILlmTraceRecorder.LlmTraceRecord.builder().traceId(traceId).build();
+        }
+
+        /** 记录时不写库，flush 时才批量写：一次对话 2~5 条调用不该各占一次 DB 往返 */
+        @Test
+        void shouldBufferAndWriteInBatch() {
+            LlmTraceRecorderImpl async = asyncRecorder(100, 10);
+
+            for (int i = 0; i < 5; i++) {
+                async.recordSuccess(record("t" + i));
+            }
+
+            verify(llmTraceService, never()).save(any(LlmTraceEntity.class));
+            verify(llmTraceService, never()).saveBatch(anyList());
+            assertThat(async.queuedSize()).isEqualTo(5);
+
+            async.destroy();
+
+            ArgumentCaptor<List<LlmTraceEntity>> captor = ArgumentCaptor.forClass(List.class);
+            verify(llmTraceService).saveBatch(captor.capture());
+            assertThat(captor.getValue()).hasSize(5);
+            assertThat(captor.getValue()).extracting(LlmTraceEntity::getTraceId)
+                    .containsExactly("t0", "t1", "t2", "t3", "t4");
+        }
+
+        /** 攒多了分批写，不把一整段缓冲拼成一条巨型 SQL */
+        @Test
+        void shouldSplitIntoMultipleBatches() {
+            LlmTraceRecorderImpl async = asyncRecorder(100, 2);
+            for (int i = 0; i < 5; i++) {
+                async.recordSuccess(record("t" + i));
+            }
+
+            async.destroy();
+
+            verify(llmTraceService, times(3)).saveBatch(anyList());
+        }
+
+        /** 队列满了丢新来的并计数：可观测性数据不值得把对话主线程拖住等库 */
+        @Test
+        void shouldDropNewestWhenQueueSaturated() {
+            LlmTraceRecorderImpl async = asyncRecorder(1, 10);
+
+            async.recordSuccess(record("t0"));
+            async.recordSuccess(record("t1"));
+            async.recordSuccess(record("t2"));
+
+            assertThat(async.queuedSize()).isEqualTo(1);
+            assertThat(async.droppedCount()).isEqualTo(2);
+            assertThatCode(() -> async.destroy()).doesNotThrowAnyException();
+        }
+
+        /** 写失败不重投不抖队列：剩下的等下一轮，不把一次库故障刷成日志风暴 */
+        @Test
+        void shouldStopDrainingWhenBatchWriteFails() {
+            LlmTraceRecorderImpl async = asyncRecorder(100, 1);
+            doThrow(new RuntimeException("db down")).when(llmTraceService).saveBatch(anyList());
+            async.recordSuccess(record("t0"));
+            async.recordSuccess(record("t1"));
+
+            async.destroy();
+
+            assertThat(async.writeFailureCount()).isEqualTo(1);
+            assertThat(async.queuedSize()).isEqualTo(1);
+        }
+
+        /** 采样只剔成功调用：失败永远留档，否则可观测性就只剩下「一切正常」 */
+        @Test
+        void shouldSampleSuccessButKeepEveryFailure() {
+            LlmTraceRecorderImpl async = asyncRecorder(100, 10);
+            ReflectionTestUtils.setField(async, "sampleRate", 0.0);
+
+            async.recordSuccess(record("ok-1"));
+            async.recordSuccess(record("ok-2"));
+            async.recordFailure(record("bad-1"), "超时");
+
+            assertThat(async.queuedSize()).isEqualTo(1);
+
+            async.destroy();
+
+            ArgumentCaptor<List<LlmTraceEntity>> captor = ArgumentCaptor.forClass(List.class);
+            verify(llmTraceService).saveBatch(captor.capture());
+            assertThat(captor.getValue()).singleElement()
+                    .satisfies(trace -> {
+                        assertThat(trace.getTraceId()).isEqualTo("bad-1");
+                        assertThat(trace.getStatus()).isEqualTo("fail");
+                    });
+        }
+
+        /** 采样率 1 全留，不因为多一层随机而丢数据 */
+        @Test
+        void shouldKeepEverySuccessWhenRateIsOne() {
+            LlmTraceRecorderImpl async = asyncRecorder(100, 10);
+
+            for (int i = 0; i < 20; i++) {
+                async.recordSuccess(record("t" + i));
+            }
+
+            assertThat(async.queuedSize()).isEqualTo(20);
+            assertThat(async.droppedCount()).isZero();
+        }
+
+        /** 关掉异步开关时逐条同步写，与拆队之前同行为 */
+        @Test
+        void shouldWriteSynchronouslyWhenAsyncDisabled() {
+            recorder.recordSuccess(record("t0"));
+
+            verify(llmTraceService).save(any(LlmTraceEntity.class));
+            verify(llmTraceService, never()).saveBatch(anyList());
         }
     }
 }

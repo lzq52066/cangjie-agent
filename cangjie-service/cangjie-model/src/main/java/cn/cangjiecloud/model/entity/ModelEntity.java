@@ -5,6 +5,8 @@ import cn.cangjiecloud.common.mp.base.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.math.BigDecimal;
+
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName(value = "model_config", autoResultMap = true)
@@ -42,6 +44,12 @@ public class ModelEntity extends BaseEntity {
 
     /** 状态：active / inactive */
     private String status;
+
+    /** 输入单价（元 / 千 token），未填则不估算成本 */
+    private BigDecimal inputPrice;
+
+    /** 输出单价（元 / 千 token），未填则不估算成本 */
+    private BigDecimal outputPrice;
 
     /** 描述 */
     private String description;

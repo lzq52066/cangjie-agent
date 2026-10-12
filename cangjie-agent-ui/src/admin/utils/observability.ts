@@ -173,19 +173,43 @@ export function renderPrompt(raw?: string): string {
   }).join('\n\n')
 }
 
-/** 列表预览用的输入摘要：消息数组按角色压平后截断 */
-export function truncateContent(content: string | null | undefined): string {
-  if (!content) return '-'
-  let text = content
+/**
+ * 成本（元）：单价按千 token 计，单次调用常在分以下，
+ * 统一两位小数会把 0.003 显示成 0.00，看成「这个模型免费」。
+ */
+export function fmtCost(cost?: number | string | null): string {
+  if (cost == null || cost === '') return '-'
+  const n = Number(cost)
+  if (Number.isNaN(n)) return '-'
+  return '¥' + (n >= 1 ? n.toFixed(2) : n.toFixed(4))
+}
+
+/**
+ * 在线评测得分：eval_scores 存的是 {指标名: 0~1} 的扁表。
+ * <p>
+ * 脏 JSON 不按异常处理：列表上一次要渲染几十行，一条历史坏行不该把整列带崩。
+ */
+export function parseEvalScores(raw?: string | null): Record<string, number> {
+  if (!raw) return {}
+  let parsed: any
   try {
-    const arr = JSON.parse(content)
-    if (Array.isArray(arr)) {
-      text = arr.map((m: any) => {
-        const role = m.role || m.type || '?'
-        const c = typeof m.content === 'string' ? m.content : (m.content ? JSON.stringify(m.content) : '')
-        return `[${role}] ${c}`
-      }).join('  ')
-    }
-  } catch { /* 不是 JSON 或不需解析 */ }
-  return text.length > 120 ? text.substring(0, 120) + '...' : text
+    parsed = JSON.parse(raw)
+  } catch {
+    return {}
+  }
+  if (!parsed || typeof parsed !== 'object') return {}
+  const out: Record<string, number> = {}
+  for (const [k, v] of Object.entries(parsed)) {
+    const n = Number(v)
+    // 只收区间内的分数：判定抽风写出的 0.9e9 会直接把均值拖到天花板
+    if (!Number.isNaN(n) && n >= 0 && n <= 1) out[k] = n
+  }
+  return out
+}
+
+/** 一行的均分：列上只能放一个数，指标明细回到悬浮层看 */
+export function avgScore(scores: Record<string, number>): number | null {
+  const values = Object.values(scores || {})
+  if (!values.length) return null
+  return values.reduce((a, b) => a + b, 0) / values.length
 }

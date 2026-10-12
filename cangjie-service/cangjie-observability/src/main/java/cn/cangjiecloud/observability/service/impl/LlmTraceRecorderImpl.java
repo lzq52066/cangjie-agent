@@ -1,26 +1,45 @@
 package cn.cangjiecloud.observability.service.impl;
 
+import cn.cangjiecloud.core.model.ModelPricing;
+import cn.cangjiecloud.core.model.ModelPricingSource;
 import cn.cangjiecloud.observability.context.TraceContext;
 import cn.cangjiecloud.observability.entity.LlmTraceEntity;
 import cn.cangjiecloud.observability.service.ILlmTraceRecorder;
 import cn.cangjiecloud.observability.service.ILlmTraceService;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ChatMessageSerializer;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * LLM 调用追踪记录器实现
  * <p>
  * 提供统一的 trace 写入 API，支持从 TraceContext 自动获取 traceId/sessionId/userId，
  * 并支持可配置的脱敏开关。
+ * <p>
+ * 写入默认走「内存队列 + 定时批量落库」：一次对话会产 2~5 条模型调用，每条都在对话请求线程
+ * 里同步写一行带上万字符正文的记录，高峰时 DB 往返会直接规到响应时延上。
+ * 实体仍在调用线程组装（traceId / userId 靠 ThreadLocal，到异步线程就取不到了），
+ * 只有落库跳到后台线程。
  * </p>
  */
 @Slf4j
@@ -28,7 +47,17 @@ import java.util.List;
 @RequiredArgsConstructor
 public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
 
+    private static final String STATUS_FAIL = "fail";
+
     private final ILlmTraceService llmTraceService;
+
+    /**
+     * 模型单价来源（由模型模块实现）：本模块不依赖模型模块，编译期只认 core 接口。
+     * <p>
+     * 没挂上时成本不估算，而不是当成免费：看板上的总成本静默偏低比缺一个数更难发现。
+     */
+    @Autowired(required = false)
+    private ModelPricingSource pricingSource;
 
     /** 是否开启脱敏（默认 false，全量明文存储） */
     @Value("${cangjie.observability.llm-trace.mask.enabled:false}")
@@ -42,6 +71,69 @@ public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
     @Value("${cangjie.observability.llm-trace.max-content-length:20000}")
     private int maxContentLength;
 
+    /**
+     * 成功调用的采样率（0~1），失败一律留档。
+     * <p>
+     * 不采样时全量写：高流量应用一周就能把 llm_trace 养成几十 GB（prompt/response 是整张表
+     * 最占空间的两列）；而把错误一起采掉的可观测性只剩下「一切正常」，等于没有。
+     */
+    @Value("${cangjie.observability.llm-trace.sample-rate:1.0}")
+    private double sampleRate;
+
+    /** 异步批量落库开关；关掉则退回逐条同步写（单测与排障时好比对） */
+    @Value("${cangjie.observability.llm-trace.async.enabled:true}")
+    private boolean asyncEnabled;
+
+    /** 缓冲队列容量 */
+    @Value("${cangjie.observability.llm-trace.async.queue-capacity:2000}")
+    private int queueCapacity;
+
+    /** 单批落库行数 */
+    @Value("${cangjie.observability.llm-trace.async.batch-size:200}")
+    private int batchSize;
+
+    /** 定时冲刷间隔 */
+    @Value("${cangjie.observability.llm-trace.async.flush-interval-ms:2000}")
+    private long flushIntervalMs;
+
+    /** 容量来自配置，只能在字段注入完成后建队 */
+    private BlockingQueue<LlmTraceEntity> queue;
+
+    private ScheduledExecutorService flusher;
+
+    /** 因队列满被丢弃的条数：不报错只计数，但要能看见丢多少 */
+    private final AtomicLong dropped = new AtomicLong();
+
+    /** 落库失败丢掉多少条（含批量写抛异常整批丢弃） */
+    private final AtomicLong writeFailures = new AtomicLong();
+
+    private volatile long lastReportedDropped;
+
+    @PostConstruct
+    void init() {
+        queue = new LinkedBlockingQueue<>(Math.max(1, queueCapacity));
+        if (!asyncEnabled) {
+            return;
+        }
+        flusher = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "llm-trace-flusher");
+            // 守护线程：可观测性后台任务不该拖住进程退出
+            thread.setDaemon(true);
+            return thread;
+        });
+        long interval = Math.max(200L, flushIntervalMs);
+        flusher.scheduleWithFixedDelay(this::flushQuietly, interval, interval, TimeUnit.MILLISECONDS);
+    }
+
+    @PreDestroy
+    void destroy() {
+        if (flusher != null) {
+            flusher.shutdown();
+        }
+        // 退出前把内存里剩下的 trace 落下去：正在排障的那几条丢不得
+        flushQuietly();
+    }
+
     @Override
     public void recordSuccess(LlmTraceRecord record) {
         save(record, "success", null);
@@ -49,10 +141,13 @@ public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
 
     @Override
     public void recordFailure(LlmTraceRecord record, String errorMessage) {
-        save(record, "fail", errorMessage);
+        save(record, STATUS_FAIL, errorMessage);
     }
 
     private void save(LlmTraceRecord record, String status, String errorMessage) {
+        if (!sampled(status)) {
+            return;
+        }
         try {
             LlmTraceEntity trace = new LlmTraceEntity();
             trace.setTraceId(resolveTraceId(record));
@@ -72,6 +167,8 @@ public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
                 promptContent = serializeMessages(record.getMessages());
             }
             trace.setPromptContent(applyContentPolicy(promptContent));
+            // 调用参数体积小且不含用户内容，不受 storeContent / 脱敏开关影响
+            trace.setModelParams(record.getModelParams());
 
             trace.setInputTokens(record.getInputTokens());
             trace.setOutputTokens(record.getOutputTokens());
@@ -79,15 +176,143 @@ public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
             trace.setResponseContent(applyContentPolicy(record.getResponseContent()));
             trace.setFinishReason(record.getFinishReason());
             trace.setDuration(record.getDuration());
+            trace.setTtft(ttftOf(record));
+            trace.setCost(estimateCost(record));
+            // 新调用一律先标「未评」：在线评测任务靠这一列捞未打标的样本，留 null 会让它反复重扫同一批
+            trace.setEvaluated(Boolean.FALSE);
             trace.setStatus(status);
             trace.setErrorMessage(errorMessage);
             trace.setStartTime(record.getStartTimeMs() != null
                     ? LocalDateTime.ofInstant(Instant.ofEpochMilli(record.getStartTimeMs()), ZoneId.systemDefault())
                     : LocalDateTime.now());
 
-            llmTraceService.save(trace);
+            persist(trace);
         } catch (Exception ex) {
             log.warn("LLM trace 记录失败", ex);
+        }
+    }
+
+    /**
+     * 要不要留这一条。
+     * <p>
+     * 采样率配成 0 / 负数相当于「只留失败」而不是全留：配错一个数不该让表重新长回去。
+     */
+    private boolean sampled(String status) {
+        if (STATUS_FAIL.equals(status) || sampleRate >= 1.0) {
+            return true;
+        }
+        if (sampleRate <= 0.0) {
+            return false;
+        }
+        return ThreadLocalRandom.current().nextDouble() < sampleRate;
+    }
+
+    /**
+     * 实体已组装好，只把落库这一下跳出去。
+     * <p>
+     * 队列满时丢掉刚来的这一条并计数：可观测性数据不值得把对话主线程拖住等库，
+     * 也不能无界堆积把堆吃空。
+     */
+    private void persist(LlmTraceEntity trace) {
+        if (!asyncEnabled || queue == null) {
+            try {
+                llmTraceService.save(trace);
+            } catch (Exception ex) {
+                log.warn("LLM trace 落库失败", ex);
+            }
+            return;
+        }
+        if (!queue.offer(trace)) {
+            dropped.incrementAndGet();
+        }
+    }
+
+    /** 定时线程里把缓冲清完：一批一批写，写不进去就等下一轮，不堆积重试 */
+    private void flushQuietly() {
+        BlockingQueue<LlmTraceEntity> buffer = queue;
+        if (buffer == null) {
+            return;
+        }
+        while (!buffer.isEmpty()) {
+            List<LlmTraceEntity> batch = new ArrayList<>(Math.max(1, batchSize));
+            buffer.drainTo(batch, Math.max(1, batchSize));
+            if (batch.isEmpty()) {
+                break;
+            }
+            try {
+                llmTraceService.saveBatch(batch);
+            } catch (Exception ex) {
+                writeFailures.addAndGet(batch.size());
+                log.warn("llm_trace 批量落库失败，本批 {} 条已丢弃: {}", batch.size(), ex.toString());
+                // 写失败说明库已经不行了，接着挖队列只会把失败放大成刷屏，剩下的等下一轮定时
+                break;
+            }
+        }
+        reportDropped();
+    }
+
+    /** 丢弃只报增量：每轮重报同一个累计值会把日志顶成刷屏 */
+    private void reportDropped() {
+        long total = dropped.get();
+        if (total > lastReportedDropped) {
+            log.warn("llm_trace 缓冲已满，累计丢弃 {} 条（本轮新增 {} 条），"
+                    + "持续出现请调大 async.queue-capacity 或降低 sample-rate",
+                    total, total - lastReportedDropped);
+            lastReportedDropped = total;
+        }
+    }
+
+    /** 当前堆积条数（仅供监控与单测） */
+    int queuedSize() {
+        return queue == null ? 0 : queue.size();
+    }
+
+    /** 队列满丢掉的条数 */
+    long droppedCount() {
+        return dropped.get();
+    }
+
+    /** 批量写失败丢掉的条数 */
+    long writeFailureCount() {
+        return writeFailures.get();
+    }
+
+    /**
+     * 首字延迟：只算流式调用（带了首个 token 时间点）且限在 [0, duration] 内。
+     * <p>
+     * 回调线程时序不保证单调，算出负数或比整段耗时还大的值只会把 P95 带歪，不如不给。
+     */
+    private static Long ttftOf(LlmTraceRecord record) {
+        Long firstTokenMs = record.getFirstTokenMs();
+        Long startMs = record.getStartTimeMs();
+        if (firstTokenMs == null || startMs == null) {
+            return null;
+        }
+        long ttft = firstTokenMs - startMs;
+        if (ttft < 0) {
+            return null;
+        }
+        Long duration = record.getDuration();
+        return duration != null && ttft > duration ? duration : ttft;
+    }
+
+    /**
+     * 按当时单价估算本次调用成本。
+     * <p>
+     * 写在调用时而不是看板查询时 join：单价会变，事后 join 只能拿到今天的价，历史成本会被重算；
+     * 这一行存的是「当时花了多少钱」。
+     */
+    private BigDecimal estimateCost(LlmTraceRecord record) {
+        if (pricingSource == null) {
+            return null;
+        }
+        try {
+            ModelPricing pricing = pricingSource.findPricing(record.getModelId());
+            return pricing == null ? null : pricing.costOf(record.getInputTokens(), record.getOutputTokens());
+        } catch (Exception ex) {
+            // 算不出成本不该把整条 trace 一起丢掉，耗时 / token / 正文仍然有价值
+            log.warn("成本估算失败: modelId={}, {}", record.getModelId(), ex.toString());
+            return null;
         }
     }
 

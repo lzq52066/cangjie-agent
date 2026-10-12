@@ -105,6 +105,9 @@
             <div v-if="m.annotation" class="msg-annotation">
               <span class="annotation-label">人工修正（{{ m.annotateBy || '-' }}）：</span>{{ m.annotation }}
             </div>
+            <div v-if="m.role === 'assistant' || m.role === 'user'" class="msg-actions">
+              <el-button link type="primary" size="small" @click="openImportDialog(m)">加入评测集</el-button>
+            </div>
           </div>
           <el-empty v-if="!messages.length && !msgLoading" description="暂无消息" :image-size="70" />
         </div>
@@ -113,6 +116,25 @@
                    :total="msgTotal" layout="total, prev, pager, next" @change="loadMessages" />
       </template>
     </el-drawer>
+
+    <!-- 单条对话回流：把线上问答（含人工修正与当时的检索来源）存成评测用例 -->
+    <el-dialog v-model="importDialog" title="加入评测集" width="440px" destroy-on-close>
+      <el-form label-width="80px">
+        <el-form-item label="目标数据集">
+          <el-select v-model="importDatasetId" filterable placeholder="选择数据集" style="width:100%">
+            <el-option v-for="ds in datasetOptions" :key="ds.id"
+                       :label="`${ds.name}（${ds.caseCount ?? 0} 用例）`" :value="ds.id" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <div class="import-hint">
+        配不成问答对的那条会被拒；同一条回复重复加入只算一票，当时的检索片段会一并当成参考依据。
+      </div>
+      <template #footer>
+        <el-button @click="importDialog = false">取消</el-button>
+        <el-button type="primary" :loading="importing" @click="submitImport">加入</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -125,10 +147,12 @@
  */
 import { onMounted, reactive, ref } from 'vue'
 import { Delete, Pointer } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import QueryBar from '@admin/components/QueryBar.vue'
 import DataPager from '@admin/components/DataPager.vue'
 import { chatSessionApi } from '@admin/api/chat-session-api'
 import { applicationApi } from '@admin/api/application-api'
+import { evalApi } from '@admin/api/eval-api'
 
 const emit = defineEmits<{ (e: 'view-links', sessionId: string): void }>()
 
@@ -246,6 +270,43 @@ onMounted(async () => {
   }
   loadList()
 })
+
+// ============ 单条对话回流 ============
+const importDialog = ref(false)
+const importing = ref(false)
+const importDatasetId = ref('')
+const importMessageId = ref('')
+const datasetOptions = ref<any[]>([])
+
+/** 点开会话抽屉不顺手拉数据集列表：只有真要回流时才需要这份选项 */
+async function openImportDialog(m: any) {
+  importMessageId.value = m.id
+  importDatasetId.value = ''
+  importDialog.value = true
+  if (!datasetOptions.value.length) {
+    try {
+      const page = await evalApi.listDatasets({ pageNum: 1, pageSize: 100 })
+      datasetOptions.value = page?.list || []
+    } catch {
+      datasetOptions.value = []
+    }
+  }
+}
+
+async function submitImport() {
+  if (!importDatasetId.value) {
+    ElMessage.error('请选择目标数据集')
+    return
+  }
+  importing.value = true
+  try {
+    await evalApi.importCaseFromMessage(importDatasetId.value, importMessageId.value)
+    ElMessage.success('已加入评测集')
+    importDialog.value = false
+  } finally {
+    importing.value = false
+  }
+}
 </script>
 
 <style lang="scss" scoped>
@@ -272,4 +333,6 @@ onMounted(async () => {
   background: #fdf6ec; color: #e6a23c; font-size: 12px; line-height: 1.7;
 }
 .annotation-label { font-weight: 600; }
+.msg-actions { margin-top: 6px; display: flex; justify-content: flex-end; }
+.import-hint { font-size: 12px; color: #909399; line-height: 1.7; }
 </style>

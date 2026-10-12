@@ -33,10 +33,12 @@ public class EvalRunEntity extends BaseEntity {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime endTime;
 
-    /** 汇总指标（JSON：avgRecall / avgCorrectness / avgLatency / totalTokens） */
+    /** 汇总指标（JSON：avgRecall / avgCorrectness / avgLatency / totalTokens，另带两个指标的出分样本数） */
     private String summary;
 
-    /** 逐 case 结果（JSON 数组，每条含 question / answer / retrievalSources / scores / latency） */
+    /**
+     * 逐 case 结果（已拆到 eval_result 明细表，仅历史运行保留这一坨 JSON）
+     */
     private String results;
 
     /** 错误信息 */

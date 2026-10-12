@@ -5,7 +5,10 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.RecordComponent;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -24,8 +27,13 @@ import static org.mockito.Mockito.when;
 /**
  * {@link VectorStore} 单元测试。
  * <p>
- * 接口本身全部为抽象方法（无可执行逻辑），真正需要覆盖的是嵌套 record
- * {@link VectorStore.VectorEntry} 的访问器 / equals / hashCode / toString 语义，
+ * 接口上的抽象方法是实现方必须提供的存储/检索能力，多知识库与文档范围重载则是 default 兼容
+ * 兼底（逐库循环），实现方可覆盖为单条 IN 查询。这里同时候验：
+ * <ul>
+ *   <li>抽象契约与 default 方法形状</li>
+ *   <li>default 兼底的语义（拼接顺序、文档范围过滤、摘要去重）</li>
+ *   <li>嵌套 record {@link VectorStore.VectorEntry} 的访问器 / equals / hashCode / toString</li>
+ * </ul>
  * 并用 Mockito 验证调用契约（含异常传播）。
  */
 class VectorStoreTest {
@@ -144,12 +152,15 @@ class VectorStoreTest {
     class StoreContract {
 
         @Test
-        void interfaceShouldDeclareOnlyAbstractMethods() {
+        void interfaceShouldKeepAbstractContractAndDefaultMultiScopeVariants() {
             assertThat(VectorStore.class.isInterface()).isTrue();
             assertThat(Arrays.stream(VectorStore.class.getDeclaredMethods()).anyMatch(m -> !m.isDefault()))
                     .isTrue();
-            assertThat(Arrays.stream(VectorStore.class.getDeclaredMethods()).anyMatch(Method::isDefault))
-                    .isFalse();
+            // 多库 / 文档范围重载以 default 兑底，不强制所有实现方同时改签名
+            assertThat(Arrays.stream(VectorStore.class.getDeclaredMethods())
+                    .filter(Method::isDefault)
+                    .map(Method::getName))
+                    .containsOnly("search", "fullTextSearch", "searchDocumentSummaries");
         }
 
         @Test
@@ -202,6 +213,122 @@ class VectorStoreTest {
             when(store.fullTextSearch(anyString(), anyString(), anyInt())).thenReturn(List.of());
 
             assertThat(store.fullTextSearch("no-hit", "kb-1", 10)).isEmpty();
+        }
+    }
+
+    @Nested
+    class MultiScopeDefaults {
+
+        /** 只实现抽象方法的极简存储，用于观察 default 重载如何回落到单库方法 */
+        private static final class AbstractOnlyStore implements VectorStore {
+
+            private final Map<String, List<RetrievalResult>> vector = new LinkedHashMap<>();
+            private final Map<String, List<RetrievalResult>> fullText = new LinkedHashMap<>();
+            private final Map<String, List<String>> summaries = new LinkedHashMap<>();
+            private final List<String> calls = new ArrayList<>();
+
+            @Override
+            public void store(String paragraphId, float[] embedding, String content, Map<String, Object> metadata) {
+            }
+
+            @Override
+            public void storeBatch(List<VectorEntry> entries) {
+            }
+
+            @Override
+            public List<RetrievalResult> search(float[] queryEmbedding, String knowledgeBaseId, int topK) {
+                calls.add("vector:" + knowledgeBaseId);
+                return vector.getOrDefault(knowledgeBaseId, List.of());
+            }
+
+            @Override
+            public List<RetrievalResult> fullTextSearch(String query, String knowledgeBaseId, int topK) {
+                calls.add("fulltext:" + knowledgeBaseId);
+                return fullText.getOrDefault(knowledgeBaseId, List.of());
+            }
+
+            @Override
+            public void deleteByKnowledgeBase(String knowledgeBaseId) {
+            }
+
+            @Override
+            public void deleteByDocument(String documentId) {
+            }
+
+            @Override
+            public void storeDocumentSummary(String documentId, float[] embedding, String summary) {
+            }
+
+            @Override
+            public List<String> searchDocumentSummaries(float[] queryEmbedding, String knowledgeBaseId, int topK) {
+                calls.add("summary:" + knowledgeBaseId);
+                return summaries.getOrDefault(knowledgeBaseId, List.of());
+            }
+
+            @Override
+            public List<RetrievalResult> searchByDocumentIds(float[] queryEmbedding, List<String> documentIds, int topK) {
+                return List.of();
+            }
+        }
+
+        private static RetrievalResult hit(String paragraphId, String documentId) {
+            return RetrievalResult.builder().paragraphId(paragraphId).documentId(documentId).build();
+        }
+
+        @Test
+        void vectorDefaultShouldWalkKnowledgeBasesInScopeOrder() {
+            AbstractOnlyStore store = new AbstractOnlyStore();
+            store.vector.put("kb-1", List.of(hit("p1", "doc1")));
+            store.vector.put("kb-2", List.of(hit("p2", "doc2"), hit("p3", "doc3")));
+
+            List<RetrievalResult> merged = store.search(VECTOR, List.of("kb-1", "kb-2"), 5);
+
+            assertThat(merged).extracting(RetrievalResult::getParagraphId).containsExactly("p1", "p2", "p3");
+            assertThat(store.calls).containsExactly("vector:kb-1", "vector:kb-2");
+        }
+
+        @Test
+        void fullTextDefaultShouldRestrictToGivenDocuments() {
+            AbstractOnlyStore store = new AbstractOnlyStore();
+            store.fullText.put("kb-1", List.of(hit("p1", "doc1"), hit("pX", "docX")));
+            store.fullText.put("kb-2", List.of(hit("p2", "doc2")));
+
+            List<RetrievalResult> scoped = store.fullTextSearch("q", List.of("kb-1", "kb-2"),
+                    List.of("doc1", "doc2"), 5);
+
+            // two_stage 的候选文档约束在 default 兼底下依然成立，只是多了一次内存过滤
+            assertThat(scoped).extracting(RetrievalResult::getParagraphId).containsExactly("p1", "p2");
+        }
+
+        @Test
+        void fullTextDefaultShouldNotFilterWhenDocumentScopeAbsent() {
+            AbstractOnlyStore store = new AbstractOnlyStore();
+            store.fullText.put("kb-1", List.of(hit("p1", "doc1"), hit("pX", "docX")));
+
+            assertThat(store.fullTextSearch("q", List.of("kb-1"), null, 5)).hasSize(2);
+            assertThat(store.fullTextSearch("q", List.of("kb-1"), List.of(), 5)).hasSize(2);
+        }
+
+        @Test
+        void summaryDefaultShouldMergeAcrossKnowledgeBasesWithoutDuplicates() {
+            AbstractOnlyStore store = new AbstractOnlyStore();
+            store.summaries.put("kb-1", List.of("doc1", "doc2"));
+            store.summaries.put("kb-2", List.of("doc2", "doc3"));
+
+            List<String> docs = store.searchDocumentSummaries(VECTOR, List.of("kb-1", "kb-2"), 3);
+
+            assertThat(docs).containsExactly("doc1", "doc2", "doc3");
+            assertThat(store.calls).containsExactly("summary:kb-1", "summary:kb-2");
+        }
+
+        @Test
+        void defaultOverloadsShouldAcceptEmptyScope() {
+            AbstractOnlyStore store = new AbstractOnlyStore();
+
+            assertThat(store.search(VECTOR, List.of(), 3)).isEmpty();
+            assertThat(store.fullTextSearch("q", List.of(), (Collection<String>) null, 3)).isEmpty();
+            assertThat(store.searchDocumentSummaries(VECTOR, List.of(), 3)).isEmpty();
+            assertThat(store.calls).isEmpty();
         }
     }
 }
