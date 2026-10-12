@@ -2,10 +2,14 @@ package cn.cangjiecloud.observability.service.impl;
 
 import cn.cangjiecloud.core.model.ModelPricing;
 import cn.cangjiecloud.core.model.ModelPricingSource;
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.observability.context.TraceContext;
 import cn.cangjiecloud.observability.entity.LlmTraceEntity;
 import cn.cangjiecloud.observability.service.ILlmTraceRecorder;
 import cn.cangjiecloud.observability.service.ILlmTraceService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ChatMessageSerializer;
 import jakarta.annotation.PostConstruct;
@@ -48,6 +52,9 @@ import java.util.concurrent.atomic.AtomicLong;
 public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
 
     private static final String STATUS_FAIL = "fail";
+
+    /** 正文被裁过的标记：写进字符串内部，不能贴在 JSON 外面，否则整段解析不了 */
+    private static final String TRUNCATION_MARK = "...[truncated]";
 
     private final ILlmTraceService llmTraceService;
 
@@ -177,14 +184,14 @@ public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
             if (promptContent == null && record.getMessages() != null) {
                 promptContent = serializeMessages(record.getMessages());
             }
-            trace.setPromptContent(applyContentPolicy(promptContent));
+            trace.setPromptContent(applyContentPolicy(promptContent, true));
             // 调用参数体积小且不含用户内容，不受 storeContent / 脱敏开关影响
             trace.setModelParams(record.getModelParams());
 
             trace.setInputTokens(record.getInputTokens());
             trace.setOutputTokens(record.getOutputTokens());
             trace.setTotalTokens(record.getTotalTokens());
-            trace.setResponseContent(applyContentPolicy(record.getResponseContent()));
+            trace.setResponseContent(applyContentPolicy(record.getResponseContent(), false));
             trace.setFinishReason(record.getFinishReason());
             trace.setDuration(record.getDuration());
             trace.setTtft(ttftOf(record));
@@ -405,20 +412,134 @@ public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
 
     /**
      * 根据配置对内容做脱敏/截断处理
+     *
+     * @param messagesShape 正文是不是消息数组（prompt 是）：这类正文按整条消息裁，裁完仍是合法 JSON
      */
-    private String applyContentPolicy(String content) {
+    private String applyContentPolicy(String content, boolean messagesShape) {
         if (content == null) return null;
         if (!storeContent) {
             // 不存完整内容，保留前 200 字符作为摘要
-            return content.length() > 200 ? content.substring(0, 200) + "...[truncated]" : content;
+            return capContent(content, 200, messagesShape);
         }
         if (maskEnabled) {
             content = maskSensitiveContent(content);
         }
-        if (maxContentLength > 0 && content.length() > maxContentLength) {
-            content = content.substring(0, maxContentLength) + "...[truncated]";
+        return maxContentLength > 0 ? capContent(content, maxContentLength, messagesShape) : content;
+    }
+
+    /**
+     * 超长正文裁剪。
+     * <p>
+     * {@code prompt_content} 存的是消息数组的 JSON：从字符串中间一刀切就留下半截数组，
+     * 而在线评测正是从这段 JSON 里还原「用户那一问」—— 解析失败的样本没问题可评，
+     * 还会被标成已评白白消耗掉。所以消息数组按整条丢（从最早的丢起，本轮提问一定留着），
+     * 只剩一条仍超限时才切正文；纯文本正文照旧直接截。
+     */
+    private String capContent(String content, int max, boolean messagesShape) {
+        if (content.length() <= max) {
+            return content;
         }
-        return content;
+        ArrayNode messages = messagesShape ? parseMessageArray(content) : null;
+        if (messages == null) {
+            return content.substring(0, max) + TRUNCATION_MARK;
+        }
+        int dropped = 0;
+        while (messages.size() > 1 && JsonUtils.toJSONString(messages).length() > max) {
+            messages.remove(0);
+            dropped++;
+        }
+        if (dropped > 0) {
+            prefixText(messages.get(0), "[已省略前 " + dropped + " 条消息]\n");
+        }
+        String json = JsonUtils.toJSONString(messages);
+        if (json.length() > max) {
+            // 单条消息本身就超限：结构字符、截断标记都算进成本，剩下的才是正文预算
+            int budget = Math.max(0, max - (json.length() - textLength(messages.get(0))) - TRUNCATION_MARK.length());
+            cutText(messages.get(0), budget);
+            json = JsonUtils.toJSONString(messages);
+        }
+        return json;
+    }
+
+    /** 只有「消息数组」这种形状才按消息裁；别的正文（单条文本、工具结果）照旧 */
+    private ArrayNode parseMessageArray(String content) {
+        if (content.charAt(0) != '[') {
+            return null;
+        }
+        try {
+            ArrayNode parsed = JsonUtils.parseArray(content);
+            // 认「带 type / text / contents 的对象元素」，别的 JSON 数组不能当消息裁，否则会整段丢内容
+            return parsed.isEmpty() || !isMessageShape(parsed.get(0)) ? null : parsed;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean isMessageShape(JsonNode node) {
+        return node != null && node.isObject()
+                && (node.has("text") || node.has("contents") || node.has("type"));
+    }
+
+    /** 一条消息里所有正文的长度之和（langchain4j 把正文放在 text 或 contents[].text 两处） */
+    private static int textLength(JsonNode node) {
+        if (node == null) {
+            return 0;
+        }
+        int total = 0;
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                total += textLength(item);
+            }
+            return total;
+        }
+        JsonNode text = node.get("text");
+        if (text != null && text.isTextual()) {
+            total += text.asText().length();
+        }
+        JsonNode contents = node.get("contents");
+        return total + textLength(contents);
+    }
+
+    /** 按预算从前往后裁正文，裁够就停；被裁过的那段带上截断标记 */
+    private static void cutText(JsonNode node, int budget) {
+        if (node == null || budget < 0) {
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                cutText(item, budget);
+                budget -= textLength(item);
+            }
+            return;
+        }
+        JsonNode text = node.get("text");
+        if (text != null && text.isTextual() && text.asText().length() > budget) {
+            String head = text.asText().substring(0, budget);
+            ((ObjectNode) node).put("text", head + TRUNCATION_MARK);
+            return;
+        }
+        cutText(node.get("contents"), text != null && text.isTextual()
+                ? budget - text.asText().length() : budget);
+    }
+
+    /** 把省略提示写在留下的第一条正文前面：只加一段文本，不新增消息类型，读侧不用改 */
+    private static void prefixText(JsonNode node, String note) {
+        if (node == null) {
+            return;
+        }
+        if (node.isArray()) {
+            prefixText(node.get(0), note);
+            return;
+        }
+        JsonNode text = node.get("text");
+        if (text != null && text.isTextual()) {
+            ((ObjectNode) node).put("text", note + text.asText());
+            return;
+        }
+        JsonNode contents = node.get("contents");
+        if (contents != null && contents.isArray()) {
+            prefixText(contents.get(0), note);
+        }
     }
 
     /**

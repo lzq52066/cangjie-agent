@@ -1,5 +1,6 @@
 package cn.cangjiecloud.observability.service.impl;
 
+import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.observability.context.TraceContext;
 import cn.cangjiecloud.observability.entity.LlmTraceEntity;
 import cn.cangjiecloud.observability.service.ILlmTraceRecorder;
@@ -231,6 +232,42 @@ class LlmTraceRecorderImplTest {
                     .build());
 
             assertThat(captureTrace().getPromptContent()).isEqualTo("0123456789...[truncated]");
+        }
+
+        /**
+         * 消息数组超长按整条丢，丢完仍是一段能解析的 JSON。
+         * <p>
+         * 从字符串中间切一刀会留下半截数组，而在线评测正是从这段 JSON 里还原「用户那一问」：
+         * 解析失败的样本没问题可评，还会被标成已评白白消耗掉。
+         */
+        @Test
+        void shouldCapMessageArrayByWholeMessages() {
+            ReflectionTestUtils.setField(recorder, "maxContentLength", 120);
+            String content = "[{\"type\":\"SYSTEM\",\"text\":\"" + "s".repeat(120) + "\"},"
+                    + "{\"type\":\"USER\",\"text\":\"这一轮的问题\"}]";
+
+            recorder.recordSuccess(ILlmTraceRecorder.LlmTraceRecord.builder()
+                    .promptContent(content)
+                    .build());
+
+            String saved = captureTrace().getPromptContent();
+            assertThat(JsonUtils.parseArray(saved)).hasSize(1);
+            assertThat(saved).contains("这一轮的问题").contains("已省略前 1 条消息");
+        }
+
+        /** 只剩一条仍超限：裁它的正文，截断标记写在字符串内部，数组结构不动 */
+        @Test
+        void shouldCutBodyOfLastMessageWhenSingleMessageStillExceeds() {
+            ReflectionTestUtils.setField(recorder, "maxContentLength", 60);
+            String content = "[{\"type\":\"USER\",\"text\":\"" + "x".repeat(200) + "\"}]";
+
+            recorder.recordSuccess(ILlmTraceRecorder.LlmTraceRecord.builder()
+                    .promptContent(content)
+                    .build());
+
+            String saved = captureTrace().getPromptContent();
+            assertThat(saved).hasSize(60).endsWith("...[truncated]\"}]");
+            assertThat(JsonUtils.parseArray(saved).get(0).get("text").asText()).startsWith("xxxx");
         }
 
         @Test

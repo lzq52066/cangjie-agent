@@ -27,6 +27,14 @@ public class ApprovalRequest {
 
     private String applicationId;
 
+    /**
+     * 发起这次调用的用户。
+     * <p>
+     * 审批单面板按申请人筛选，这一列不落库就等于「谁能批、批了什么」查不到人。
+     * 决策人另记在 {@code decidedBy}，两者可以是不同的人。
+     */
+    private String userId;
+
     /** 待执行的工具函数名 */
     private String toolName;
 

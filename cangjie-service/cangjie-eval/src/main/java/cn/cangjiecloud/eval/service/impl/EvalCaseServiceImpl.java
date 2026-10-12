@@ -9,6 +9,7 @@ import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.core.conversation.ConversationFilter;
 import cn.cangjiecloud.core.conversation.ConversationSample;
 import cn.cangjiecloud.core.conversation.ConversationSource;
+import cn.cangjiecloud.core.conversation.ConversationTurn;
 import cn.cangjiecloud.eval.dto.EvalCaseImportDTO;
 import cn.cangjiecloud.eval.dto.EvalImportResultDTO;
 import cn.cangjiecloud.eval.entity.EvalCaseEntity;
@@ -25,7 +26,9 @@ import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @Slf4j
@@ -39,6 +42,14 @@ public class EvalCaseServiceImpl extends ServiceImpl<EvalCaseMapper, EvalCaseEnt
 
     /** 默认标签：回流用例要能单独切片看，也能与手工用例区分开 */
     private static final String TAG_FROM_CHAT = "from-chat";
+
+    /**
+     * 一次最多回流多少条勾选。
+     * <p>
+     * 与对话侧 {@code MAX_LIMIT} 同量级：前端一次拉不完整个会话，选中再多也是分批，
+     * 上限只是把「把整张表勾上」这种误操作挡住。
+     */
+    private static final int MAX_SELECTED_MESSAGES = 200;
 
     private final IEvalDatasetService datasetService;
 
@@ -133,18 +144,22 @@ public class EvalCaseServiceImpl extends ServiceImpl<EvalCaseMapper, EvalCaseEnt
         requireConversationSource();
 
         EvalCaseImportDTO condition = request == null ? new EvalCaseImportDTO() : request;
-        List<ConversationSample> samples = conversationSource.searchSamples(new ConversationFilter(
+        List<String> messageIds = selectedMessageIds(condition);
+        List<ConversationSample> samples = messageIds.isEmpty()
+                ? conversationSource.searchSamples(new ConversationFilter(
                 trimToNull(condition.getApplicationId()), trimToNull(condition.getFeedback()),
-                condition.getAnnotatedOnly(), condition.getLimit()));
+                condition.getAnnotatedOnly(), condition.getLimit()))
+                // 后台勾选的是「就这几条」，按 ID 精确取，不再走筛选
+                : messageIds.stream().map(conversationSource::loadSample).toList();
 
         Set<String> seen = existingSourceMessageIds(datasetId);
         List<EvalCaseEntity> pending = new ArrayList<>();
         int duplicated = 0;
         int unusable = 0;
         for (ConversationSample sample : samples) {
-            if (!sample.usable()) {
-                // 开场白、纯客套这类回复配不到用户问题，不入库但要点名条数：
-                // 不然「扫了 50 条只进来 3 条」看起来像代码漏写了
+            if (sample == null || !sample.usable()) {
+                // 开场白、纯客套这类回复配不到用户问题，消息被删掉也走这一支：
+                // 不入库但要点名条数，不然「扫了 50 条只进来 3 条」看起来像代码漏写了
                 unusable++;
                 continue;
             }
@@ -184,6 +199,7 @@ public class EvalCaseServiceImpl extends ServiceImpl<EvalCaseMapper, EvalCaseEnt
         entity.setDatasetId(datasetId);
         entity.setQuestion(sample.question().trim());
         entity.setExpectedAnswer(sample.expectedAnswer());
+        entity.setConversation(toConversationJson(sample.history()));
         entity.setReferenceDocs(toIdJson(sample.referenceDocs()));
         entity.setReferenceChunks(toIdJson(sample.referenceChunks()));
         // 标签带上反馈：点踩的那批修没修好，是这套闭环唯一的验收口径，得能单独切片看
@@ -197,6 +213,37 @@ public class EvalCaseServiceImpl extends ServiceImpl<EvalCaseMapper, EvalCaseEnt
     /** 空列表写 null：一个 "[]" 与「没有标注」在报告里应该是同一个样子 */
     private static String toIdJson(List<String> ids) {
         return ids == null || ids.isEmpty() ? null : JsonUtils.toJSONString(ids);
+    }
+
+    /** 勾选的消息 ID：去空、去重、夹到上限，空列表表示「这次按筛选条件批量回流」 */
+    private static List<String> selectedMessageIds(EvalCaseImportDTO condition) {
+        List<String> ids = condition.getMessageIds();
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return ids.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .limit(MAX_SELECTED_MESSAGES)
+                .toList();
+    }
+
+    /** 单轮问答没有上文，这一列留 null：报告里「不带历史」与「历史为空」是同一件事 */
+    private static String toConversationJson(List<ConversationTurn> history) {
+        if (history == null || history.isEmpty()) {
+            return null;
+        }
+        List<Map<String, String>> turns = history.stream()
+                .map(turn -> {
+                    // 固定 role 在前、content 在后：LinkedHashMap 保序，落库的 JSON 与前端读到的顺序一致
+                    Map<String, String> turn0 = new LinkedHashMap<>(2);
+                    turn0.put("role", StringUtils.hasText(turn.role()) ? turn.role() : "user");
+                    turn0.put("content", turn.content());
+                    return turn0;
+                })
+                .toList();
+        return JsonUtils.toJSONString(turns);
     }
 
     private EvalCaseEntity findBySourceMessage(String datasetId, String messageId) {

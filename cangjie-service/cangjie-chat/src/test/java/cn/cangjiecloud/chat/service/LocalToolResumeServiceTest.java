@@ -6,17 +6,23 @@ import cn.cangjiecloud.application.entity.ApplicationEntity;
 import cn.cangjiecloud.application.service.IApplicationService;
 import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.core.harness.AgentHarness;
+import cn.cangjiecloud.core.harness.ApprovalRequest;
 import cn.cangjiecloud.core.harness.HarnessOutcome;
 import cn.cangjiecloud.core.harness.LocalToolCall;
 import cn.cangjiecloud.core.harness.RunStatus;
 import cn.cangjiecloud.observability.entity.AgentRunEntity;
+import cn.cangjiecloud.observability.entity.AgentRunStepEntity;
+import cn.cangjiecloud.observability.service.IAgentApprovalService;
 import cn.cangjiecloud.observability.service.IAgentRunService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -30,7 +36,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * {@link LocalToolResumeService} 单元测试：覆盖等待 run 的状态/令牌/会话校验，
- * 结果回传后的完成、再次挂起、审批挂起与失败分支及收尾落库。
+ * 结果回传后的完成、再次挂起、审批挂起与失败分支及收尾落库，
+ * 以及浏览器二次确认的审批单留痕。
  */
 @ExtendWith(MockitoExtension.class)
 class LocalToolResumeServiceTest {
@@ -38,6 +45,9 @@ class LocalToolResumeServiceTest {
     /** run 服务桩 */
     @Mock
     private IAgentRunService agentRunService;
+    /** 审批单存储桩 */
+    @Mock
+    private IAgentApprovalService approvalStore;
     /** Agent 引擎桩 */
     @Mock
     private AgentHarness agentHarness;
@@ -59,8 +69,8 @@ class LocalToolResumeServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new LocalToolResumeService(agentRunService, agentHarness, applicationService,
-                chatSessionService, chatMessageService, sessionSummaryService);
+        service = new LocalToolResumeService(agentRunService, approvalStore, agentHarness,
+                applicationService, chatSessionService, chatMessageService, sessionSummaryService);
     }
 
     /**
@@ -246,6 +256,97 @@ class LocalToolResumeServiceTest {
             assertThatThrownBy(() -> service.complete(body(false)))
                     .isInstanceOf(ApiException.class)
                     .hasMessageContaining("恢复运行失败");
+        }
+    }
+
+    @Nested
+    class DecisionAudit {
+
+        private AgentRunStepEntity step(String id, String type, String name, String input, String status) {
+            AgentRunStepEntity step = new AgentRunStepEntity();
+            step.setId(id);
+            step.setType(type);
+            step.setName(name);
+            step.setInput(input);
+            step.setStatus(status);
+            return step;
+        }
+
+        /** 允许：留痕单取挂起时已落的 waiting_local 步骤，不采信客户端回传的工具名与入参 */
+        @Test
+        void shouldRecordApprovedDecisionFromWaitingLocalStep() {
+            LocalToolResultDTO body = body(false);
+            body.setConfirmed(true);
+            body.setRiskLevel("high");
+            body.setActionSummary("删除文件 c.txt");
+            body.setToolName("local_write_file");
+            AgentRunEntity run = waitingRun(RunStatus.WAITING_LOCAL.value());
+            run.setUserId("u-1");
+            when(agentRunService.getById("run-1")).thenReturn(run);
+            when(agentRunService.listSteps("run-1")).thenReturn(List.of(
+                    step("step-8", "tool", "local_read_file", "{}", "success"),
+                    step("step-9", "tool", "local_delete_file", "{\"path\":\"c.txt\"}", "waiting_local")));
+            when(agentHarness.completeLocalTool(anyString(), anyString(), anyString(),
+                    anyBoolean(), anyString(), any())).thenReturn(HarnessOutcome.builder()
+                    .status(RunStatus.COMPLETED).runId("run-1").finalText("已删除").build());
+
+            service.complete(body);
+
+            ArgumentCaptor<ApprovalRequest> request = ArgumentCaptor.forClass(ApprovalRequest.class);
+            ArgumentCaptor<Boolean> approved = ArgumentCaptor.forClass(Boolean.class);
+            verify(approvalStore).recordDecided(request.capture(), approved.capture(),
+                    eq("u-1"), eq("删除文件 c.txt"));
+            assertThat(approved.getValue()).isTrue();
+            ApprovalRequest recorded = request.getValue();
+            assertThat(recorded.getRunId()).isEqualTo("run-1");
+            assertThat(recorded.getStepId()).isEqualTo("step-9");
+            assertThat(recorded.getSessionId()).isEqualTo("s1");
+            assertThat(recorded.getApplicationId()).isEqualTo("app-1");
+            assertThat(recorded.getUserId()).isEqualTo("u-1");
+            assertThat(recorded.getToolName()).isEqualTo("local_delete_file");
+            assertThat(recorded.getToolType()).isEqualTo("LOCAL");
+            assertThat(recorded.getArguments()).isEqualTo("{\"path\":\"c.txt\"}");
+            assertThat(recorded.getRiskLevel()).isEqualTo("high");
+            assertThat(recorded.getReason()).contains("浏览器侧本地工具二次确认").contains("风险等级：high");
+        }
+
+        /** 拒绝同样要留痕：没有登录态时决策人记成可辨识的占位标识，备注退回拒绝原因 */
+        @Test
+        void shouldRecordRejectedDecisionWithClientFallback() {
+            LocalToolResultDTO body = body(true);
+            body.setConfirmed(false);
+            body.setErrorMessage("用户拒绝了「删除文件 c.txt」操作");
+            body.setToolName("local_delete_file");
+            when(agentRunService.getById("run-1"))
+                    .thenReturn(waitingRun(RunStatus.WAITING_LOCAL.value()));
+            when(agentRunService.listSteps("run-1")).thenReturn(List.of());
+            when(agentHarness.completeLocalTool(anyString(), anyString(), anyString(),
+                    anyBoolean(), anyString(), any())).thenReturn(HarnessOutcome.builder()
+                    .status(RunStatus.FAILED).errorMessage("模型调用失败").build());
+
+            service.complete(body);
+
+            ArgumentCaptor<ApprovalRequest> request = ArgumentCaptor.forClass(ApprovalRequest.class);
+            verify(approvalStore).recordDecided(request.capture(), eq(false),
+                    eq("浏览器用户"), eq("用户拒绝了「删除文件 c.txt」操作"));
+            assertThat(request.getValue().getToolName()).isEqualTo("local_delete_file");
+            assertThat(request.getValue().getRiskLevel()).isEqualTo("medium");
+            assertThat(request.getValue().getArguments()).isNull();
+        }
+
+        /** 只读工具自动执行、没有人参与：不留痕，也不额外查步骤 */
+        @Test
+        void shouldNotRecordWhenNoHumanDecision() {
+            when(agentRunService.getById("run-1"))
+                    .thenReturn(waitingRun(RunStatus.WAITING_LOCAL.value()));
+            when(agentHarness.completeLocalTool(anyString(), anyString(), anyString(),
+                    anyBoolean(), anyString(), any())).thenReturn(HarnessOutcome.builder()
+                    .status(RunStatus.COMPLETED).runId("run-1").finalText("目录内容").build());
+
+            service.complete(body(false));
+
+            verify(approvalStore, never()).recordDecided(any(), anyBoolean(), any(), any());
+            verify(agentRunService, never()).listSteps(anyString());
         }
     }
 }

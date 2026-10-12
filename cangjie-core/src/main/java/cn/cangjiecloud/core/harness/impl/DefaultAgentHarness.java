@@ -295,6 +295,7 @@ public class DefaultAgentHarness implements AgentHarness {
                 .runId(ctx.getRunId())
                 .sessionId(ctx.getSessionId())
                 .applicationId(ctx.getApplicationId())
+                .userId(ctx.getRequest() == null ? null : ctx.getRequest().getUserId())
                 .toolName(invocation.getCallName())
                 .toolType(invocation.getToolType())
                 .arguments(invocation.getArgumentsJson())
@@ -315,6 +316,9 @@ public class DefaultAgentHarness implements AgentHarness {
     /**
      * 本地工具挂起：写检查点，把待执行调用与一次性令牌交给调用方环境（如浏览器）执行，
      * 不创建审批单、不占用线程。结果由 {@link #completeLocalTool} 回传后续跑。
+     * <p>
+     * 这里不建 pending 单是因为闸门在调用方环境：服务端既不知道该不该拦，也没人可点「同意」。
+     * 用户点过的允许/拒绝由回传侧（{@code LocalToolResumeService}）补记成终态留痕单。
      */
     private HarnessOutcome suspendLocal(HarnessContext ctx, ToolInvocation invocation,
                                         HarnessListener listener) {

@@ -7,12 +7,17 @@ import cn.cangjiecloud.application.service.IApplicationService;
 import cn.cangjiecloud.chat.entity.ChatMessageEntity;
 import cn.cangjiecloud.chat.entity.ChatSessionEntity;
 import cn.cangjiecloud.core.harness.AgentHarness;
+import cn.cangjiecloud.core.harness.ApprovalRequest;
 import cn.cangjiecloud.core.harness.HarnessListener;
 import cn.cangjiecloud.core.harness.HarnessOutcome;
 import cn.cangjiecloud.core.harness.LocalToolCall;
 import cn.cangjiecloud.core.harness.RunStatus;
+import cn.cangjiecloud.core.harness.ToolStatus;
 import cn.cangjiecloud.observability.entity.AgentRunEntity;
+import cn.cangjiecloud.observability.entity.AgentRunStepEntity;
+import cn.cangjiecloud.observability.service.IAgentApprovalService;
 import cn.cangjiecloud.observability.service.IAgentRunService;
+import cn.cangjiecloud.tool.consts.ToolConstants;
 import cn.cangjiecloud.common.exception.ApiException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,16 +27,21 @@ import org.springframework.util.StringUtils;
 /**
  * 浏览器侧本地工具结果回传与断点续跑。
  * <p>
- * 与 {@link ApprovalResumeService} 同构，区别在于挂起不建审批单、无需人工决策：
- * 校验 run 归属与一次性令牌 → {@link AgentHarness#completeLocalTool} 把浏览器执行结果
- * 塞进检查点上下文并继续跑完剩下的工具与轮次。
+ * 与 {@link ApprovalResumeService} 同构，区别在于闸门在调用方环境：本地工具不进服务端钩子链，
+ * 挂起时不建 pending 审批单、无需人工点「同意」，run 等的是浏览器把结果回传（见
+ * {@code ToolGatewayImpl#dispatch} 的 LOCAL 短路）。但变更类工具的二次确认同样是人工决策，
+ * 由 {@link #recordUserDecision} 在续跑前补记成终态审批单，否则「谁允许删了这个文件」在库里查不到。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class LocalToolResumeService {
 
+    /** 匿名网页路径没有登录态，决策人只能记成可辨识的占位标识 */
+    private static final String ANONYMOUS_DECIDED_BY = "浏览器用户";
+
     private final IAgentRunService agentRunService;
+    private final IAgentApprovalService approvalStore;
     private final AgentHarness agentHarness;
     private final IApplicationService applicationService;
     private final IChatSessionService chatSessionService;
@@ -66,6 +76,8 @@ public class LocalToolResumeService {
      * 回传本地执行结果并恢复运行，返回恢复后的产出
      */
     public LocalToolResumeDTO complete(LocalToolResultDTO body) {
+        // 决策先落账再续跑：恢复失败时用户确实点过允许/拒绝，这条审计不能跟着一起丢
+        recordUserDecision(body);
         String resultJson = body.isFailed() ? body.getErrorMessage() : body.getResult();
         HarnessOutcome outcome;
         try {
@@ -84,6 +96,58 @@ public class LocalToolResumeService {
     private String lookupSessionId(String runId) {
         AgentRunEntity run = agentRunService.getById(runId);
         return run == null ? null : run.getSessionId();
+    }
+
+    /**
+     * 把浏览器二次确认的允许/拒绝补记成一张终态审批单。
+     * <p>
+     * 只读工具（列目录/读取）自动执行、没有人参与，{@code confirmed} 为空时不留痕，
+     * 否则审批单会被无意义的自动执行灌满。工具名与入参取挂起时已落的步骤记录，
+     * 不采信客户端回传的字符串——留痕要能回答「到底执行了什么」。
+     */
+    private void recordUserDecision(LocalToolResultDTO body) {
+        if (body.getConfirmed() == null) {
+            return;
+        }
+        AgentRunEntity run = agentRunService.getById(body.getRunId());
+        AgentRunStepEntity call = lastWaitingLocalStep(body.getRunId());
+        String userId = run == null ? null : run.getUserId();
+        String riskLevel = StringUtils.hasText(body.getRiskLevel()) ? body.getRiskLevel() : "medium";
+        approvalStore.recordDecided(ApprovalRequest.builder()
+                .runId(body.getRunId())
+                .stepId(call == null ? null : call.getId())
+                .sessionId(run == null ? body.getSessionId() : run.getSessionId())
+                .applicationId(run == null ? null : run.getAppId())
+                .userId(userId)
+                .toolName(call == null ? body.getToolName() : call.getName())
+                .toolType(ToolConstants.ToolType.LOCAL)
+                .arguments(call == null ? null : call.getInput())
+                .reason("浏览器侧本地工具二次确认（风险等级：" + riskLevel + "）")
+                .riskLevel(riskLevel)
+                .build(),
+                Boolean.TRUE.equals(body.getConfirmed()),
+                StringUtils.hasText(userId) ? userId : ANONYMOUS_DECIDED_BY,
+                decisionRemark(body));
+    }
+
+    /** 确认卡片写了什么就记什么；没有卡片文案时退回拒绝原因 */
+    private String decisionRemark(LocalToolResultDTO body) {
+        if (StringUtils.hasText(body.getActionSummary())) {
+            return body.getActionSummary();
+        }
+        return StringUtils.hasText(body.getErrorMessage()) ? body.getErrorMessage() : null;
+    }
+
+    /** 本地工具挂起前网关已落 waiting_local 步骤，同一次 run 里取最后一条即当前待回传调用 */
+    private AgentRunStepEntity lastWaitingLocalStep(String runId) {
+        AgentRunStepEntity matched = null;
+        for (AgentRunStepEntity step : agentRunService.listSteps(runId)) {
+            if ("tool".equals(step.getType())
+                    && ToolStatus.WAITING_LOCAL.value().equals(step.getStatus())) {
+                matched = step;
+            }
+        }
+        return matched;
     }
 
     private LocalToolResumeDTO toResult(HarnessOutcome outcome, String sessionId) {

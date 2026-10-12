@@ -87,6 +87,7 @@ class AgentApprovalServiceImplTest {
                     .stepId("step-1")
                     .sessionId("session-1")
                     .applicationId("app-1")
+                    .userId("u-1")
                     .toolName("deleteFile")
                     .toolType("builtin")
                     .arguments("{\"path\":\"/tmp\"}")
@@ -109,6 +110,8 @@ class AgentApprovalServiceImplTest {
             assertThat(saved.getStepId()).isEqualTo("step-1");
             assertThat(saved.getSessionId()).isEqualTo("session-1");
             assertThat(saved.getAppId()).isEqualTo("app-1");
+            // 申请人不落库，面板按用户筛选就永远查不到东西
+            assertThat(saved.getUserId()).isEqualTo("u-1");
             assertThat(saved.getToolName()).isEqualTo("deleteFile");
             assertThat(saved.getToolType()).isEqualTo("builtin");
             assertThat(saved.getArguments()).isEqualTo("{\"path\":\"/tmp\"}");
@@ -410,6 +413,88 @@ class AgentApprovalServiceImplTest {
             assertThat(pageCaptor.getValue().getSize()).isEqualTo(10);
             assertThat(((LambdaQueryWrapper<AgentApprovalEntity>) wrapperCaptor.getValue()).getTargetSql())
                     .doesNotContain("status", "app_id", "user_id");
+        }
+    }
+
+    // ==================== recordDecided ====================
+
+    @Nested
+    class RecordDecided {
+
+        private ApprovalRequest localToolRequest(String stepId) {
+            return ApprovalRequest.builder()
+                    .runId("run-1")
+                    .stepId(stepId)
+                    .sessionId("session-1")
+                    .applicationId("app-1")
+                    .userId("u-1")
+                    .toolName("local_delete_file")
+                    .toolType("LOCAL")
+                    .arguments("{\"path\":\"c.txt\"}")
+                    .reason("浏览器侧本地工具二次确认（风险等级：high）")
+                    .riskLevel("high")
+                    .build();
+        }
+
+        /** 浏览器侧确认直接落终态单：不占恢复令牌，也不能被超时扫描捞去终止 run */
+        @Test
+        void shouldPersistTerminalDecisionWithoutPendingFields() {
+            doReturn(0L).when(service).count(any(Wrapper.class));
+
+            service.recordDecided(localToolRequest("step-9"), true, "u-1", "删除文件 c.txt");
+
+            ArgumentCaptor<AgentApprovalEntity> captor = ArgumentCaptor.forClass(AgentApprovalEntity.class);
+            verify(service).save(captor.capture());
+            AgentApprovalEntity saved = captor.getValue();
+            assertThat(saved.getStatus()).isEqualTo("approved");
+            assertThat(saved.getStepId()).isEqualTo("step-9");
+            assertThat(saved.getUserId()).isEqualTo("u-1");
+            assertThat(saved.getToolType()).isEqualTo("LOCAL");
+            assertThat(saved.getDecidedBy()).isEqualTo("u-1");
+            assertThat(saved.getDecideRemark()).isEqualTo("删除文件 c.txt");
+            assertThat(saved.getDecideTime()).isNotNull();
+            assertThat(saved.getResumeToken()).isNull();
+            assertThat(saved.getExpireTime()).isNull();
+        }
+
+        /** 同一步骤只留一张单：回传失败后用户重点一次确认，不该把一次决策记成两次 */
+        @Test
+        void shouldSkipWhenSameStepAlreadyRecorded() {
+            doReturn(1L).when(service).count(any(Wrapper.class));
+
+            service.recordDecided(localToolRequest("step-9"), false, "u-1", null);
+
+            verify(service, never()).save(any(AgentApprovalEntity.class));
+        }
+
+        /** 定位不到步骤时照样留痕，只是失去幂等保护 */
+        @Test
+        void shouldRecordRejectedDecisionWhenStepUnknown() {
+            service.recordDecided(localToolRequest(null), false, "浏览器用户", "用户拒绝了删除操作");
+
+            verify(service, never()).count(any(Wrapper.class));
+            ArgumentCaptor<AgentApprovalEntity> captor = ArgumentCaptor.forClass(AgentApprovalEntity.class);
+            verify(service).save(captor.capture());
+            assertThat(captor.getValue().getStatus()).isEqualTo("rejected");
+            assertThat(captor.getValue().getDecidedBy()).isEqualTo("浏览器用户");
+        }
+
+        /** 留痕写不进库不能把续跑带崩：审批单缺一条比整轮对话失败损失小 */
+        @Test
+        void shouldSwallowPersistenceFailure() {
+            doThrow(new RuntimeException("db down")).when(service).save(any(AgentApprovalEntity.class));
+
+            service.recordDecided(localToolRequest(null), true, "u-1", null);
+        }
+
+        /** 备注是客户端传来的卡片标题，超长路径必须截断到列宽，否则整条留痕静默丢失 */
+        @Test
+        void shouldCapOverlongRemarkToColumnWidth() {
+            service.recordDecided(localToolRequest(null), true, "u-1", "删".repeat(600));
+
+            ArgumentCaptor<AgentApprovalEntity> captor = ArgumentCaptor.forClass(AgentApprovalEntity.class);
+            verify(service).save(captor.capture());
+            assertThat(captor.getValue().getDecideRemark()).hasSize(500);
         }
     }
 }

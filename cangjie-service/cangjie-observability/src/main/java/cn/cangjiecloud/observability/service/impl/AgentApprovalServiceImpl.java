@@ -36,6 +36,9 @@ public class AgentApprovalServiceImpl extends ServiceImpl<AgentApprovalMapper, A
     private static final String STATUS_REJECTED = "rejected";
     private static final String STATUS_EXPIRED = "expired";
 
+    /** decide_remark 列宽；确认卡片标题带的是用户给的完整路径，超长会写不进库 */
+    private static final int REMARK_MAX_CHARS = 500;
+
     /** 审批默认有效期（秒），仅当引擎未写入过期时间时兜底，与 cangjie.harness.approval-timeout-seconds 同键 */
     @Value("${cangjie.harness.approval-timeout-seconds:1800}")
     private int defaultTimeoutSeconds;
@@ -55,6 +58,7 @@ public class AgentApprovalServiceImpl extends ServiceImpl<AgentApprovalMapper, A
             entity.setStepId(request.getStepId());
             entity.setSessionId(request.getSessionId());
             entity.setAppId(request.getApplicationId());
+            entity.setUserId(request.getUserId());
             entity.setToolName(request.getToolName());
             entity.setToolType(request.getToolType());
             entity.setArguments(request.getArguments());
@@ -90,6 +94,37 @@ public class AgentApprovalServiceImpl extends ServiceImpl<AgentApprovalMapper, A
                 .set(AgentApprovalEntity::getDecidedBy, decidedBy)
                 .set(AgentApprovalEntity::getDecideRemark, remark)
                 .set(AgentApprovalEntity::getDecideTime, LocalDateTime.now()));
+    }
+
+    @Override
+    public void recordDecided(ApprovalRequest request, boolean approved, String decidedBy, String remark) {
+        try {
+            // 同一步骤只留一张单：回传失败后用户重试确认，不应把一次决策记成多次
+            if (StringUtils.hasText(request.getStepId()) && count(new LambdaQueryWrapper<AgentApprovalEntity>()
+                    .eq(AgentApprovalEntity::getRunId, request.getRunId())
+                    .eq(AgentApprovalEntity::getStepId, request.getStepId())) > 0) {
+                return;
+            }
+            AgentApprovalEntity entity = new AgentApprovalEntity();
+            entity.setRunId(request.getRunId());
+            entity.setStepId(request.getStepId());
+            entity.setSessionId(request.getSessionId());
+            entity.setAppId(request.getApplicationId());
+            entity.setUserId(request.getUserId());
+            entity.setToolName(request.getToolName());
+            entity.setToolType(request.getToolType());
+            entity.setArguments(request.getArguments());
+            entity.setReason(request.getReason());
+            entity.setRiskLevel(request.getRiskLevel());
+            entity.setStatus(approved ? STATUS_APPROVED : STATUS_REJECTED);
+            entity.setDecidedBy(decidedBy);
+            entity.setDecideRemark(cut(remark));
+            entity.setDecideTime(LocalDateTime.now());
+            save(entity);
+        } catch (Exception ex) {
+            log.warn("本地工具确认留痕写入失败: runId={}, tool={}, {}",
+                    request.getRunId(), request.getToolName(), ex.getMessage());
+        }
     }
 
     @Override
@@ -199,5 +234,11 @@ public class AgentApprovalServiceImpl extends ServiceImpl<AgentApprovalMapper, A
             return null;
         }
         return LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMilli), ZoneId.systemDefault());
+    }
+
+    /** 备注按列宽截断：整条留痕写不进库，比少几个字更亏 */
+    private String cut(String remark) {
+        return remark == null || remark.length() <= REMARK_MAX_CHARS
+                ? remark : remark.substring(0, REMARK_MAX_CHARS);
     }
 }

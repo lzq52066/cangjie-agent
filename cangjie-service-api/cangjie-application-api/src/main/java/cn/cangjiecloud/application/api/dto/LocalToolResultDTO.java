@@ -35,4 +35,21 @@ public class LocalToolResultDTO {
 
     /** 失败时的错误信息（回填给模型，可空） */
     private String errorMessage;
+
+    /**
+     * 用户在浏览器二次确认卡片上的决策：true 允许 / false 拒绝 / null 无需确认（只读工具自动执行）。
+     * <p>
+     * 与 {@code failed} 不是一回事：允许之后执行照样可能抛错（文件被占用等），那时是
+     * {@code confirmed=true, failed=true}。留痕以本字段为准。
+     */
+    private Boolean confirmed;
+
+    /** 确认卡片判定的风险等级（low / high），服务端只透传展示，不作为放行依据 */
+    private String riskLevel;
+
+    /** 确认卡片标题（如「删除文件 c.txt」），落审批单备注 */
+    private String actionSummary;
+
+    /** 待执行的本地工具名；服务端优先取挂起时已落的步骤记录，这里仅作兜底展示 */
+    private String toolName;
 }

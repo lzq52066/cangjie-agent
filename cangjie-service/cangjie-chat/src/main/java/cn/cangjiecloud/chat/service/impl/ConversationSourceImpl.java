@@ -6,6 +6,7 @@ import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.core.conversation.ConversationFilter;
 import cn.cangjiecloud.core.conversation.ConversationSample;
 import cn.cangjiecloud.core.conversation.ConversationSource;
+import cn.cangjiecloud.core.conversation.ConversationTurn;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,9 +14,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 对话样本来源实现：把 {@code chat_message} 拆成问答对交给评测侧回流。
@@ -33,6 +36,14 @@ public class ConversationSourceImpl implements ConversationSource {
 
     /** 默认取多少条候选 */
     private static final int DEFAULT_LIMIT = 50;
+
+    /**
+     * 一条用例最多带多少句历史。
+     * <p>
+     * 「那第二个呢」这类追问只有配上文才评得出东西；但把整场会话灌进每条用例，
+     * 一次离线跑要把几十轮重复塞进模型，token 全花在同一批历史上。
+     */
+    private static final int MAX_HISTORY_MESSAGES = 12;
 
     /**
      * 单次回流的硬上限。
@@ -54,12 +65,13 @@ public class ConversationSourceImpl implements ConversationSource {
             return null;
         }
         if (ROLE_ASSISTANT.equals(message.getRole())) {
-            return toSample(message, precedingQuestion(message));
+            ChatMessageEntity question = precedingQuestion(message);
+            return toSample(message, question, historyMessages(message, question));
         }
         if (ROLE_USER.equals(message.getRole())) {
             // 前端在用户气泡上点「加入评测集」也要能用：向后找这一轮的回答
             ChatMessageEntity answer = followingAnswer(message);
-            return answer == null ? null : toSample(answer, message);
+            return answer == null ? null : toSample(answer, message, historyMessages(answer, message));
         }
         return null;
     }
@@ -88,27 +100,44 @@ public class ConversationSourceImpl implements ConversationSource {
             return List.of();
         }
 
-        // 批量把配对问题取回来：逐条查会变成 N+1，一次点击几百条查询把回流做成压测
-        Map<String, List<ChatMessageEntity>> questionsBySession = loadUserMessages(answers);
-        List<ConversationSample> samples = new ArrayList<>(answers.size());
-        List<ChatMessageEntity> matched = new ArrayList<>(answers.size());
+        // 批量把候选会话的时间线取回来：逐条查会变成 N+1，一次点击几百条查询把回流做成压测
+        Map<String, List<ChatMessageEntity>> timelineBySession = loadSessionMessages(answers);
+        List<ChatMessageEntity> questions = new ArrayList<>(answers.size());
+        List<List<ChatMessageEntity>> histories = new ArrayList<>(answers.size());
         for (ChatMessageEntity answer : answers) {
-            matched.add(pickQuestion(questionsBySession.get(answer.getSessionId()), answer));
+            List<ChatMessageEntity> timeline =
+                    timelineBySession.getOrDefault(answer.getSessionId(), List.of());
+            int questionIndex = lastUserIndexAtOrBefore(timeline, answer);
+            ChatMessageEntity question = questionIndex < 0 ? null : timeline.get(questionIndex);
+            questions.add(question);
+            histories.add(historyWindow(timeline, questionIndex));
         }
-        fillQuestionContents(matched);
+
+        List<ChatMessageEntity> involved = new ArrayList<>();
         for (int i = 0; i < answers.size(); i++) {
-            samples.add(toSample(answers.get(i), matched.get(i)));
+            if (questions.get(i) != null) {
+                involved.add(questions.get(i));
+            }
+            involved.addAll(histories.get(i));
+        }
+        Map<String, String> contentById = loadContents(involved);
+        questions.forEach(question -> applyContent(question, contentById));
+        histories.forEach(history -> history.forEach(message -> applyContent(message, contentById)));
+
+        List<ConversationSample> samples = new ArrayList<>(answers.size());
+        for (int i = 0; i < answers.size(); i++) {
+            samples.add(toSample(answers.get(i), questions.get(i), histories.get(i)));
         }
         return samples;
     }
 
     /**
-     * 拉取候选会话里的用户消息，只取定序需要的三列。
+     * 拉取候选会话的消息时间线，只取定序需要的四列。
      * <p>
-     * 不投影的话会把整个会话的正文一次性读进内存，而配对只用时间戳：一次回流几百条时，
-     * 未用到的正文就是纯粹的内存负担。正文留到 {@link #fillQuestionContents} 里按 ID 精确回捞。
+     * 不投影的话会把整个会话的正文一次性读进内存，而配对与历史窗口只用时间戳与 role：
+     * 正文留到 {@link #loadContents} 里按最终命中的 ID 精确回捞。
      */
-    private Map<String, List<ChatMessageEntity>> loadUserMessages(List<ChatMessageEntity> answers) {
+    private Map<String, List<ChatMessageEntity>> loadSessionMessages(List<ChatMessageEntity> answers) {
         List<String> sessionIds = answers.stream()
                 .map(ChatMessageEntity::getSessionId)
                 .filter(StringUtils::hasText)
@@ -117,63 +146,76 @@ public class ConversationSourceImpl implements ConversationSource {
         if (sessionIds.isEmpty()) {
             return Map.of();
         }
-        List<ChatMessageEntity> questions = chatMessageService.list(new LambdaQueryWrapper<ChatMessageEntity>()
+        List<ChatMessageEntity> messages = chatMessageService.list(new LambdaQueryWrapper<ChatMessageEntity>()
                 .select(ChatMessageEntity::getId, ChatMessageEntity::getSessionId,
-                        ChatMessageEntity::getCreateTime)
+                        ChatMessageEntity::getRole, ChatMessageEntity::getCreateTime)
                 .in(ChatMessageEntity::getSessionId, sessionIds)
-                .eq(ChatMessageEntity::getRole, ROLE_USER)
-                .orderByAsc(ChatMessageEntity::getCreateTime));
+                .in(ChatMessageEntity::getRole, List.of(ROLE_USER, ROLE_ASSISTANT))
+                .orderByAsc(ChatMessageEntity::getCreateTime)
+                .orderByAsc(ChatMessageEntity::getId));
         Map<String, List<ChatMessageEntity>> bySession = new LinkedHashMap<>();
-        for (ChatMessageEntity question : questions) {
-            bySession.computeIfAbsent(question.getSessionId(), key -> new ArrayList<>()).add(question);
+        for (ChatMessageEntity message : messages) {
+            bySession.computeIfAbsent(message.getSessionId(), key -> new ArrayList<>()).add(message);
         }
         return bySession;
     }
 
     /**
-     * 按最终命中的问题 ID 批量补齐正文：一条 {@code IN} 查询，量级等于本次回流的样本数。
+     * 按命中的消息 ID 批量补齐正文：一条 {@code IN} 查询，量级等于本次回流的样本数。
      */
-    private void fillQuestionContents(List<ChatMessageEntity> matched) {
-        List<String> ids = matched.stream()
-                .filter(java.util.Objects::nonNull)
+    private Map<String, String> loadContents(List<ChatMessageEntity> messages) {
+        List<String> ids = messages.stream()
+                .filter(Objects::nonNull)
                 .map(ChatMessageEntity::getId)
                 .filter(StringUtils::hasText)
                 .distinct()
                 .toList();
         if (ids.isEmpty()) {
-            return;
+            return Map.of();
         }
         Map<String, String> contentById = new LinkedHashMap<>();
-        for (ChatMessageEntity question : chatMessageService.listByIds(ids)) {
-            if (question != null) {
-                contentById.put(question.getId(), question.getContent());
+        for (ChatMessageEntity message : chatMessageService.listByIds(ids)) {
+            if (message != null) {
+                contentById.put(message.getId(), message.getContent());
             }
         }
-        for (ChatMessageEntity question : matched) {
-            if (question != null) {
-                question.setContent(contentById.get(question.getId()));
-            }
+        return contentById;
+    }
+
+    private static void applyContent(ChatMessageEntity message, Map<String, String> contentById) {
+        if (message != null) {
+            message.setContent(contentById.get(message.getId()));
         }
     }
 
     /**
-     * 取该回答之前最近的一条用户消息（列表已按时间升序，从尾部往前找）。
+     * 取该回答之前最近的一条用户消息（时间线已按时间升序，从尾部往前找）。
      * <p>
      * 等于回答的时间戳也算：同一次请求里用户消息与 AI 回复可能拿到同一个时间，
      * 排除了反而会把上一轮的问题当成本轮的。
+     *
+     * @return 命中下标，会话里没有用户消息时返回 -1
      */
-    private ChatMessageEntity pickQuestion(List<ChatMessageEntity> sessionQuestions, ChatMessageEntity answer) {
-        if (sessionQuestions == null || sessionQuestions.isEmpty()) {
-            return null;
-        }
-        for (int i = sessionQuestions.size() - 1; i >= 0; i--) {
-            ChatMessageEntity question = sessionQuestions.get(i);
-            if (answer.getCreateTime() == null || question.getCreateTime() == null
-                    || !question.getCreateTime().isAfter(answer.getCreateTime())) {
-                return question;
+    private static int lastUserIndexAtOrBefore(List<ChatMessageEntity> timeline, ChatMessageEntity answer) {
+        for (int i = timeline.size() - 1; i >= 0; i--) {
+            ChatMessageEntity message = timeline.get(i);
+            if (!ROLE_USER.equals(message.getRole())) {
+                continue;
+            }
+            if (answer.getCreateTime() == null || message.getCreateTime() == null
+                    || !message.getCreateTime().isAfter(answer.getCreateTime())) {
+                return i;
             }
         }
-        return null;
+        return -1;
+    }
+
+    /** 本轮问题之前的至多 {@code MAX_HISTORY_MESSAGES} 句，按时间升序 */
+    private static List<ChatMessageEntity> historyWindow(List<ChatMessageEntity> timeline, int questionIndex) {
+        if (questionIndex <= 0) {
+            return List.of();
+        }
+        return new ArrayList<>(timeline.subList(Math.max(0, questionIndex - MAX_HISTORY_MESSAGES), questionIndex));
     }
 
     /**
@@ -200,14 +242,52 @@ public class ConversationSourceImpl implements ConversationSource {
                 .last("LIMIT 1"), false);
     }
 
-    private ConversationSample toSample(ChatMessageEntity answer, ChatMessageEntity question) {
+    private ConversationSample toSample(ChatMessageEntity answer, ChatMessageEntity question,
+                                        List<ChatMessageEntity> history) {
         List<String> documentIds = new ArrayList<>();
         List<String> paragraphIds = new ArrayList<>();
         readSources(answer.getRetrievalSources(), documentIds, paragraphIds);
+        List<ConversationTurn> turns = new ArrayList<>(history == null ? 0 : history.size());
+        if (history != null) {
+            for (ChatMessageEntity message : history) {
+                if (StringUtils.hasText(message.getContent())) {
+                    turns.add(new ConversationTurn(message.getRole(), message.getContent().trim()));
+                }
+            }
+        }
         return new ConversationSample(answer.getId(), answer.getSessionId(), answer.getApplicationId(),
-                question == null ? null : question.getContent(), answer.getContent(),
+                question == null ? null : question.getContent(), answer.getContent(), turns,
                 answer.getFeedback(), trimToNull(answer.getAnnotation()),
                 documentIds, paragraphIds, answer.getCreateTime());
+    }
+
+    /**
+     * 单条回流的历史：本轮问题之前的最后若干句。
+     * <p>
+     * 批量回流是从会话时间线切窗口，单条只拿得到一条消息，按时间倒着捞再翻正即可，
+     * 不值得为它把整场会话读进内存。
+     */
+    private List<ChatMessageEntity> historyMessages(ChatMessageEntity answer, ChatMessageEntity question) {
+        if (question == null || !StringUtils.hasText(answer.getSessionId())
+                || question.getCreateTime() == null) {
+            return List.of();
+        }
+        List<ChatMessageEntity> earlier = chatMessageService.list(new LambdaQueryWrapper<ChatMessageEntity>()
+                .select(ChatMessageEntity::getId, ChatMessageEntity::getRole, ChatMessageEntity::getContent)
+                .eq(ChatMessageEntity::getSessionId, answer.getSessionId())
+                .in(ChatMessageEntity::getRole, List.of(ROLE_USER, ROLE_ASSISTANT))
+                .ne(ChatMessageEntity::getId, answer.getId())
+                .le(ChatMessageEntity::getCreateTime, question.getCreateTime())
+                .orderByDesc(ChatMessageEntity::getCreateTime)
+                .orderByDesc(ChatMessageEntity::getId)
+                .last("LIMIT " + (MAX_HISTORY_MESSAGES + 1)));
+        List<ChatMessageEntity> chronological = new ArrayList<>(earlier);
+        Collections.reverse(chronological);
+        // 倒着捞会把本轮问题一起带进来（同刻落库的相邻轮次也算），摘掉它才是「这一轮之前」
+        chronological.removeIf(message -> message.getRole() == null
+                || Objects.equals(message.getId(), question.getId()));
+        int from = Math.max(0, chronological.size() - MAX_HISTORY_MESSAGES);
+        return new ArrayList<>(chronological.subList(from, chronological.size()));
     }
 
     /**

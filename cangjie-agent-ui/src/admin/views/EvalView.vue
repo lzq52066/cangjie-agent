@@ -60,6 +60,18 @@
             </div>
           </template>
           <el-table :data="cases" v-loading="caseLoading" stripe size="small">
+            <el-table-column type="expand">
+              <template #default="{ row }">
+                <div v-if="conversationTurns(row.conversation).length" class="case-context">
+                  <div class="case-context-title">本轮之前的对话（线上回流带过来的上下文，跑评测时与本轮问题一起发给模型）</div>
+                  <div v-for="(turn, index) in conversationTurns(row.conversation)" :key="index" class="case-context-turn">
+                    <span class="case-context-role">{{ turn.role === 'assistant' ? '助手' : '用户' }}</span>
+                    <span class="case-context-text">{{ turn.content }}</span>
+                  </div>
+                </div>
+                <el-empty v-else description="这条用例没有对话上文（单轮问答）" :image-size="60" />
+              </template>
+            </el-table-column>
             <el-table-column prop="question" label="问题" min-width="220" show-overflow-tooltip />
             <el-table-column prop="expectedAnswer" label="期望回答" min-width="180" show-overflow-tooltip />
             <el-table-column label="来源" width="90" align="center">
@@ -542,6 +554,19 @@ const METRIC_OPTIONS = [
 
 function sourceLabel(s?: string) {
   return ({ trace: '对话回流', synthetic: '合成' } as Record<string, string>)[s || ''] || s || '-'
+}
+
+/** 用例的对话上文（后端 eval_case.conversation 存的 JSON 数组），脏数据就当没有上文 */
+function conversationTurns(json?: string): { role: string; content: string }[] {
+  if (!json) return []
+  try {
+    const parsed = JSON.parse(json)
+    return Array.isArray(parsed)
+      ? parsed.filter(t => t && typeof t.content === 'string' && t.content).map(t => ({ role: t.role || 'user', content: t.content }))
+      : []
+  } catch {
+    return []
+  }
 }
 
 // ============ 数据集 ============
@@ -1197,6 +1222,13 @@ onUnmounted(() => {
 .compare-title { font-size: 13px; font-weight: 600; color: #303133; margin-bottom: 8px; }
 .case-delta-table { width: auto; margin: 0 12px; }
 .cell-sm { font-size: 12px; }
+.case-context { padding: 6px 16px 10px 16px; }
+.case-context-title { font-size: 12px; color: #909399; margin-bottom: 8px; }
+.case-context-turn {
+  display: flex; gap: 8px; padding: 4px 0; font-size: 13px; line-height: 1.7; color: #303133;
+}
+.case-context-role { flex: none; width: 34px; color: #909399; font-size: 12px; }
+.case-context-text { white-space: pre-wrap; word-break: break-all; }
 
 @media (max-width: 992px) {
   .case-col { margin-top: 16px; }

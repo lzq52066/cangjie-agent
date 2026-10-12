@@ -6,6 +6,7 @@ import cn.cangjiecloud.core.eval.EvalMetric;
 import cn.cangjiecloud.core.eval.EvalSample;
 import cn.cangjiecloud.core.eval.MetricContext;
 import cn.cangjiecloud.core.eval.MetricScore;
+import cn.cangjiecloud.core.model.ChatMessage;
 import cn.cangjiecloud.core.model.ChatRequest;
 import cn.cangjiecloud.core.model.ChatResponse;
 import cn.cangjiecloud.core.rag.HybridRetriever;
@@ -437,6 +438,41 @@ class EvalRunServiceImplTest {
 
     @Nested
     class RunWithLlm {
+
+        /** 用例带对话上文时按 system → 历史 → 本轮问题 发给模型：追问脱离上文就评不出东西 */
+        @Test
+        void runShouldReplayCaseConversationWhenGeneratingAnswer() {
+            EvalCaseEntity withHistory = evalCase("c1", "那第二个呢？", null);
+            withHistory.setConversation("[{\"role\":\"user\",\"content\":\"支持哪些模型？\"},"
+                    + "{\"role\":\"assistant\",\"content\":\"支持 OpenAI 兼容协议。\"}]");
+            when(datasetService.getById("ds1")).thenReturn(dataset("ds1", "kb1", "回归集"));
+            when(caseService.listByDataset("ds1")).thenReturn(List.of(withHistory));
+            when(hybridRetriever.retrieve(any(String.class), any(RetrievalOptions.class)))
+                    .thenReturn(List.of());
+            when(modelService.getClient("m1")).thenReturn(modelClient);
+            when(modelClient.chat(any(ChatRequest.class)))
+                    .thenReturn(ChatResponse.builder().content("指的是第二个协议").totalTokens(3).build())
+                    .thenReturn(ChatResponse.builder()
+                            .content("{\"score\":0.6,\"reason\":\"部分一致\"}").build());
+            doReturn(true).when(service).updateById(any(EvalRunEntity.class));
+            doReturn(true).when(service).update(any(Wrapper.class));
+
+            Map<String, Object> config = new HashMap<>();
+            config.put("modelId", "m1");
+            service.run("ds1", config);
+            executePendingTask();
+
+            ArgumentCaptor<ChatRequest> requestCap = ArgumentCaptor.forClass(ChatRequest.class);
+            verify(modelClient, times(2)).chat(requestCap.capture());
+            List<ChatMessage> messages = requestCap.getAllValues().get(0).getMessages();
+            assertThat(messages).hasSize(4);
+            assertThat(messages.get(0).getRole()).isEqualTo("system");
+            assertThat(messages.get(1).getRole()).isEqualTo("user");
+            assertThat(messages.get(1).getContent()).isEqualTo("支持哪些模型？");
+            assertThat(messages.get(2).getRole()).isEqualTo("assistant");
+            assertThat(messages.get(2).getContent()).isEqualTo("支持 OpenAI 兼容协议。");
+            assertThat(messages.get(3).getContent()).contains("那第二个呢？");
+        }
 
         /** 配置 modelId 时生成回答并做 LLM-as-judge，判定 token 一并计入成本 */
         @Test

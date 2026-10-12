@@ -582,6 +582,11 @@ const localToolNotFound = ref(false)
 const localToolHint = ref('')
 /** 变更类工具（写/改名/删除）预检后的二次确认方案；非空表示正在等待用户允许/拒绝 */
 const localToolConfirm = ref<LocalToolConfirmPlan | null>(null)
+/**
+ * 用户在二次确认卡片上点出来的决策，随执行结果一起回传后端落审批单。
+ * 只读工具自动执行、没有人参与，保持 null（后端按 null 判定无需留痕）。
+ */
+const localToolDecision = ref<{ confirmed: boolean; riskLevel?: string; actionSummary?: string } | null>(null)
 /** 预检阶段标记，避免与执行中 spinner 混淆 */
 const localToolPlanning = ref(false)
 
@@ -672,6 +677,7 @@ function setPendingLocalTool(raw: any) {
   localToolFailed.value = false
   localToolNotFound.value = false
   localToolConfirm.value = null
+  localToolDecision.value = null
   localToolNeedAuth.value = !localFsSupported || !localFsAuthorized.value
   if (!localFsSupported) {
     localToolHint.value = '当前浏览器不支持本地文件操作，请使用最新版 Chrome / Edge。'
@@ -702,6 +708,7 @@ function clearPendingLocalTool() {
   localToolFailed.value = false
   localToolNotFound.value = false
   localToolConfirm.value = null
+  localToolDecision.value = null
 }
 
 /** 标记本地工具失败；若为授权目录内找不到目标，提示用户改选包含目标的文件夹 */
@@ -766,6 +773,10 @@ async function prepareLocalTool() {
 
 /** 用户在二次确认卡片点"允许"：真正执行变更类工具 */
 async function confirmLocalTool() {
+  const plan = localToolConfirm.value
+  localToolDecision.value = plan
+    ? { confirmed: true, riskLevel: plan.riskLevel, actionSummary: plan.title }
+    : null
   await runPendingLocalTool()
 }
 
@@ -778,6 +789,9 @@ async function rejectLocalTool() {
     ? `用户拒绝了「${plan.title}」操作（未对本地文件做任何改动）。请停止该操作，并据此回复用户；如确有必要，可在向用户说明风险后由用户重新发起。`
     : '用户拒绝了该本地文件操作，未做任何改动。'
   localToolConfirm.value = null
+  localToolDecision.value = plan
+    ? { confirmed: false, riskLevel: plan.riskLevel, actionSummary: plan.title }
+    : { confirmed: false }
   localToolResumeRunning.value = true
   try {
     await submitLocalResult(target, true, undefined, reason)
@@ -839,7 +853,11 @@ async function submitLocalResult(target: PendingLocalTool, failed: boolean,
       sessionId: sessionId.value || undefined,
       failed,
       result,
-      errorMessage
+      errorMessage,
+      confirmed: localToolDecision.value?.confirmed,
+      riskLevel: localToolDecision.value?.riskLevel,
+      actionSummary: localToolDecision.value?.actionSummary,
+      toolName: target.toolName || target.tool || undefined
     })
     applyLocalResumeResult(res)
   } catch (e: any) {

@@ -4,6 +4,7 @@ import cn.cangjiecloud.common.exception.ApiException;
 import cn.cangjiecloud.core.conversation.ConversationFilter;
 import cn.cangjiecloud.core.conversation.ConversationSample;
 import cn.cangjiecloud.core.conversation.ConversationSource;
+import cn.cangjiecloud.core.conversation.ConversationTurn;
 import cn.cangjiecloud.eval.dto.EvalCaseImportDTO;
 import cn.cangjiecloud.eval.dto.EvalImportResultDTO;
 import cn.cangjiecloud.eval.entity.EvalCaseEntity;
@@ -271,7 +272,7 @@ class EvalCaseServiceImplTest {
         }
 
         private static ConversationSample sample(String messageId, String question) {
-            return new ConversationSample(messageId, "s1", "app1", question, "AI 回答",
+            return new ConversationSample(messageId, "s1", "app1", question, "AI 回答", List.of(),
                     null, null, List.of(), List.of(), LocalDateTime.of(2026, 10, 9, 10, 0));
         }
 
@@ -346,12 +347,14 @@ class EvalCaseServiceImplTest {
             verify(datasetService, never()).updateById(any(EvalDatasetEntity.class));
         }
 
-        /** 样本 → 用例：标注当期望答案、检索来源当 ground truth、来源与幂等键落库 */
+        /** 样本 → 用例：标注当期望答案、检索来源当 ground truth、本轮之前的对话与幂等键落库 */
         @Test
         void importShouldConvertSampleToCase() {
             datasetExists();
             installSource();
             scripted.add(new ConversationSample("m1", "s1", "app1", "  什么是仓颉？  ", "AI 回答",
+                    List.of(new ConversationTurn("user", "你们支持哪些模型？"),
+                            new ConversationTurn("assistant", "支持 OpenAI 兼容协议与本地模型。")),
                     "dislike", "人工修正的答案", List.of("doc1", "doc1", " "), List.of("p1"),
                     LocalDateTime.of(2026, 10, 9, 10, 0)));
             doReturn(null).when(service).getOne(any(Wrapper.class), anyBoolean());
@@ -372,6 +375,10 @@ class EvalCaseServiceImplTest {
             assertThat(saved.getTags()).isEqualTo("from-chat,dislike");
             assertThat(saved.getSource()).isEqualTo("trace");
             assertThat(saved.getSourceMessageId()).isEqualTo("m1");
+            // 追问脱离上文就评不出东西：这一轮之前的对话要原样进用例，跑评测时一起发给模型
+            assertThat(saved.getConversation()).isEqualTo(
+                    "[{\"role\":\"user\",\"content\":\"你们支持哪些模型？\"},"
+                            + "{\"role\":\"assistant\",\"content\":\"支持 OpenAI 兼容协议与本地模型。\"}]");
 
             ArgumentCaptor<EvalDatasetEntity> dsCap = ArgumentCaptor.forClass(EvalDatasetEntity.class);
             verify(datasetService).updateById(dsCap.capture());
@@ -396,6 +403,36 @@ class EvalCaseServiceImplTest {
             assertThat(captor.getValue().getReferenceDocs()).isNull();
             assertThat(captor.getValue().getReferenceChunks()).isNull();
             assertThat(captor.getValue().getTags()).isEqualTo("from-chat");
+            // 单轮问答没有上文，这一列留 null，别在报告里冒充「有一段空历史」
+            assertThat(captor.getValue().getConversation()).isNull();
+        }
+
+        /** 后台勾选走 messageIds：按 ID 精确取样本，一条筛选都不跑，取不到的计入 unusable */
+        @Test
+        void batchImportShouldUseSelectedMessageIdsInsteadOfFilters() {
+            datasetExists();
+            installSource();
+            scripted.add(sample("m1", "q1"));
+            scripted.add(sample("m2", "q2"));
+            doReturn(List.of()).when(service).list(any(Wrapper.class));
+            doAnswer(inv -> {
+                List<EvalCaseEntity> batch = inv.getArgument(0);
+                batch.forEach(item -> item.setId("c-" + item.getSourceMessageId()));
+                return true;
+            }).when(service).saveBatch(anyCollection());
+            doReturn(2L).when(service).count(any(Wrapper.class));
+
+            EvalCaseImportDTO request = new EvalCaseImportDTO();
+            request.setMessageIds(List.of("m1", " m2 ", "m1", "m-missing"));
+
+            EvalImportResultDTO result = service.importFromConversations("ds1", request);
+
+            assertThat(lastFilter).isNull();
+            // 选中列表去空去重后是 m1 / m2 / m-missing 三条
+            assertThat(result.getScanned()).isEqualTo(3);
+            assertThat(result.getImported()).isEqualTo(2);
+            assertThat(result.getUnusable()).isEqualTo(1);
+            assertThat(result.getCaseIds()).containsExactly("c-m1", "c-m2");
         }
 
         /** 批量按 scanned / imported / duplicated / unusable 分栏报数，只刷一次计数 */

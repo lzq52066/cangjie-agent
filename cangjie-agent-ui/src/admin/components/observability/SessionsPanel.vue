@@ -91,9 +91,26 @@
                     @keyup.enter="reloadMessages" />
         </QueryBar>
 
+        <div class="msg-toolbar">
+          <el-checkbox :model-value="allChecked" :indeterminate="someChecked" :disabled="!selectableIds.length"
+                       @change="toggleAll">
+            全选本页（已选 {{ selectedIds.length }} 条）
+          </el-checkbox>
+          <el-button type="primary" plain size="small" :disabled="!selectedIds.length"
+                     @click="openImportDialog()">
+            加入评测集
+          </el-button>
+          <span class="msg-toolbar-hint">勾选的每条回复会带着「这一轮之前的对话」一起进评测集，追问不再评成没头没尾的一句。</span>
+        </div>
+
         <div v-loading="msgLoading" class="msg-list">
           <div v-for="m in messages" :key="m.id" class="msg-item" :class="'msg-' + m.role">
             <div class="msg-meta">
+              <el-checkbox v-if="m.role === 'assistant' || m.role === 'user'"
+                           :model-value="selectedIds.includes(m.id)"
+                           @change="toggleMessage(m.id)">
+                回流
+              </el-checkbox>
               <el-tag size="small" :type="roleTagType(m.role)">{{ roleLabel(m.role) }}</el-tag>
               <span class="msg-time">{{ m.createTime }}</span>
               <span v-if="m.tokens != null" class="msg-extra">{{ m.tokens }} tokens</span>
@@ -105,9 +122,6 @@
             <div v-if="m.annotation" class="msg-annotation">
               <span class="annotation-label">人工修正（{{ m.annotateBy || '-' }}）：</span>{{ m.annotation }}
             </div>
-            <div v-if="m.role === 'assistant' || m.role === 'user'" class="msg-actions">
-              <el-button link type="primary" size="small" @click="openImportDialog(m)">加入评测集</el-button>
-            </div>
           </div>
           <el-empty v-if="!messages.length && !msgLoading" description="暂无消息" :image-size="70" />
         </div>
@@ -117,9 +131,10 @@
       </template>
     </el-drawer>
 
-    <!-- 单条对话回流：把线上问答（含人工修正与当时的检索来源）存成评测用例 -->
-    <el-dialog v-model="importDialog" title="加入评测集" width="440px" destroy-on-close>
-      <el-form label-width="80px">
+    <!-- 对话回流：把选中的线上问答（含人工修正、当时的检索上文）存成评测用例 -->
+    <el-dialog v-model="importDialog" :title="`加入评测集（已选 ${selectedIds.length} 条）`" width="440px" destroy-on-close>
+      <!-- label-width 要盖过 5 个汉字 + Element Plus 默认的 12px label 右内边距，否则会折成两行 -->
+      <el-form label-width="92px">
         <el-form-item label="目标数据集">
           <el-select v-model="importDatasetId" filterable placeholder="选择数据集" style="width:100%">
             <el-option v-for="ds in datasetOptions" :key="ds.id"
@@ -128,7 +143,8 @@
         </el-form-item>
       </el-form>
       <div class="import-hint">
-        配不成问答对的那条会被拒；同一条回复重复加入只算一票，当时的检索片段会一并当成参考依据。
+        一条勾选取一轮问答：配不成问答对的那条会被拒，重复加入只算一票，
+        当时的检索片段与本轮之前的对话会一并带进用例。
       </div>
       <template #footer>
         <el-button @click="importDialog = false">取消</el-button>
@@ -145,7 +161,7 @@
  * 原先是独立菜单页，与会话留痕、链路追踪是同一批排障数据，故并入可观测性的一个 tab；
  * 只被授过原菜单的角色由 V114 迁移到可观测性授权上。
  */
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { Delete, Pointer } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import QueryBar from '@admin/components/QueryBar.vue'
@@ -225,6 +241,8 @@ const msgQuery = reactive({ role: '', feedback: '', keyword: '' })
 async function loadMessages() {
   if (!current.value) return
   msgLoading.value = true
+  // 换页/换筛选后旧勾选不再对应屏幕上的条目，留着会把没看到的条目一起提交
+  selectedIds.value = []
   try {
     const page = await chatSessionApi.messages(current.value.sessionId, {
       role: msgQuery.role || undefined,
@@ -271,16 +289,44 @@ onMounted(async () => {
   loadList()
 })
 
-// ============ 单条对话回流 ============
+// ============ 对话回流（勾选式，一次可以多条） ============
 const importDialog = ref(false)
 const importing = ref(false)
 const importDatasetId = ref('')
-const importMessageId = ref('')
+const selectedIds = ref<string[]>([])
 const datasetOptions = ref<any[]>([])
 
+/** 只有用户提问与助手回复能回流：系统提示配不出问答对 */
+const selectableIds = computed(() => messages.value
+  .filter(m => m.role === 'assistant' || m.role === 'user')
+  .map(m => m.id))
+const allChecked = computed(() => selectableIds.value.length > 0
+  && selectableIds.value.every(id => selectedIds.value.includes(id)))
+const someChecked = computed(() => selectedIds.value.length > 0 && !allChecked.value)
+
+/** 全选只管本页：别的页已勾上的要保持住，不然翻一页就丢一批 */
+function toggleAll(checked: boolean) {
+  if (checked) {
+    selectedIds.value = Array.from(new Set([...selectedIds.value, ...selectableIds.value]))
+  } else {
+    selectedIds.value = selectedIds.value.filter(id => !selectableIds.value.includes(id))
+  }
+}
+function toggleMessage(id: string) {
+  const at = selectedIds.value.indexOf(id)
+  if (at >= 0) {
+    selectedIds.value.splice(at, 1)
+  } else {
+    selectedIds.value.push(id)
+  }
+}
+
 /** 点开会话抽屉不顺手拉数据集列表：只有真要回流时才需要这份选项 */
-async function openImportDialog(m: any) {
-  importMessageId.value = m.id
+async function openImportDialog() {
+  if (!selectedIds.value.length) {
+    ElMessage.warning('先勾选要回流的对话')
+    return
+  }
   importDatasetId.value = ''
   importDialog.value = true
   if (!datasetOptions.value.length) {
@@ -300,9 +346,19 @@ async function submitImport() {
   }
   importing.value = true
   try {
-    await evalApi.importCaseFromMessage(importDatasetId.value, importMessageId.value)
-    ElMessage.success('已加入评测集')
+    const ids = [...selectedIds.value]
+    if (ids.length === 1) {
+      await evalApi.importCaseFromMessage(importDatasetId.value, ids[0])
+      ElMessage.success('已加入评测集')
+    } else {
+      // 多条走勾选回流：一条一条点会把「这一次点了哪些」拆成几次互不知情的写入
+      const result = await evalApi.importCasesFromConversations(importDatasetId.value, { messageIds: ids })
+      ElMessage.success(`已加入 ${result.imported} 条`
+        + (result.duplicated ? `，重复 ${result.duplicated} 条` : '')
+        + (result.unusable ? `，配不成问答对 ${result.unusable} 条` : ''))
+    }
     importDialog.value = false
+    selectedIds.value = []
   } finally {
     importing.value = false
   }
@@ -333,6 +389,9 @@ async function submitImport() {
   background: #fdf6ec; color: #e6a23c; font-size: 12px; line-height: 1.7;
 }
 .annotation-label { font-weight: 600; }
-.msg-actions { margin-top: 6px; display: flex; justify-content: flex-end; }
+.msg-toolbar {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+}
+.msg-toolbar-hint { font-size: 12px; color: #909399; line-height: 1.6; }
 .import-hint { font-size: 12px; color: #909399; line-height: 1.7; }
 </style>

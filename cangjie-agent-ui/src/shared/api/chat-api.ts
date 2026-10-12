@@ -75,6 +75,14 @@ export interface LocalToolResult {
   result?: string
   /** 失败时的错误信息 */
   errorMessage?: string
+  /** 用户在二次确认卡片上的决策：true 允许 / false 拒绝；只读工具自动执行时不传 */
+  confirmed?: boolean
+  /** 确认卡片判定的风险等级，仅作留痕展示 */
+  riskLevel?: string
+  /** 确认卡片标题（如「删除文件 c.txt」），落审批单备注 */
+  actionSummary?: string
+  /** 本次执行的本地工具名，服务端以挂起时的步骤记录为准，这里作兜底 */
+  toolName?: string
 }
 
 /** 本地工具结果回传后恢复执行的产出 */

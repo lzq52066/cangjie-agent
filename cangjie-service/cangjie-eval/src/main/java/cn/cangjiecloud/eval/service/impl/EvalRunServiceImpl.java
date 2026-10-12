@@ -868,14 +868,55 @@ public class EvalRunServiceImpl extends ServiceImpl<EvalRunMapper, EvalRunEntity
         }
 
         ChatRequest request = ChatRequest.builder()
-                .messages(List.of(
-                        ChatMessage.system("你是一个问答助手。请根据参考资料回答问题。如果参考资料没有相关信息，请如实说明。"),
-                        ChatMessage.user(context + "\n问题：" + promptSegment(evalCase.getQuestion()))
-                ))
+                .messages(chatMessages(evalCase, context.toString()))
                 .temperature(0.1)
                 .traceContext(traceContext(modelId, traceId, "answer"))
                 .build();
         return client.chat(request);
+    }
+
+    /** 本轮问答拼上当时的对话上文，按 system → 历史 → 本轮问题 的顺序发给模型 */
+    private List<ChatMessage> chatMessages(EvalCaseEntity evalCase, String context) {
+        List<ChatMessage> history = historyMessages(evalCase);
+        List<ChatMessage> messages = new ArrayList<>(history.size() + 2);
+        messages.add(ChatMessage.system("你是一个问答助手。请根据参考资料回答问题。如果参考资料没有相关信息，请如实说明。"));
+        messages.addAll(history);
+        messages.add(ChatMessage.user(context + "\n问题：" + promptSegment(evalCase.getQuestion())));
+        return messages;
+    }
+
+    /**
+     * 用例的对话上文（{@code eval_case.conversation}）→ 模型消息。
+     * <p>
+     * 线上回流的追问脱离上文就评不出东西：「那第二个呢」重跑时模型不知道在问第二件什么事，
+     * 答歪了算的是用例的锅而不是模型的锅。这里把当时那几轮原样重放，评测才对着同一语境打分。
+     * <p>
+     * 脏 JSON 只丢上文、不丢整条用例：问题与期望回答仍然有效，退回单轮问答跑就行。
+     */
+    private List<ChatMessage> historyMessages(EvalCaseEntity evalCase) {
+        if (!StringUtils.hasText(evalCase.getConversation())) {
+            return List.of();
+        }
+        List<Map<String, Object>> turns;
+        try {
+            turns = JsonUtils.parseListOfMap(evalCase.getConversation());
+        } catch (Exception e) {
+            log.debug("用例对话上文解析失败，本条按单轮问答跑: caseId={}, {}", evalCase.getId(), e.toString());
+            return List.of();
+        }
+        List<ChatMessage> messages = new ArrayList<>(turns.size());
+        for (Map<String, Object> turn : turns) {
+            Object rawContent = turn == null ? null : turn.get("content");
+            String content = rawContent == null ? null : String.valueOf(rawContent).trim();
+            if (!StringUtils.hasText(content)) {
+                continue;
+            }
+            Object role = turn.get("role");
+            messages.add("assistant".equalsIgnoreCase(role == null ? null : String.valueOf(role))
+                    ? ChatMessage.assistant(promptSegment(content))
+                    : ChatMessage.user(promptSegment(content)));
+        }
+        return messages;
     }
 
     /**

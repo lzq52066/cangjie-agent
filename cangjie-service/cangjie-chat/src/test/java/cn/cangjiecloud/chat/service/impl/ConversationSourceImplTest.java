@@ -4,6 +4,7 @@ import cn.cangjiecloud.chat.entity.ChatMessageEntity;
 import cn.cangjiecloud.chat.service.IChatMessageService;
 import cn.cangjiecloud.core.conversation.ConversationFilter;
 import cn.cangjiecloud.core.conversation.ConversationSample;
+import cn.cangjiecloud.core.conversation.ConversationTurn;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -103,6 +104,26 @@ class ConversationSourceImplTest {
             assertThat(sample.referenceChunks()).containsExactly("p1", "p2");
         }
 
+        /** 单条回流也带上上文：本轮问题之前的消息按时间升序交出去 */
+        @Test
+        void shouldCarryHistoryForSingleMessage() {
+            ChatMessageEntity reply = answer("m2", LocalDateTime.of(2026, 10, 9, 10, 5));
+            when(chatMessageService.getById("m2")).thenReturn(reply);
+            when(chatMessageService.getOne(any(Wrapper.class), anyBoolean()))
+                    .thenReturn(message("q2", "user", "那第二个呢？", LocalDateTime.of(2026, 10, 9, 10, 5)));
+            // 按时间倒着捞最近的若干句，实现里翻回升序
+            when(chatMessageService.list(any(Wrapper.class))).thenReturn(List.of(
+                    message("m1", "assistant", "支持 OpenAI 兼容协议。", LocalDateTime.of(2026, 10, 9, 10, 1)),
+                    message("q1", "user", "支持哪些模型？", LocalDateTime.of(2026, 10, 9, 10, 0))));
+
+            ConversationSample sample = source.loadSample("m2");
+
+            assertThat(sample.question()).isEqualTo("那第二个呢？");
+            assertThat(sample.history()).containsExactly(
+                    new ConversationTurn("user", "支持哪些模型？"),
+                    new ConversationTurn("assistant", "支持 OpenAI 兼容协议。"));
+        }
+
         /** 用户消息：向后找这一轮的回答，前端在用户气泡上点「加入评测集」也能用 */
         @Test
         void shouldFollowAnswerForUserMessage() {
@@ -168,10 +189,10 @@ class ConversationSourceImplTest {
     class SearchSamples {
 
         /**
-         * 批量只查一次用户消息：逐条查会变成 N+1，一次点击几百条查询把回流做成压测。
+         * 批量只查一次会话时间线：逐条查会变成 N+1，一次点击几百条查询把回流做成压测。
          * <p>
-         * 这一批只取定序需要的三列（id / session_id / create_time），正文等命中哪条之后按 ID 回捞 ——
-         * 会话历史整段读进内存是白读，命中问题最多也就样本数那么多条。
+         * 这一批只取定序要用的四列（id / session_id / role / create_time），正文等问题与历史窗口
+         * 都定下来之后按 ID 回捞 —— 整场会话的正文读进内存是白读，命中的最多也就样本数那么多条。
          */
         @Test
         void shouldLoadQuestionsInOneBatch() {
@@ -217,8 +238,33 @@ class ConversationSourceImplTest {
 
             assertThat(samples).singleElement()
                     .extracting(ConversationSample::question).isEqualTo("这一轮的问题");
-            // 回捞只取命中的那一条，没命中的历史正文根本不进内存
-            verify(chatMessageService).listByIds(argThat(ids -> ids.size() == 1));
+            // 回捞按 ID 精确取：命中问题 + 它之前的那句历史，会话里更晚的正文根本不进内存
+            verify(chatMessageService).listByIds(argThat(ids -> ids.size() == 2));
+        }
+
+        /** 批量回流把本轮之前的对话一起带上：追问脱离上文就评不出东西 */
+        @Test
+        void shouldCarryConversationHistoryInBatch() {
+            ChatMessageEntity reply = answer("m2", LocalDateTime.of(2026, 10, 9, 10, 5));
+            List<ChatMessageEntity> timeline = List.of(
+                    message("q1", "user", "支持哪些模型？", LocalDateTime.of(2026, 10, 9, 10, 0)),
+                    message("m1", "assistant", "支持 OpenAI 兼容协议。", LocalDateTime.of(2026, 10, 9, 10, 1)),
+                    message("q2", "user", "那第二个呢？", LocalDateTime.of(2026, 10, 9, 10, 5)),
+                    reply);
+            when(chatMessageService.list(any(Wrapper.class)))
+                    .thenReturn(List.of(reply))
+                    .thenReturn(timeline);
+            when(chatMessageService.listByIds(anyCollection()))
+                    .thenReturn(List.of(timeline.get(0), timeline.get(1), timeline.get(2)));
+
+            List<ConversationSample> samples = source.searchSamples(ConversationFilter.of(10));
+
+            assertThat(samples).singleElement().satisfies(sample -> {
+                assertThat(sample.question()).isEqualTo("那第二个呢？");
+                assertThat(sample.history()).containsExactly(
+                        new ConversationTurn("user", "支持哪些模型？"),
+                        new ConversationTurn("assistant", "支持 OpenAI 兼容协议。"));
+            });
         }
 
         /** 会话里没有更早的用户消息时照样出样本，由评测侧按「不可用」计数报出 */

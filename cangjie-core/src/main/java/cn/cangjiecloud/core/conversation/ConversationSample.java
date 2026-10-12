@@ -17,6 +17,7 @@ import java.util.List;
  * @param applicationId   应用 ID
  * @param question        配对的用户问题，取不到时为 null
  * @param answer          AI 回答原文
+ * @param history         这一轮之前的对话（按时间升序，不含本问答），多轮追问靠它还原语境
  * @param feedback        用户反馈：like / dislike / none，可为 null
  * @param annotation      人工标注的修正答案（有它就以它为准），可为 null
  * @param referenceDocs   当时召回命中的文档 ID（去重），可为空列表
@@ -28,6 +29,7 @@ public record ConversationSample(String messageId,
                                  String applicationId,
                                  String question,
                                  String answer,
+                                 List<ConversationTurn> history,
                                  String feedback,
                                  String annotation,
                                  List<String> referenceDocs,
@@ -36,6 +38,8 @@ public record ConversationSample(String messageId,
 
     public ConversationSample {
         // 列表来自脏 JSON，null 元素得先清掉：List.copyOf 不容 null，而这里一个 null 不值得抛异常
+        history = history == null ? List.of()
+                : history.stream().filter(t -> t != null && t.content() != null && !t.content().isBlank()).toList();
         referenceDocs = nonBlank(referenceDocs);
         referenceChunks = nonBlank(referenceChunks);
     }

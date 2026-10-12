@@ -22,6 +22,14 @@ public class EvalCaseEntity extends BaseEntity {
     /** 期望回答 */
     private String expectedAnswer;
 
+    /**
+     * 这一轮之前的对话（JSON 数组 {@code [{"role":"user","content":"..."}]}），可空。
+     * <p>
+     * 线上回流带得出来：「那第二个呢」这类追问单独摆着没法评，跑离线评测时要把上文一起喂进去，
+     * 模型才可能重现当时那次回答。
+     */
+    private String conversation;
+
     /** 参考文档 ID 列表（JSON 数组，用于召回率计算） */
     private String referenceDocs;
 
