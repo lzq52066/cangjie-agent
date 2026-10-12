@@ -1,9 +1,7 @@
 package cn.cangjiecloud.observability.service;
 
 import cn.cangjiecloud.core.observability.TraceCollector;
-import cn.cangjiecloud.observability.dto.TraceQueryDTO;
 import cn.cangjiecloud.observability.entity.TraceRecordEntity;
-import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 
 /**
@@ -15,11 +13,6 @@ public interface ITraceRecordService extends IService<TraceRecordEntity>, TraceC
      * 记录一条追踪
      */
     void record(TraceRecordEntity entity);
-
-    /**
-     * 分页查询追踪记录
-     */
-    IPage<TraceRecordEntity> pageQuery(TraceQueryDTO query);
 
     /**
      * 按 spanId 取单条 span 的完整载荷（input / output / metadata）。

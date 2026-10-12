@@ -12,7 +12,6 @@ import cn.cangjiecloud.core.harness.context.ContextSlot;
 import cn.cangjiecloud.core.model.ChatMessage;
 import cn.cangjiecloud.observability.context.TraceContext;
 import cn.cangjiecloud.observability.dto.AgentRunDetailVO;
-import cn.cangjiecloud.observability.dto.AgentRunQueryDTO;
 import cn.cangjiecloud.observability.entity.AgentApprovalEntity;
 import cn.cangjiecloud.observability.entity.AgentRunEntity;
 import cn.cangjiecloud.observability.entity.AgentRunStepEntity;
@@ -25,9 +24,7 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -644,58 +641,6 @@ class AgentRunServiceImplTest {
     // ==================== 查询 ====================
 
     @Nested
-    class PageQuery {
-
-        @Test
-        void shouldApplyAllFiltersAndPaging() {
-            doReturn(new Page<>(2, 20)).when(service).page(any(IPage.class), any(Wrapper.class));
-            AgentRunQueryDTO query = new AgentRunQueryDTO();
-            query.setTraceId("trace-1");
-            query.setSessionId("session-1");
-            query.setAppId("app-1");
-            query.setUserId("user-1");
-            query.setStatus("running");
-            query.setHarnessType("chat");
-            query.setParentRunId("parent-1");
-            query.setModelName("gpt-4o");
-            query.setStartTime(LocalDateTime.of(2026, 1, 1, 0, 0));
-            query.setEndTime(LocalDateTime.of(2026, 2, 1, 0, 0));
-            query.setPageNum(2);
-            query.setPageSize(20);
-
-            service.pageQuery(query);
-
-            ArgumentCaptor<IPage<AgentRunEntity>> pageCaptor = ArgumentCaptor.forClass(IPage.class);
-            ArgumentCaptor<Wrapper<AgentRunEntity>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
-            verify(service).page(pageCaptor.capture(), wrapperCaptor.capture());
-            assertThat(pageCaptor.getValue().getCurrent()).isEqualTo(2);
-            assertThat(pageCaptor.getValue().getSize()).isEqualTo(20);
-            LambdaQueryWrapper<AgentRunEntity> wrapper = (LambdaQueryWrapper<AgentRunEntity>) wrapperCaptor.getValue();
-            assertThat(wrapper.getTargetSql()).contains("trace_id", "session_id", "app_id", "user_id",
-                    "status", "harness_type", "parent_run_id", "model_name", "start_time");
-            assertThat(wrapper.getSqlSegment()).containsIgnoringCase("ORDER BY");
-        }
-
-        @Test
-        void shouldUsePagingDefaultsAndSkipBlankFilters() {
-            doReturn(new Page<>(1, 10)).when(service).page(any(IPage.class), any(Wrapper.class));
-            AgentRunQueryDTO query = new AgentRunQueryDTO();
-            query.setPageNum(null);
-            query.setPageSize(null);
-
-            service.pageQuery(query);
-
-            ArgumentCaptor<IPage<AgentRunEntity>> pageCaptor = ArgumentCaptor.forClass(IPage.class);
-            ArgumentCaptor<Wrapper<AgentRunEntity>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
-            verify(service).page(pageCaptor.capture(), wrapperCaptor.capture());
-            assertThat(pageCaptor.getValue().getCurrent()).isEqualTo(1);
-            assertThat(pageCaptor.getValue().getSize()).isEqualTo(10);
-            LambdaQueryWrapper<AgentRunEntity> wrapper = (LambdaQueryWrapper<AgentRunEntity>) wrapperCaptor.getValue();
-            assertThat(wrapper.getTargetSql()).doesNotContain("trace_id", "session_id");
-        }
-    }
-
-    @Nested
     class Detail {
 
         @Test
@@ -749,21 +694,6 @@ class AgentRunServiceImplTest {
             LambdaQueryWrapper<AgentRunStepEntity> wrapper = (LambdaQueryWrapper<AgentRunStepEntity>) captor.getValue();
             assertThat(wrapper.getTargetSql()).contains("run_id");
             assertThat(wrapper.getSqlSegment()).containsIgnoringCase("ORDER BY").contains("step_no");
-        }
-
-        @Test
-        void shouldQueryRunsBySessionOrderedByStartTime() {
-            AgentRunEntity run = new AgentRunEntity();
-            run.setId("run-1");
-            doReturn(List.of(run)).when(service).list(any(Wrapper.class));
-
-            assertThat(service.listBySession("session-1")).containsExactly(run);
-
-            ArgumentCaptor<Wrapper<AgentRunEntity>> captor = ArgumentCaptor.forClass(Wrapper.class);
-            verify(service).list(captor.capture());
-            LambdaQueryWrapper<AgentRunEntity> wrapper = (LambdaQueryWrapper<AgentRunEntity>) captor.getValue();
-            assertThat(wrapper.getTargetSql()).contains("session_id");
-            assertThat(wrapper.getSqlSegment()).containsIgnoringCase("ORDER BY").contains("start_time");
         }
     }
 

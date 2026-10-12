@@ -123,7 +123,7 @@ class LlmTraceServiceImplTest {
         }
     }
 
-    // ==================== 单条与时间线 ====================
+    // ==================== 单条查询 ====================
 
     @Nested
     class DetailAndTimeline {
@@ -135,23 +135,6 @@ class LlmTraceServiceImplTest {
             doReturn(entity).when(service).getById("llm-1");
 
             assertThat(service.getDetail("llm-1")).isSameAs(entity);
-        }
-
-        @Test
-        void shouldQueryTimelineBySessionAscending() {
-            LlmTraceEntity entity = new LlmTraceEntity();
-            entity.setId("llm-1");
-            doReturn(List.of(entity)).when(service).list(any(Wrapper.class));
-
-            assertThat(service.timeline("session-1")).containsExactly(entity);
-
-            ArgumentCaptor<Wrapper<LlmTraceEntity>> captor = ArgumentCaptor.forClass(Wrapper.class);
-            verify(service).list(captor.capture());
-            LambdaQueryWrapper<LlmTraceEntity> wrapper = (LambdaQueryWrapper<LlmTraceEntity>) captor.getValue();
-            assertThat(wrapper.getTargetSql()).contains("session_id");
-            assertThat(wrapper.getSqlSegment()).containsIgnoringCase("ORDER BY").contains("start_time");
-            assertThat(wrapper.getSqlSelect()).isNull();
-            assertThat(wrapper.getParamNameValuePairs().values()).contains("session-1");
         }
     }
 

@@ -16,8 +16,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
-
 /**
  * LLM 调用追踪查询接口
  */
@@ -45,14 +43,6 @@ public class LlmTraceController {
     public R<LlmTraceEntity> detail(@PathVariable String id) {
         LlmTraceEntity entity = llmTraceService.getDetail(id);
         return entity != null ? R.data(entity) : R.fail("LLM 调用记录不存在");
-    }
-
-    /**
-     * 按会话 ID 查询 LLM 调用时间线
-     */
-    @GetMapping("/timeline")
-    public R<List<LlmTraceEntity>> timeline(String sessionId) {
-        return R.data(llmTraceService.timeline(sessionId));
     }
 
     /**

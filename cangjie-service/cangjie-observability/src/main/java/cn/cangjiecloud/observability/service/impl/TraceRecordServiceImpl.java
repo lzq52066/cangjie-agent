@@ -4,13 +4,10 @@ import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.core.observability.ExportedSpan;
 import cn.cangjiecloud.core.observability.TraceExporter;
 import cn.cangjiecloud.core.observability.TraceSpan;
-import cn.cangjiecloud.observability.dto.TraceQueryDTO;
 import cn.cangjiecloud.observability.entity.TraceRecordEntity;
 import cn.cangjiecloud.observability.mapper.TraceRecordMapper;
 import cn.cangjiecloud.observability.service.ITraceRecordService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -187,19 +184,6 @@ public class TraceRecordServiceImpl extends ServiceImpl<TraceRecordMapper, Trace
         } catch (Exception ex) {
             return null;
         }
-    }
-
-    @Override
-    public IPage<TraceRecordEntity> pageQuery(TraceQueryDTO query) {
-        LambdaQueryWrapper<TraceRecordEntity> wrapper = briefWrapper()
-                .eq(StringUtils.hasText(query.getTraceId()), TraceRecordEntity::getTraceId, query.getTraceId())
-                .eq(StringUtils.hasText(query.getModule()), TraceRecordEntity::getModule, query.getModule())
-                .eq(StringUtils.hasText(query.getAction()), TraceRecordEntity::getAction, query.getAction())
-                .ge(query.getStartTime() != null, TraceRecordEntity::getStartTime, query.getStartTime())
-                .le(query.getEndTime() != null, TraceRecordEntity::getStartTime, query.getEndTime())
-                .orderByDesc(TraceRecordEntity::getStartTime);
-        return page(new Page<>(query.getPageNum() == null ? 1 : query.getPageNum(),
-                query.getPageSize() == null ? 10 : query.getPageSize()), wrapper);
     }
 
     /**

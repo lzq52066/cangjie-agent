@@ -3,7 +3,6 @@ package cn.cangjiecloud.observability.controller;
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.common.constant.AppConst;
 import cn.cangjiecloud.observability.dto.LlmTraceStatsDTO;
-import cn.cangjiecloud.observability.dto.TraceQueryDTO;
 import cn.cangjiecloud.observability.entity.OperationLogEntity;
 import cn.cangjiecloud.observability.entity.SystemMetricEntity;
 import cn.cangjiecloud.observability.entity.TraceRecordEntity;
@@ -14,10 +13,8 @@ import cn.cangjiecloud.observability.service.ITraceRecordService;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -26,8 +23,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,11 +35,6 @@ import java.util.Map;
 @RequiredArgsConstructor
 @RequestMapping(AppConst.ADMIN_API + "/observability")
 public class ObservabilityController {
-
-    /**
-     * 图表接口单次读取的明细行上限，与分页插件的 maxLimit 对齐。
-     */
-    private static final int MAX_CHART_ROWS = 5000;
 
     private final IOperationLogService operationLogService;
     private final ISystemMetricService systemMetricService;
@@ -86,14 +76,6 @@ public class ObservabilityController {
     }
 
     /**
-     * 调用追踪分页
-     */
-    @GetMapping("/traces")
-    public R<IPage<TraceRecordEntity>> traces(TraceQueryDTO query) {
-        return R.data(traceRecordService.pageQuery(query));
-    }
-
-    /**
      * 单条 span 的完整载荷（检索 query / 召回片段与分数等）。
      * <p>
      * 链路详情只带精简列，正文在此按需拉取。
@@ -103,75 +85,6 @@ public class ObservabilityController {
     @GetMapping("/traces/{spanId}/payload")
     public R<TraceRecordEntity> spanPayload(@PathVariable String spanId) {
         return R.data(traceRecordService.payload(spanId));
-    }
-
-    /**
-     * 系统指标图表数据：支持时间范围过滤，按 metricType 分组多 series 返回
-     */
-    @GetMapping("/metrics/chart")
-    public R<Map<String, Object>> chart(
-            @RequestParam(required = false) String metricType,
-            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
-            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime) {
-
-        if (startTime == null) startTime = LocalDateTime.now().minusHours(2);
-        if (endTime == null) endTime = LocalDateTime.now();
-
-        // 明细行数随时间窗口线性增长，只取窗口内最新的 MAX_CHART_ROWS 条（不查 count），避免一次性物化全量结果
-        IPage<SystemMetricEntity> chartPage = systemMetricService.page(
-                new Page<>(1, MAX_CHART_ROWS, false),
-                new LambdaQueryWrapper<SystemMetricEntity>()
-                        .eq(StringUtils.hasText(metricType), SystemMetricEntity::getMetricType, metricType)
-                        .ge(SystemMetricEntity::getCollectTime, startTime)
-                        .le(SystemMetricEntity::getCollectTime, endTime)
-                        .orderByDesc(SystemMetricEntity::getCollectTime));
-        List<SystemMetricEntity> rows = new ArrayList<>(chartPage.getRecords());
-        Collections.reverse(rows);
-
-        // 按 metricType 分组，每组下多个 series（按 metricName）
-        Map<String, Map<String, Object>> typeGroups = new LinkedHashMap<>();
-        for (SystemMetricEntity row : rows) {
-            String type = row.getMetricType();
-            String name = row.getMetricName();
-            String unit = row.getUnit();
-
-            Map<String, Object> typeGroup = typeGroups.computeIfAbsent(type, k -> {
-                Map<String, Object> g = new LinkedHashMap<>();
-                g.put("metricType", type);
-                g.put("series", new ArrayList<Map<String, Object>>());
-                return g;
-            });
-
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> seriesList = (List<Map<String, Object>>) typeGroup.get("series");
-
-            // 找到或创建对应 metricName 的 series
-            Map<String, Object> seriesObj = null;
-            for (Map<String, Object> s : seriesList) {
-                if (name.equals(s.get("name"))) {
-                    seriesObj = s;
-                    break;
-                }
-            }
-            if (seriesObj == null) {
-                seriesObj = new LinkedHashMap<>();
-                seriesObj.put("name", name);
-                seriesObj.put("unit", unit);
-                seriesObj.put("data", new ArrayList<Map<String, Object>>());
-                seriesList.add(seriesObj);
-            }
-
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> data = (List<Map<String, Object>>) seriesObj.get("data");
-            Map<String, Object> point = new LinkedHashMap<>();
-            point.put("time", row.getCollectTime() != null ? row.getCollectTime().toString() : "");
-            point.put("value", row.getMetricValue());
-            data.add(point);
-        }
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("groups", new ArrayList<>(typeGroups.values()));
-        return R.data(result);
     }
 
     /**

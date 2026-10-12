@@ -2,7 +2,6 @@ package cn.cangjiecloud.observability.controller;
 
 import cn.cangjiecloud.common.api.R;
 import cn.cangjiecloud.observability.dto.LlmTraceStatsDTO;
-import cn.cangjiecloud.observability.dto.TraceQueryDTO;
 import cn.cangjiecloud.observability.entity.OperationLogEntity;
 import cn.cangjiecloud.observability.entity.SystemMetricEntity;
 import cn.cangjiecloud.observability.entity.TraceRecordEntity;
@@ -41,13 +40,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * {@link ObservabilityController} 单元测试：验证日志/指标/追踪查询的参数透传、
- * chart 的时间窗口兜底与分组整形、dashboard 的统计聚合与条件拼接。
+ * {@link ObservabilityController} 单元测试：验证日志/指标查询的参数透传、
+ * dashboard 的统计聚合与条件拼接。
  */
 @ExtendWith(MockitoExtension.class)
 class ObservabilityControllerTest {
-
-    private static final int MAX_CHART_ROWS = 5000;
 
     @Mock
     private IOperationLogService operationLogService;
@@ -92,28 +89,6 @@ class ObservabilityControllerTest {
         entity.setMetricValue(value);
         entity.setCollectTime(time);
         return entity;
-    }
-
-    @SuppressWarnings("unchecked")
-    private void stubChartPage(List<SystemMetricEntity> rows) {
-        Page<SystemMetricEntity> page = new Page<>(1, MAX_CHART_ROWS, false);
-        page.setRecords(rows);
-        doReturn(page).when(systemMetricService).page(any(Page.class), any(Wrapper.class));
-    }
-
-    @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> groupsOf(R<Map<String, Object>> response) {
-        return (List<Map<String, Object>>) response.getData().get("groups");
-    }
-
-    @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> seriesOf(Map<String, Object> group) {
-        return (List<Map<String, Object>>) group.get("series");
-    }
-
-    @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> dataOf(Map<String, Object> series) {
-        return (List<Map<String, Object>>) series.get("data");
     }
 
     @Nested
@@ -174,138 +149,6 @@ class ObservabilityControllerTest {
             assertThat(response.isSuccess()).isTrue();
             assertThat(response.getData()).isSameAs(collected);
             verify(systemMetricService).collect();
-        }
-    }
-
-    @Nested
-    class Traces {
-
-        @Test
-        void shouldDelegateTraceQueryDto() {
-            // 正常场景：追踪查询 DTO 原样传给 Service
-            TraceQueryDTO query = new TraceQueryDTO();
-            query.setModule("chat");
-            query.setPageNum(2);
-            query.setPageSize(10);
-            Page<TraceRecordEntity> page = new Page<>(2, 10);
-            when(traceRecordService.pageQuery(query)).thenReturn(page);
-
-            R<IPage<TraceRecordEntity>> response = controller.traces(query);
-
-            assertThat(response.getData()).isSameAs(page);
-            verify(traceRecordService).pageQuery(query);
-        }
-    }
-
-    @Nested
-    class Chart {
-
-        @Test
-        void shouldApplyDefaultWindowReverseRowsAndGroupByTypeAndName() {
-            // 正常场景：缺省时间窗为最近 2 小时；倒序明细反转成升序并按 type/name 分组
-            LocalDateTime t1 = LocalDateTime.of(2026, 1, 1, 10, 0);
-            LocalDateTime t2 = LocalDateTime.of(2026, 1, 1, 10, 5);
-            LocalDateTime t3 = LocalDateTime.of(2026, 1, 1, 10, 10);
-            // Service 返回按 collect_time 倒序的最新行
-            stubChartPage(List.of(
-                    metric("memory", "heap_used", "MB", 300.0, t3),
-                    metric("cpu", "usage", "%", 12.5, t2),
-                    metric("cpu", "usage", "%", 10.0, t1)));
-
-            R<Map<String, Object>> response = controller.chart(null, null, null);
-
-            assertThat(response.isSuccess()).isTrue();
-
-            // 单次读取按 maxLimit 截断、不做 count
-            ArgumentCaptor<IPage<SystemMetricEntity>> pageCap = ArgumentCaptor.forClass(IPage.class);
-            ArgumentCaptor<Wrapper<SystemMetricEntity>> wrapperCap = ArgumentCaptor.forClass(Wrapper.class);
-            verify(systemMetricService).page(pageCap.capture(), wrapperCap.capture());
-            Page<?> requested = (Page<?>) pageCap.getValue();
-            assertThat(requested.getCurrent()).isEqualTo(1);
-            assertThat(requested.getSize()).isEqualTo(MAX_CHART_ROWS);
-            assertThat(requested.searchCount()).isFalse();
-
-            // 无 metricType 时不拼类型条件；时间窗命中 collect_time，倒序取最新
-            LambdaQueryWrapper<?> wrapper = (LambdaQueryWrapper<?>) wrapperCap.getValue();
-            assertThat(wrapper.getTargetSql()).contains("collect_time").doesNotContain("metric_type");
-            assertThat(wrapper.getSqlSegment()).containsIgnoringCase("ORDER BY");
-
-            // 时间参数为 now-2h ~ now
-            List<LocalDateTime> window = wrapper.getParamNameValuePairs().values().stream()
-                    .map(LocalDateTime.class::cast)
-                    .sorted()
-                    .toList();
-            assertThat(window).hasSize(2);
-            assertThat(window.get(0)).isAfter(LocalDateTime.now().minusHours(2).minusMinutes(5));
-            assertThat(window.get(1)).isAfter(LocalDateTime.now().minusMinutes(5));
-
-            // 反转后按 collect_time 升序，且分组顺序为首次出现顺序
-            List<Map<String, Object>> groups = groupsOf(response);
-            assertThat(groups).hasSize(2);
-            Map<String, Object> cpuGroup = groups.get(0);
-            assertThat(cpuGroup).containsEntry("metricType", "cpu");
-            List<Map<String, Object>> cpuSeries = seriesOf(cpuGroup);
-            assertThat(cpuSeries).hasSize(1);
-            assertThat(cpuSeries.get(0)).containsEntry("name", "usage").containsEntry("unit", "%");
-            List<Map<String, Object>> points = dataOf(cpuSeries.get(0));
-            assertThat(points).hasSize(2);
-            assertThat(points.get(0)).containsEntry("time", t1.toString()).containsEntry("value", 10.0);
-            assertThat(points.get(1)).containsEntry("time", t2.toString()).containsEntry("value", 12.5);
-
-            Map<String, Object> memoryGroup = groups.get(1);
-            assertThat(memoryGroup).containsEntry("metricType", "memory");
-            List<Map<String, Object>> memoryPoints = dataOf(seriesOf(memoryGroup).get(0));
-            assertThat(memoryPoints).hasSize(1);
-            assertThat(memoryPoints.get(0)).containsEntry("value", 300.0);
-        }
-
-        @Test
-        void shouldFilterByMetricTypeAndPassExplicitRange() {
-            // 正常场景：显式 metricType 与时间范围入条件；同类型不同 name 生成多 series
-            LocalDateTime start = LocalDateTime.of(2026, 1, 1, 0, 0);
-            LocalDateTime end = LocalDateTime.of(2026, 1, 1, 12, 0);
-            stubChartPage(List.of(
-                    metric("cpu", "load", "", 0.5, start.plusHours(2)),
-                    metric("cpu", "usage", "%", 1.0, start.plusHours(1))));
-
-            R<Map<String, Object>> response = controller.chart("cpu", start, end);
-
-            ArgumentCaptor<Wrapper<SystemMetricEntity>> wrapperCap = ArgumentCaptor.forClass(Wrapper.class);
-            verify(systemMetricService).page(any(Page.class), wrapperCap.capture());
-            LambdaQueryWrapper<?> wrapper = (LambdaQueryWrapper<?>) wrapperCap.getValue();
-            assertThat(wrapper.getTargetSql()).contains("metric_type");
-            assertThat(wrapper.getParamNameValuePairs().values()).contains("cpu", start, end);
-
-            List<Map<String, Object>> groups = groupsOf(response);
-            assertThat(groups).hasSize(1);
-            List<Map<String, Object>> series = seriesOf(groups.get(0));
-            assertThat(series).hasSize(2);
-            // 反转后 usage(1h) 在前、load(2h) 在后
-            assertThat(series.get(0)).containsEntry("name", "usage");
-            assertThat(series.get(1)).containsEntry("name", "load");
-        }
-
-        @Test
-        void shouldEmitEmptyTimeStringWhenCollectTimeMissing() {
-            // 边界场景：collect_time 为空的脏数据不会 NPE，时间位补空串
-            stubChartPage(List.of(metric("jvm", "uptime", "ms", 1234.0, null)));
-
-            R<Map<String, Object>> response = controller.chart(null, null, null);
-
-            List<Map<String, Object>> points = dataOf(seriesOf(groupsOf(response).get(0)).get(0));
-            assertThat(points).hasSize(1);
-            assertThat(points.get(0)).containsEntry("time", "").containsEntry("value", 1234.0);
-        }
-
-        @Test
-        void shouldReturnEmptyGroupsWhenNoMetricMatched() {
-            // 边界场景：窗口内无指标返回空 groups 而非失败或 null
-            stubChartPage(List.of());
-
-            R<Map<String, Object>> response = controller.chart("cpu", null, null);
-
-            assertThat(response.isSuccess()).isTrue();
-            assertThat(groupsOf(response)).isEmpty();
         }
     }
 

@@ -23,7 +23,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * {@link LlmTraceController} 单元测试：验证分页/详情/时间线/评测趋势接口的委托与不存在分支。
+ * {@link LlmTraceController} 单元测试：验证分页/详情/评测趋势接口的委托与不存在分支。
  */
 @ExtendWith(MockitoExtension.class)
 class LlmTraceControllerTest {
@@ -118,37 +118,6 @@ class LlmTraceControllerTest {
             assertThat(response.getMsg()).isEqualTo("LLM 调用记录不存在");
             assertThat(response.getData()).isNull();
             verify(llmTraceService).getDetail("missing");
-        }
-    }
-
-    @Nested
-    class Timeline {
-
-        @Test
-        void shouldDelegateSessionIdAndWrapList() {
-            // 正常场景：按会话查询时间线
-            List<LlmTraceEntity> traces = List.of(
-                    trace("t-3", "gpt-4o", "success"),
-                    trace("t-4", "gpt-4o-mini", "fail"));
-            when(llmTraceService.timeline("session-7")).thenReturn(traces);
-
-            R<List<LlmTraceEntity>> response = controller.timeline("session-7");
-
-            assertThat(response.isSuccess()).isTrue();
-            assertThat(response.getData()).isSameAs(traces);
-            verify(llmTraceService).timeline("session-7");
-        }
-
-        @Test
-        void shouldReturnEmptyListAsSuccessWhenSessionHasNoTrace() {
-            // 边界场景：会话无调用记录返回空列表而非失败
-            when(llmTraceService.timeline("empty")).thenReturn(List.of());
-
-            R<List<LlmTraceEntity>> response = controller.timeline("empty");
-
-            assertThat(response.isSuccess()).isTrue();
-            assertThat(response.getData()).isEmpty();
-            verify(llmTraceService).timeline("empty");
         }
     }
 

@@ -8,7 +8,6 @@ import cn.cangjiecloud.core.harness.ResumeState;
 import cn.cangjiecloud.core.harness.RunStatus;
 import cn.cangjiecloud.observability.context.TraceContext;
 import cn.cangjiecloud.observability.dto.AgentRunDetailVO;
-import cn.cangjiecloud.observability.dto.AgentRunQueryDTO;
 import cn.cangjiecloud.observability.entity.AgentApprovalEntity;
 import cn.cangjiecloud.observability.entity.AgentRunEntity;
 import cn.cangjiecloud.observability.entity.AgentRunStepEntity;
@@ -21,8 +20,6 @@ import cn.hutool.core.util.IdUtil;
 import cn.cangjiecloud.common.util.JsonUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -284,24 +281,6 @@ public class AgentRunServiceImpl extends ServiceImpl<AgentRunMapper, AgentRunEnt
     // ==================== 查询 ====================
 
     @Override
-    public IPage<AgentRunEntity> pageQuery(AgentRunQueryDTO query) {
-        LambdaQueryWrapper<AgentRunEntity> wrapper = new LambdaQueryWrapper<AgentRunEntity>()
-                .like(StringUtils.hasText(query.getTraceId()), AgentRunEntity::getTraceId, query.getTraceId())
-                .eq(StringUtils.hasText(query.getSessionId()), AgentRunEntity::getSessionId, query.getSessionId())
-                .eq(StringUtils.hasText(query.getAppId()), AgentRunEntity::getAppId, query.getAppId())
-                .eq(StringUtils.hasText(query.getUserId()), AgentRunEntity::getUserId, query.getUserId())
-                .eq(StringUtils.hasText(query.getStatus()), AgentRunEntity::getStatus, query.getStatus())
-                .eq(StringUtils.hasText(query.getHarnessType()), AgentRunEntity::getHarnessType, query.getHarnessType())
-                .eq(StringUtils.hasText(query.getParentRunId()), AgentRunEntity::getParentRunId, query.getParentRunId())
-                .like(StringUtils.hasText(query.getModelName()), AgentRunEntity::getModelName, query.getModelName())
-                .ge(query.getStartTime() != null, AgentRunEntity::getStartTime, query.getStartTime())
-                .le(query.getEndTime() != null, AgentRunEntity::getStartTime, query.getEndTime())
-                .orderByDesc(AgentRunEntity::getStartTime);
-        return page(new Page<>(query.getPageNum() == null ? 1 : query.getPageNum(),
-                query.getPageSize() == null ? 10 : query.getPageSize()), wrapper);
-    }
-
-    @Override
     public AgentRunDetailVO detail(String runId) {
         AgentRunEntity run = getById(runId);
         if (run == null) {
@@ -325,13 +304,6 @@ public class AgentRunServiceImpl extends ServiceImpl<AgentRunMapper, AgentRunEnt
         return stepMapper.selectList(new LambdaQueryWrapper<AgentRunStepEntity>()
                 .eq(AgentRunStepEntity::getRunId, runId)
                 .orderByAsc(AgentRunStepEntity::getStepNo));
-    }
-
-    @Override
-    public List<AgentRunEntity> listBySession(String sessionId) {
-        return list(new LambdaQueryWrapper<AgentRunEntity>()
-                .eq(AgentRunEntity::getSessionId, sessionId)
-                .orderByAsc(AgentRunEntity::getStartTime));
     }
 
     /**

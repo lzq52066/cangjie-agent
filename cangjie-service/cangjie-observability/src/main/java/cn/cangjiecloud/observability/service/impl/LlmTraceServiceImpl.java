@@ -63,14 +63,6 @@ public class LlmTraceServiceImpl extends ServiceImpl<LlmTraceMapper, LlmTraceEnt
     }
 
     @Override
-    public List<LlmTraceEntity> timeline(String sessionId) {
-        LambdaQueryWrapper<LlmTraceEntity> wrapper = new LambdaQueryWrapper<LlmTraceEntity>()
-                .eq(LlmTraceEntity::getSessionId, sessionId)
-                .orderByAsc(LlmTraceEntity::getStartTime);
-        return list(wrapper);
-    }
-
-    @Override
     public List<LlmTraceEntity> listByRun(String runId) {
         if (!StringUtils.hasText(runId)) {
             return List.of();

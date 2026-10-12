@@ -4,15 +4,12 @@ import cn.cangjiecloud.common.util.JsonUtils;
 import cn.cangjiecloud.core.observability.ExportedSpan;
 import cn.cangjiecloud.core.observability.TraceExporter;
 import cn.cangjiecloud.core.observability.TraceSpan;
-import cn.cangjiecloud.observability.dto.TraceQueryDTO;
 import cn.cangjiecloud.observability.entity.TraceRecordEntity;
 import cn.cangjiecloud.observability.mapper.TraceRecordMapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -284,58 +281,6 @@ class TraceRecordServiceImplTest {
             LambdaQueryWrapper<?> wrapper = (LambdaQueryWrapper<?>) wrapperCaptor.getValue();
             assertThat(wrapper.getTargetSql()).contains("span_id");
             assertThat(wrapper.getParamNameValuePairs().values()).contains("span-1");
-        }
-    }
-
-    // ==================== pageQuery ====================
-
-    @Nested
-    class PageQuery {
-
-        @Test
-        void shouldApplyFiltersAndOrderByStartTimeDesc() {
-            doReturn(new Page<>(3, 50)).when(service).page(any(IPage.class), any(Wrapper.class));
-            TraceQueryDTO query = new TraceQueryDTO();
-            query.setTraceId("trace-1");
-            query.setModule("order");
-            query.setAction("create");
-            query.setStartTime(LocalDateTime.of(2026, 1, 1, 0, 0));
-            query.setEndTime(LocalDateTime.of(2026, 2, 1, 0, 0));
-            query.setPageNum(3);
-            query.setPageSize(50);
-
-            IPage<TraceRecordEntity> page = service.pageQuery(query);
-
-            assertThat(page.getCurrent()).isEqualTo(3);
-            assertThat(page.getSize()).isEqualTo(50);
-
-            ArgumentCaptor<IPage<TraceRecordEntity>> pageCaptor = ArgumentCaptor.forClass(IPage.class);
-            ArgumentCaptor<Wrapper<TraceRecordEntity>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
-            verify(service).page(pageCaptor.capture(), wrapperCaptor.capture());
-            LambdaQueryWrapper<TraceRecordEntity> wrapper =
-                    (LambdaQueryWrapper<TraceRecordEntity>) wrapperCaptor.getValue();
-            assertThat(wrapper.getTargetSql()).contains("trace_id", "module", "action", "start_time");
-            assertThat(wrapper.getSqlSegment()).containsIgnoringCase("ORDER BY").contains("start_time");
-            assertThat(wrapper.getParamNameValuePairs().values()).contains("trace-1", "order", "create");
-        }
-
-        @Test
-        void shouldUsePagingDefaultsAndSkipBlankFilters() {
-            doReturn(new Page<>(1, 10)).when(service).page(any(IPage.class), any(Wrapper.class));
-            TraceQueryDTO query = new TraceQueryDTO();
-            query.setTraceId(" ");
-            query.setPageNum(null);
-            query.setPageSize(null);
-
-            service.pageQuery(query);
-
-            ArgumentCaptor<IPage<TraceRecordEntity>> pageCaptor = ArgumentCaptor.forClass(IPage.class);
-            ArgumentCaptor<Wrapper<TraceRecordEntity>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
-            verify(service).page(pageCaptor.capture(), wrapperCaptor.capture());
-            assertThat(pageCaptor.getValue().getCurrent()).isEqualTo(1);
-            assertThat(pageCaptor.getValue().getSize()).isEqualTo(10);
-            assertThat(((LambdaQueryWrapper<TraceRecordEntity>) wrapperCaptor.getValue()).getTargetSql())
-                    .doesNotContain("trace_id", "module", "action");
         }
     }
 
