@@ -362,7 +362,10 @@ class LlmTraceRecorderImplTest {
             assertThatCode(() -> async.destroy()).doesNotThrowAnyException();
         }
 
-        /** 写失败不重投不抖队列：剩下的等下一轮，不把一次库故障刷成日志风暴 */
+        /**
+         * 写失败不接着挖队列，但这一批要能等下一轮：一次库抖动作把缓冲整段丢掉，
+         * 等于「库坏了三分钟，那三分钟的调用记录全没了」，而采样率与容量看起来都正常。
+         */
         @Test
         void shouldStopDrainingWhenBatchWriteFails() {
             LlmTraceRecorderImpl async = asyncRecorder(100, 1);
@@ -372,8 +375,25 @@ class LlmTraceRecorderImplTest {
 
             async.destroy();
 
+            // 失败按批计一次，两条都退回缓冲原地等下一轮，一条没丢
             assertThat(async.writeFailureCount()).isEqualTo(1);
-            assertThat(async.queuedSize()).isEqualTo(1);
+            assertThat(async.queuedSize()).isEqualTo(2);
+            assertThat(async.droppedCount()).isZero();
+        }
+
+        /** 退不回来（缓冲已被新数据占满）的那些才计入丢弃，别让丢数静默发生 */
+        @Test
+        void shouldCountLostRowsWhenRequeueDoesNotFit() {
+            LlmTraceRecorderImpl async = asyncRecorder(1, 10);
+            doThrow(new RuntimeException("db down")).when(llmTraceService).saveBatch(anyList());
+            async.recordSuccess(record("t0"));
+            async.recordSuccess(record("t1"));
+            async.recordSuccess(record("t2"));
+
+            async.destroy();
+
+            assertThat(async.droppedCount()).isPositive();
+            assertThat(async.writeFailureCount()).isPositive();
         }
 
         /** 采样只剔成功调用：失败永远留档，否则可观测性就只剩下「一切正常」 */
@@ -397,6 +417,37 @@ class LlmTraceRecorderImplTest {
                         assertThat(trace.getTraceId()).isEqualTo("bad-1");
                         assertThat(trace.getStatus()).isEqualTo("fail");
                     });
+        }
+
+        /**
+         * 采样按 traceId 决定，而不是按条掷骰子：一次请求的 2~5 条模型调用要么整条链路留下，
+         * 要么整条链路不留 —— 逐条随机会留下「只有第二次调用、没有第一次」的残片，
+         * 链路视图与耗时/Token 汇总都不再可信。
+         */
+        @Test
+        void samplingShouldBeStickyWithinOneTraceId() {
+            LlmTraceRecorderImpl async = asyncRecorder(100, 10);
+            ReflectionTestUtils.setField(async, "sampleRate", 0.5);
+
+            for (int i = 0; i < 5; i++) {
+                async.recordSuccess(record("same-trace"));
+            }
+
+            // 同 traceId 只会是「全收」或「全丢」两种结果
+            assertThat(async.queuedSize()).isIn(0, 5);
+        }
+
+        /** 同一采样率下不同 traceId 仍要散布开，否则抽样失去代表性 */
+        @Test
+        void samplingShouldSpreadAcrossTraceIds() {
+            LlmTraceRecorderImpl async = asyncRecorder(100, 10);
+            ReflectionTestUtils.setField(async, "sampleRate", 0.5);
+
+            for (int i = 0; i < 40; i++) {
+                async.recordSuccess(record("trace-" + i));
+            }
+
+            assertThat(async.queuedSize()).isBetween(5, 35);
         }
 
         /** 采样率 1 全留，不因为多一层随机而丢数据 */

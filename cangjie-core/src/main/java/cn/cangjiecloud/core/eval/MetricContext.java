@@ -43,13 +43,24 @@ public record MetricContext(JudgeFunction judge, EmbeddingFunction embedding, Ma
         return embedding != null;
     }
 
-    /** 取整数配置，非数字或越界回落到默认值（配置来自前端 JSON，不能让它把评估带崩） */
+    /**
+     * 取整数配置，非数字或越界回落到默认值（配置来自前端 JSON，不能让它把评估带崩）。
+     * <p>
+     * 数字字符串也算：前端表单和 {@code eval_run.config} 里的值经常是 "5" 这种文本，
+     * 只认 Number 会让这项配置静默失效、指标按默认值跑，而报告上看不出它没被应用过。
+     */
     public int intConfig(String key, int defaultValue) {
         Object raw = config.get(key);
+        Integer value = null;
         if (raw instanceof Number number) {
-            int value = number.intValue();
-            return value > 0 ? value : defaultValue;
+            value = number.intValue();
+        } else if (raw != null) {
+            try {
+                value = Integer.valueOf(String.valueOf(raw).trim());
+            } catch (NumberFormatException ignored) {
+                value = null;
+            }
         }
-        return defaultValue;
+        return value != null && value > 0 ? value : defaultValue;
     }
 }

@@ -46,6 +46,18 @@ public class RagContributor implements ContextContributor {
     /** 片段正文写入留痕时的截断长度：够定位「召回的是哪一段」，又不至于把 trace 表撑爆 */
     private static final int MAX_SNIPPET_CHARS = 500;
 
+    /**
+     * 送进模型的单段正文上限。
+     * <p>
+     * 与留痕用的 {@link #MAX_SNIPPET_CHARS} 分开：留痕要能认出是哪一段，送模型则要控住上下文占用。
+     */
+    @Value("${cangjie.rag.max-snippet-chars:2000}")
+    private int maxSnippetChars = 2000;
+
+    /** 全部片段合计送进模型的上限（约 6k token），超出的片段直接不进 prompt */
+    @Value("${cangjie.rag.max-prompt-chars:12000}")
+    private int maxPromptBudgetChars = 12000;
+
     private final HybridRetriever hybridRetriever;
     private final QueryRewriterFactory queryRewriterFactory;
 
@@ -115,12 +127,22 @@ public class RagContributor implements ContextContributor {
         } catch (Exception e) {
             // 失败时同样把输入落库：不知道用了什么 query 的失败检索无法复现
             recordTrace(request, originalQuery, query, options, retrievalStart, "fail",
-                    "知识库检索失败: " + e.getMessage(), List.of());
+                    "知识库检索失败: " + e.getMessage(), List.of(), List.of());
             log.warn("知识库检索失败: {}", e.getMessage());
             return ContextFragment.empty(slot(), name());
         }
-        recordTrace(request, originalQuery, query, options, retrievalStart, "success",
-                "知识库检索: " + results.size() + " 条结果", results);
+        // 降级要留在链路里：向量路是唯一受相似度阈值约束的通道，它挂了这批结果就是无阈值全文召回，
+        // 而 span 若仍是一句「检索 5 条结果 / success」，排障方向会被彻底带偏（看着像召回质量差）。
+        // 状态沿用 success —— 检索确实返回了东西，标成 fail 会和「整条请求失败」混在一起；
+        // 区分靠 message 与 metadata.failedChannels
+        List<String> failedChannels = failedChannelsOf(results);
+        String outcome = "知识库检索: " + results.size() + " 条结果"
+                + (failedChannels.isEmpty() ? ""
+                : "（降级：仅 " + survivingChannels(failedChannels) + " 通道，无相似度阈值过滤）");
+        recordTrace(request, originalQuery, query, options, retrievalStart, "success", outcome, results, failedChannels);
+        if (!failedChannels.isEmpty()) {
+            log.warn("知识库检索降级: 通道 {} 失败，本次结果未经相似度阈值过滤", failedChannels);
+        }
         if (results.isEmpty()) {
             return ContextFragment.empty(slot(), name());
         }
@@ -131,9 +153,17 @@ public class RagContributor implements ContextContributor {
                 sources instanceof List<?> list ? (List<Map<String, Object>>) list : null;
         for (int i = 0; i < results.size(); i++) {
             RetrievalResult r = results.get(i);
+            // 进 prompt 的正文要设上限：条数只由 cangjie.rag.top-k 控制，单个 chunk 配大时
+            // 几段原文就能把上下文窗口占满，把系统提示与历史挤出去（MAX_SNIPPET_CHARS 管的是留痕，不是出网）
+            if (prompt.length() >= maxPromptBudgetChars) {
+                log.warn("知识库片段总量已达 prompt 上限（{} 字），本次只送前 {} 段",
+                        maxPromptBudgetChars, i);
+                break;
+            }
+            String body = promptSnippet(r.getContent());
             prompt.append("【片段").append(i + 1).append("】")
                     .append("来源：").append(getDocumentName(r)).append("\n")
-                    .append("内容：").append(r.getContent()).append("\n\n");
+                    .append("内容：").append(body).append("\n\n");
 
             if (retrievalSources != null) {
                 Map<String, Object> source = new HashMap<>();
@@ -156,7 +186,7 @@ public class RagContributor implements ContextContributor {
      */
     private void recordTrace(ContextRequest request, String originalQuery, String effectiveQuery,
                             RetrievalOptions options, long startMs, String status, String message,
-                            List<RetrievalResult> results) {
+                            List<RetrievalResult> results, List<String> failedChannels) {
         if (traceCollector == null) {
             return;
         }
@@ -177,12 +207,18 @@ public class RagContributor implements ContextContributor {
             input.put("knowledgeBaseIds", options.getKnowledgeBaseIds());
             input.put("topK", options.getTopK());
 
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("candidateCount", results.size());
+            if (!failedChannels.isEmpty()) {
+                metadata.put("failedChannels", failedChannels);
+            }
+
             TraceSpan span = TraceSpan.builder()
                     .module("retrieval").action("search").traceId(request.getTraceId())
                     .duration(duration).status(status).message(message)
                     .input(JsonUtils.toJSONString(input))
                     .output(results.isEmpty() ? null : JsonUtils.toJSONString(toPayload(results)))
-                    .metadata(Map.of("candidateCount", results.size()))
+                    .metadata(metadata)
                     .build();
             traceCollector.record(span);
         } catch (Exception e) {
@@ -245,6 +281,42 @@ public class RagContributor implements ContextContributor {
             return content;
         }
         return content.substring(0, MAX_SNIPPET_CHARS) + "...[truncated]";
+    }
+
+    /** 送进模型的正文裁剪，与留痕的 {@link #truncate(String)} 各用各的上限 */
+    private String promptSnippet(String content) {
+        if (content == null || content.length() <= maxSnippetChars) {
+            return content;
+        }
+        return content.substring(0, maxSnippetChars) + "...[truncated]";
+    }
+
+    /**
+     * 从结果里读回「哪一路挂了」（由检索侧写在 {@link RetrievalResult#META_FAILED_CHANNELS} 里）。
+     */
+    private static List<String> failedChannelsOf(List<RetrievalResult> results) {
+        for (RetrievalResult r : results) {
+            if (r.getMetadata() == null) {
+                continue;
+            }
+            Object failed = r.getMetadata().get(RetrievalResult.META_FAILED_CHANNELS);
+            if (failed instanceof List<?> list && !list.isEmpty()) {
+                return list.stream().map(String::valueOf).toList();
+            }
+        }
+        return List.of();
+    }
+
+    /** 降级提示要说的是「还剩哪一路」，不是「挂了哪一路」 */
+    private static String survivingChannels(List<String> failed) {
+        List<String> all = new ArrayList<>(List.of("向量", "全文"));
+        if (failed.contains("vector")) {
+            all.remove("向量");
+        }
+        if (failed.contains("fullText")) {
+            all.remove("全文");
+        }
+        return all.isEmpty() ? "无可用通道" : String.join("+", all);
     }
 
     private String getDocumentName(RetrievalResult r) {

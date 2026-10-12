@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 指标注册表与执行器。
@@ -28,10 +29,23 @@ public class EvalMetricRegistry {
 
     private final Map<String, EvalMetric> metrics;
 
+    /**
+     * 已有真实列的指标名（文档口径召回、判定正确性）。
+     * <p>
+     * 这两个名字走的是固定列与固定汇总槽位，SPI 指标若同名会把读数额外并进列口径，
+     * 报告上出现两行名字一样、来源不一样的分数。注册时直接拒掉，别等汇总去猜。
+     */
+    private static final Set<String> RESERVED_NAMES = Set.of("recall", "correctness");
+
     public EvalMetricRegistry(List<EvalMetric> metrics) {
         Map<String, EvalMetric> byName = new LinkedHashMap<>();
         for (EvalMetric metric : metrics == null ? Collections.<EvalMetric>emptyList() : metrics) {
             if (metric == null || metric.name() == null || metric.name().isBlank()) {
+                continue;
+            }
+            if (RESERVED_NAMES.contains(metric.name())) {
+                log.warn("评估指标名与内置列冲突，已忽略该实现: name={}, class={}",
+                        metric.name(), metric.getClass().getSimpleName());
                 continue;
             }
             EvalMetric previous = byName.putIfAbsent(metric.name(), metric);
@@ -78,6 +92,10 @@ public class EvalMetricRegistry {
 
     /**
      * 跑一批指标。返回的 map 保留指标顺序，key 是指标名。
+     * <p>
+     * 出分一律过 {@link MetricScore#clamp}：指标是对外扩展点，第三方实现返回 1.5、NaN
+     * 或负数都有可能，这类值直接进累加器就会污染整轮均值与报告。越界按「本该出分却没出」
+     * 处理（{@code failed}），不夹成 1.0 —— 猜出来的上限值比一个空洞更误导。
      */
     public Map<String, MetricScore> run(EvalSample sample, MetricContext context, List<EvalMetric> selected) {
         Map<String, MetricScore> scores = new LinkedHashMap<>();
@@ -92,8 +110,18 @@ public class EvalMetricRegistry {
                     continue;
                 }
                 MetricScore score = metric.score(sample, context);
-                // 指标自己也不能返回 null：宁可记成「没出分 + 原因」，别让一行残缺数据把汇总带崩
-                scores.put(name, score == null ? MetricScore.failed("指标未返回结果") : score);
+                if (score == null) {
+                    // 指标自己也不能返回 null：宁可记成「没出分 + 原因」，别让一行残缺数据把汇总带崩
+                    scores.put(name, MetricScore.failed("指标未返回结果"));
+                    continue;
+                }
+                Double valid = MetricScore.clamp(score.value());
+                if (valid == null && score.evaluated()) {
+                    log.warn("指标返回越界分数，按未评测处理: metric={}, value={}", name, score.value());
+                    scores.put(name, MetricScore.failed("指标返回的分数不在 0~1 区间: " + score.value()));
+                    continue;
+                }
+                scores.put(name, score);
             } catch (Exception e) {
                 log.warn("指标执行失败: metric={}, {}", name, e.getMessage());
                 scores.put(name, MetricScore.failed("指标执行异常: "

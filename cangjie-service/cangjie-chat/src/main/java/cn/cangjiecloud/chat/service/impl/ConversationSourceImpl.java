@@ -91,12 +91,23 @@ public class ConversationSourceImpl implements ConversationSource {
         // 批量把配对问题取回来：逐条查会变成 N+1，一次点击几百条查询把回流做成压测
         Map<String, List<ChatMessageEntity>> questionsBySession = loadUserMessages(answers);
         List<ConversationSample> samples = new ArrayList<>(answers.size());
+        List<ChatMessageEntity> matched = new ArrayList<>(answers.size());
         for (ChatMessageEntity answer : answers) {
-            samples.add(toSample(answer, pickQuestion(questionsBySession.get(answer.getSessionId()), answer)));
+            matched.add(pickQuestion(questionsBySession.get(answer.getSessionId()), answer));
+        }
+        fillQuestionContents(matched);
+        for (int i = 0; i < answers.size(); i++) {
+            samples.add(toSample(answers.get(i), matched.get(i)));
         }
         return samples;
     }
 
+    /**
+     * 拉取候选会话里的用户消息，只取定序需要的三列。
+     * <p>
+     * 不投影的话会把整个会话的正文一次性读进内存，而配对只用时间戳：一次回流几百条时，
+     * 未用到的正文就是纯粹的内存负担。正文留到 {@link #fillQuestionContents} 里按 ID 精确回捞。
+     */
     private Map<String, List<ChatMessageEntity>> loadUserMessages(List<ChatMessageEntity> answers) {
         List<String> sessionIds = answers.stream()
                 .map(ChatMessageEntity::getSessionId)
@@ -107,6 +118,8 @@ public class ConversationSourceImpl implements ConversationSource {
             return Map.of();
         }
         List<ChatMessageEntity> questions = chatMessageService.list(new LambdaQueryWrapper<ChatMessageEntity>()
+                .select(ChatMessageEntity::getId, ChatMessageEntity::getSessionId,
+                        ChatMessageEntity::getCreateTime)
                 .in(ChatMessageEntity::getSessionId, sessionIds)
                 .eq(ChatMessageEntity::getRole, ROLE_USER)
                 .orderByAsc(ChatMessageEntity::getCreateTime));
@@ -115,6 +128,32 @@ public class ConversationSourceImpl implements ConversationSource {
             bySession.computeIfAbsent(question.getSessionId(), key -> new ArrayList<>()).add(question);
         }
         return bySession;
+    }
+
+    /**
+     * 按最终命中的问题 ID 批量补齐正文：一条 {@code IN} 查询，量级等于本次回流的样本数。
+     */
+    private void fillQuestionContents(List<ChatMessageEntity> matched) {
+        List<String> ids = matched.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(ChatMessageEntity::getId)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
+        if (ids.isEmpty()) {
+            return;
+        }
+        Map<String, String> contentById = new LinkedHashMap<>();
+        for (ChatMessageEntity question : chatMessageService.listByIds(ids)) {
+            if (question != null) {
+                contentById.put(question.getId(), question.getContent());
+            }
+        }
+        for (ChatMessageEntity question : matched) {
+            if (question != null) {
+                question.setContent(contentById.get(question.getId()));
+            }
+        }
     }
 
     /**

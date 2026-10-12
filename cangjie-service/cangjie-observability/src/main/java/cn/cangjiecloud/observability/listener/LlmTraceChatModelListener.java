@@ -57,9 +57,11 @@ public class LlmTraceChatModelListener implements ChatModelListener {
                             .responseContent(response.aiMessage() == null ? null : response.aiMessage().text())
                             .finishReason(response.finishReason() == null ? null : response.finishReason().name());
             if (usage != null) {
-                builder.inputTokens((long) usage.inputTokenCount())
-                        .outputTokens((long) usage.outputTokenCount())
-                        .totalTokens((long) usage.totalTokenCount());
+                // 厂商不返 usage 的分项时 langchain4j 给的是 null：直接拆箱会 NPE，被外层 catch 吞掉后
+                // 整条成功调用的 trace 一起丢了，代价远大于少记一组 token
+                builder.inputTokens(toLong(usage.inputTokenCount()))
+                        .outputTokens(toLong(usage.outputTokenCount()))
+                        .totalTokens(toLong(usage.totalTokenCount()));
             }
             llmTraceRecorder.recordSuccess(builder.build());
         } catch (Exception e) {
@@ -166,5 +168,10 @@ public class LlmTraceChatModelListener implements ChatModelListener {
         if (value != null) {
             params.put(key, value);
         }
+    }
+
+    /** 可空计数 → 可空 Long：缺项就是缺项，不猜 0，也不该因为拆箱把整条记录丢掉 */
+    private static Long toLong(Integer value) {
+        return value == null ? null : value.longValue();
     }
 }

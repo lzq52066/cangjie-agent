@@ -193,5 +193,47 @@ class EvalMetricRegistryTest {
             assertThat(scores.get("m").evaluated()).isFalse();
             assertThat(scores.get("m").detail()).containsKey(MetricScore.ERROR_REASON);
         }
+
+        /**
+         * 越界分数在注册表这一道闸门就被拦成「未评测」：第三方指标实现各写各的，
+         * 一个 1.5 或 -3 直接进汇总会把均值、回归门禁一起带跑，而报告上看不出异常。
+         */
+        @Test
+        void outOfRangeScoreShouldBecomeFailure() {
+            FakeMetric tooHigh = new FakeMetric("m", true, sample -> MetricScore.of(1.5));
+            FakeMetric negative = new FakeMetric("n", true, sample -> MetricScore.of(-3.0));
+
+            Map<String, MetricScore> scores = new EvalMetricRegistry(List.of(tooHigh, negative))
+                    .run(SAMPLE, CONTEXT, List.of(tooHigh, negative));
+
+            assertThat(scores.get("m").evaluated()).isFalse();
+            assertThat(String.valueOf(scores.get("m").detail().get(MetricScore.ERROR_REASON)))
+                    .contains("0~1");
+            assertThat(scores.get("n").evaluated()).isFalse();
+        }
+
+        /** 边界值 0 与 1 是合法读数，不能被当成越界吞掉 */
+        @Test
+        void boundaryScoresShouldStayEvaluated() {
+            FakeMetric zero = new FakeMetric("z", true, sample -> MetricScore.of(0.0));
+            FakeMetric one = new FakeMetric("o", true, sample -> MetricScore.of(1.0));
+
+            Map<String, MetricScore> scores = new EvalMetricRegistry(List.of(zero, one))
+                    .run(SAMPLE, CONTEXT, List.of(zero, one));
+
+            assertThat(scores.get("z").evaluated()).isTrue();
+            assertThat(scores.get("o").value()).isEqualTo(1.0);
+        }
+
+        /**
+         * 指标名不许占用内置列名：SPI 指标写进 eval_result 时与 recall / correctness 两套读数
+         * 会互相覆盖，报告里根本分不出这一列是谁写的。
+         */
+        @Test
+        void reservedNamesShouldBeRejectedAtRegistration() {
+            assertThat(new EvalMetricRegistry(List.of(
+                    scoring("recall", 0.5), scoring("correctness", 0.5), scoring("faithfulness", 0.5)))
+                    .all()).extracting(EvalMetric::name).containsExactly("faithfulness");
+        }
     }
 }

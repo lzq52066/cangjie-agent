@@ -21,7 +21,8 @@ import java.util.stream.Collectors;
 /**
  * 混合检索器实现
  * <p>
- * 并行执行向量相似度检索与全文检索两路，融合后排序，可选再叠一层重排序。
+ * 依次执行向量相似度检索与全文检索两路（串行，见 {@link #simpleCandidates}），融合后排序，
+ * 可选再叠一层重排序。多知识库靠一条 IN 一次拿回全局候选，不按库循环查。
  * 支持相似度阈值过滤和动态 topK（实际结果数不强制凑满）。
  * <p>
  * 检索模式：
@@ -121,25 +122,60 @@ public class HybridRetrieverImpl implements HybridRetriever {
     }
 
     /**
-     * simple 模式：两路各自单查（多知识库一条 IN 拿回全局前 candidateK）后融合
+     * simple 模式：两路依次单查（多知识库一条 IN 拿回全局前 candidateK）后融合
+     * <p>
+     * 两路是串行而不是并行：并行要把查询搬到子线程，而通道查询依赖请求线程上的上下文
+     * （traceId、数据权限），搬线程要么丢上下文要么得把上下文逐个搬运 —— 热路径上这点收益不值这个风险。
      */
     private List<RetrievalResult> simpleCandidates(RetrievalContext ctx) {
+        List<String> failedChannels = new ArrayList<>(2);
         List<RetrievalResult> vectorResults = new ArrayList<>();
         try {
             float[] queryEmbedding = embeddingProvider.embed(ctx.query());
             vectorResults = new ArrayList<>(vectorStore.search(queryEmbedding, ctx.kbIds(), ctx.candidateK()));
         } catch (Exception e) {
-            log.warn("向量检索失败，仅使用全文检索: {}", e.getMessage());
+            failedChannels.add(CHANNEL_VECTOR);
+            log.error("向量检索失败，本次仅全文召回（无相似度阈值过滤）: {}", e.getMessage());
         }
 
         List<RetrievalResult> fullTextResults = new ArrayList<>();
         try {
             fullTextResults = new ArrayList<>(vectorStore.fullTextSearch(ctx.query(), ctx.kbIds(), null, ctx.candidateK()));
         } catch (Exception e) {
-            log.warn("全文检索失败: {}", e.getMessage());
+            failedChannels.add(CHANNEL_FULLTEXT);
+            log.error("全文检索失败: {}", e.getMessage());
         }
 
-        return fuse(ctx, thresholdVector(vectorResults, ctx.threshold()), fullTextResults);
+        if (failedChannels.size() == 2) {
+            // 两路都失败不是「知识库没内容」，是检索系统坏了；只留一句日志的话，
+            // 上层与链路看到的是一个正常的空结果，没人会被叫去看这条 error
+            throw new IllegalStateException("混合检索两路均失败: " + String.join(",", failedChannels));
+        }
+        return markDegraded(fuse(ctx, thresholdVector(vectorResults, ctx.threshold()), fullTextResults), failedChannels);
+    }
+
+    /** 向量通道标识（也用作降级 metadata 的取值） */
+    private static final String CHANNEL_VECTOR = "vector";
+
+    /** 全文通道标识 */
+    private static final String CHANNEL_FULLTEXT = "fullText";
+
+    /**
+     * 给结果打上「哪一路挂了」的标记。
+     * <p>
+     * 只写日志的话降级就只存在于日志里：链路的检索 span 仍然是一条 success，评测报告也照常把这一条
+     * 当正常召回计入均值，两边都不会把人引到真正坏了的那一路。
+     */
+    private List<RetrievalResult> markDegraded(List<RetrievalResult> results, List<String> failedChannels) {
+        if (failedChannels.isEmpty() || results.isEmpty()) {
+            return results;
+        }
+        return results.stream().map(r -> {
+            Map<String, Object> metadata = r.getMetadata() == null
+                    ? new LinkedHashMap<>() : new LinkedHashMap<>(r.getMetadata());
+            metadata.put(RetrievalResult.META_FAILED_CHANNELS, failedChannels);
+            return r.toBuilder().metadata(metadata).build();
+        }).collect(Collectors.toList());
     }
 
     /**
@@ -153,8 +189,10 @@ public class HybridRetrieverImpl implements HybridRetriever {
         try {
             queryEmbedding = embeddingProvider.embed(ctx.query());
         } catch (Exception e) {
-            log.error("Query 向量化失败", e);
-            return Collections.emptyList();
+            // 向量化失败让两级的向量那一路整体无从执行，但全文不依赖向量：
+            // 降级为「仅全文召回」，与 simple 模式的单路降级同一口径 —— 直接抛会把可用的一路也丢掉
+            log.error("Query 向量化失败，两级检索降级为仅全文召回: {}", e.getMessage());
+            return fullTextOnlyCandidates(ctx, CHANNEL_VECTOR);
         }
 
         List<String> candidateDocIds;
@@ -170,21 +208,44 @@ public class HybridRetrieverImpl implements HybridRetriever {
         }
         log.info("Two-stage 检索：摘要阶段匹配到 {} 个候选文档", candidateDocIds.size());
 
+        List<String> failedChannels = new ArrayList<>(2);
         List<RetrievalResult> vectorResults;
         try {
             vectorResults = vectorStore.searchByDocumentIds(queryEmbedding, candidateDocIds, ctx.candidateK());
         } catch (Exception e) {
-            log.warn("Two-stage 段落级向量检索失败: {}", e.getMessage());
+            failedChannels.add(CHANNEL_VECTOR);
+            log.error("Two-stage 段落级向量检索失败，本次仅全文召回（无相似度阈值过滤）: {}", e.getMessage());
             vectorResults = new ArrayList<>();
         }
         List<RetrievalResult> fullTextResults;
         try {
             fullTextResults = vectorStore.fullTextSearch(ctx.query(), ctx.kbIds(), candidateDocIds, ctx.candidateK());
         } catch (Exception e) {
-            log.warn("Two-stage 全文检索失败: {}", e.getMessage());
+            failedChannels.add(CHANNEL_FULLTEXT);
+            log.error("Two-stage 全文检索失败: {}", e.getMessage());
             fullTextResults = List.of();
         }
-        return fuse(ctx, thresholdVector(vectorResults, ctx.threshold()), fullTextResults);
+        if (failedChannels.size() == 2) {
+            throw new IllegalStateException("Two-stage 检索两路均失败: " + String.join(",", failedChannels));
+        }
+        return markDegraded(fuse(ctx, thresholdVector(vectorResults, ctx.threshold()), fullTextResults), failedChannels);
+    }
+
+    /**
+     * 只剩全文一路时的检索（向量通道整体不可用时）。
+     * <p>
+     * 全文自己再失败就没有可召回的通道了，这时才抛 —— 与 {@code simpleCandidates} 的收口一致。
+     */
+    private List<RetrievalResult> fullTextOnlyCandidates(RetrievalContext ctx, String failedChannel) {
+        List<RetrievalResult> fullTextResults;
+        try {
+            fullTextResults = new ArrayList<>(
+                    vectorStore.fullTextSearch(ctx.query(), ctx.kbIds(), null, ctx.candidateK()));
+        } catch (Exception e) {
+            log.error("全文检索同样失败，本次检索无任何可用通道: {}", e.getMessage());
+            throw new IllegalStateException("混合检索两路均失败: " + failedChannel + "," + CHANNEL_FULLTEXT, e);
+        }
+        return markDegraded(fuse(ctx, List.of(), fullTextResults), List.of(failedChannel));
     }
 
     /** 阈值只裁向量通道：cosine 分有绝对语义，全文分与融合分都没有 */
@@ -323,8 +384,13 @@ public class HybridRetrieverImpl implements HybridRetriever {
     }
 
     private static String paragraphKey(RetrievalResult r) {
-        return r.getParagraphId() != null ? r.getParagraphId()
-                : (r.getDocumentId() + "#" + System.identityHashCode(r));
+        if (r.getParagraphId() != null) {
+            return r.getParagraphId();
+        }
+        // 没有段落 ID 时按「文档 + 正文哈希」取键：identityHashCode 每次都不一样，
+        // 两路命中的同一段落合不到一处（既重复计分，排序也不可复现）
+        String content = r.getContent();
+        return r.getDocumentId() + "#" + (content == null ? "" : Integer.toHexString(content.hashCode()));
     }
 
     /**

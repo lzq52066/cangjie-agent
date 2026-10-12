@@ -24,8 +24,13 @@ import java.util.List;
 public class LlmTraceServiceImpl extends ServiceImpl<LlmTraceMapper, LlmTraceEntity>
         implements ILlmTraceService {
 
-    /** 保留天数，<=0 表示不清理 */
-    @Value("${cangjie.observability.llm-trace.retention-days:30}")
+    /**
+     * 保留天数，<=0 表示不清理。
+     * <p>
+     * 默认关：这是物理 DELETE，老库升级上来第一次调度就会把保留期之前的历史调用记录删光，
+     * 而「装新版本」不该顺带删历史。确认历史可弃后由部署方显式打开。
+     */
+    @Value("${cangjie.observability.llm-trace.retention-days:0}")
     private int retentionDays;
 
     private static final int PURGE_BATCH_SIZE = 2000;

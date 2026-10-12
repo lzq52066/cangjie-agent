@@ -12,10 +12,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -27,7 +28,12 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Slf4j
 @Service
@@ -35,13 +41,73 @@ import java.util.concurrent.Executor;
 public class TraceRecordServiceImpl extends ServiceImpl<TraceRecordMapper, TraceRecordEntity>
         implements ITraceRecordService {
 
-    @Autowired
-    @Qualifier("businessExecutor")
-    private Executor businessExecutor;
-
-    /** span 保留天数，<=0 表示不清理 */
-    @Value("${cangjie.observability.trace.retention-days:30}")
+    /**
+     * span 保留天数，<=0 表示不清理。
+     * <p>
+     * 默认关：这是一条物理 DELETE，老库升级上来第一次调度就会把保留期之前的历史链路全删了，
+     * 而升级的人通常不会预期「装个新版本 = 删历史」。要回收空间再显式开。
+     */
+    @Value("${cangjie.observability.trace.retention-days:0}")
     private int retentionDays;
+
+    /** span 写入缓冲容量：满了丢新来的并计数，绝不把带载荷的同步写塞回业务线程 */
+    @Value("${cangjie.observability.trace.write-queue-capacity:2000}")
+    private int writeQueueCapacity;
+
+    /**
+     * span 写入线程池（独立、有界、拒绝即丢）。
+     * <p>
+     * 刻意不复用 businessExecutor：那个池是 CallerRunsPolicy，池满时任务会退回调用线程就地执行，
+     * 而一条 span 可能挂着数十 KB 的检索/模型正文 —— 那等于把「不阻塞主链路」又请了回来，
+     * 而且抢的是业务线程。这里宁可丢一条观测数据。
+     */
+    private Executor spanWriter;
+
+    /** 因缓冲满丢掉的 span 条数 */
+    private final AtomicLong droppedSpans = new AtomicLong();
+
+    private volatile long lastReportedDropped;
+
+    @PostConstruct
+    void initWriter() {
+        int capacity = Math.max(1, writeQueueCapacity);
+        spanWriter = new ThreadPoolExecutor(1, 2, 60L, TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(capacity),
+                runnable -> {
+                    Thread thread = new Thread(runnable, "trace-span-writer");
+                    // 守护线程：可观测性后台任务不该拖住进程退出
+                    thread.setDaemon(true);
+                    return thread;
+                },
+                new ThreadPoolExecutor.AbortPolicy());
+    }
+
+    @PreDestroy
+    void shutdownWriter() {
+        if (!(spanWriter instanceof ThreadPoolExecutor executor)) {
+            return;
+        }
+        executor.shutdown();
+        try {
+            // 排障时最后几条 span 往往正是要看的，给它们一点时间落库
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException ex) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /** span 写入缓冲当前堆积数（仅供监控与单测；同步执行器没有队列，报 0） */
+    int writerQueueSize() {
+        return spanWriter instanceof ThreadPoolExecutor executor ? executor.getQueue().size() : 0;
+    }
+
+    /** 缓冲满丢掉的 span 条数 */
+    long droppedSpanCount() {
+        return droppedSpans.get();
+    }
 
     /**
      * 外部出口（OTLP 等）：没配就一个也不装，默认空列表。
@@ -61,14 +127,31 @@ public class TraceRecordServiceImpl extends ServiceImpl<TraceRecordMapper, Trace
         }
         export(entity);
         // 异步独立落库：span 不能跟着业务事务一起回滚，否则失败调用反而查不到
-        businessExecutor.execute(() -> {
-            try {
-                save(entity);
-            } catch (Exception ex) {
-                log.warn("trace_record 写入失败: module={}, action={}, {}",
-                        entity.getModule(), entity.getAction(), ex.getMessage());
-            }
-        });
+        try {
+            spanWriter.execute(() -> {
+                try {
+                    save(entity);
+                } catch (Exception ex) {
+                    log.warn("trace_record 写入失败: module={}, action={}, {}",
+                            entity.getModule(), entity.getAction(), ex.getMessage());
+                }
+            });
+        } catch (RejectedExecutionException ex) {
+            // 缓冲满了：丢这一条并计数。可观测性数据不值得让业务线程等库，也不值得为它撑爆堆
+            droppedSpans.incrementAndGet();
+            reportDropped();
+        }
+    }
+
+    /** 丢弃只报增量：每次重报同一个累计值会把日志顶成刷屏 */
+    private void reportDropped() {
+        long total = droppedSpans.get();
+        if (total > lastReportedDropped) {
+            log.warn("trace_record 写入缓冲已满，累计丢弃 {} 条 span（本轮新增 {} 条），"
+                    + "持续出现请调大 cangjie.observability.trace.write-queue-capacity",
+                    total, total - lastReportedDropped);
+            lastReportedDropped = total;
+        }
     }
 
     /** 交给各出口：单个出口抛异常不能连带影响其他出口与落库 */

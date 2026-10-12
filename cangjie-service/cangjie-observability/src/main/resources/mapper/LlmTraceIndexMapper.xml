@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.cangjiecloud.observability.mapper.LlmTraceIndexMapper">
+
+    <!-- pg_trgm 扩展：精简镜像可能没装，失败由调用方兜住并跳过索引 -->
+    <update id="ensureTrgmExtension">
+        CREATE EXTENSION IF NOT EXISTS pg_trgm
+    </update>
+
+    <!--
+      CONCURRENTLY 必须跑在事务外：普通 CREATE INDEX 持 SHARE 锁会阻塞 llm_trace 全部写入。
+      Flyway 迁移在事务里不允许 CONCURRENTLY，故由启动后的后台线程执行。
+    -->
+    <update id="createPromptTrgmIndex">
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS "llm_trace_prompt_trgm_idx"
+        ON "public"."llm_trace" USING gin ("prompt_content" gin_trgm_ops)
+    </update>
+
+    <update id="createResponseTrgmIndex">
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS "llm_trace_response_trgm_idx"
+        ON "public"."llm_trace" USING gin ("response_content" gin_trgm_ops)
+    </update>
+
+</mapper>

@@ -16,6 +16,15 @@ import java.util.Map;
 @AllArgsConstructor
 public class RetrievalResult {
 
+    /**
+     * {@code metadata} 的约定 key：本次检索中失败的通道名（{@code vector} / {@code fullText}）。
+     * <p>
+     * 一路挂了调用方拿到的仍是另一路的结果列表，看不出区别；而向量路是唯一受相似度阈值约束的通道，
+     * 它挂了意味着这批结果<strong>没有任何阈值过滤</strong>。这个标记要让上层（链路 span / 评测明细）
+     * 能把「降级」和「正常召回」区分开，否则排障时看到的一条成功 span 会把问题指向错的方向。
+     */
+    public static final String META_FAILED_CHANNELS = "retrievalFailedChannels";
+
     /** 段落 ID */
     private String paragraphId;
 

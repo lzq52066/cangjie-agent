@@ -29,6 +29,8 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -67,7 +69,8 @@ class TraceRecordServiceImplTest {
     void setUp() {
         service = spy(new TraceRecordServiceImpl());
         ReflectionTestUtils.setField(service, "baseMapper", traceRecordMapper);
-        ReflectionTestUtils.setField(service, "businessExecutor", (Executor) Runnable::run);
+        // 写入执行器换成同线程直跑，落库断言才不用等；生产用的是独立有界池
+        ReflectionTestUtils.setField(service, "spanWriter", (Executor) Runnable::run);
     }
 
     private TraceRecordEntity captureSavedSpan() {
@@ -104,6 +107,42 @@ class TraceRecordServiceImplTest {
             doThrow(new RuntimeException("db down")).when(service).save(any(TraceRecordEntity.class));
 
             assertThatCode(() -> service.record(new TraceRecordEntity())).doesNotThrowAnyException();
+        }
+
+        /**
+         * 缓冲满时丢 span 并计数，而不是退回调用线程执行。
+         * <p>
+         * 一条 span 可能挂着数十 KB 正文，落到业务线程上同步写库等于把「不阻塞主链路」又请回来；
+         * 但悄悄丢更糟 —— 得有一个数能让人知道丢过多少。
+         */
+        @Test
+        void shouldCountDroppedSpanWhenWriterQueueRejected() {
+            ReflectionTestUtils.setField(service, "spanWriter", (Executor) task -> {
+                throw new RejectedExecutionException("queue full");
+            });
+            TraceRecordEntity entity = new TraceRecordEntity();
+            entity.setTraceId("trace-1");
+
+            assertThatCode(() -> service.record(entity)).doesNotThrowAnyException();
+
+            assertThat(service.droppedSpanCount()).isEqualTo(1L);
+            verify(service, never()).save(any(TraceRecordEntity.class));
+        }
+
+        /** 独立写入池用的是有界队列 + 拒绝即丢：不能借业务池的 CallerRunsPolicy */
+        @Test
+        void initWriterShouldBuildBoundedAbortPolicyPool() {
+            TraceRecordServiceImpl fresh = new TraceRecordServiceImpl();
+            ReflectionTestUtils.setField(fresh, "writeQueueCapacity", 7);
+
+            ReflectionTestUtils.invokeMethod(fresh, "initWriter");
+            Object writer = ReflectionTestUtils.getField(fresh, "spanWriter");
+
+            assertThat(writer).isInstanceOf(ThreadPoolExecutor.class);
+            ThreadPoolExecutor pool = (ThreadPoolExecutor) writer;
+            assertThat(pool.getQueue().remainingCapacity()).isEqualTo(7);
+            assertThat(pool.getRejectedExecutionHandler()).isInstanceOf(ThreadPoolExecutor.AbortPolicy.class);
+            ReflectionTestUtils.invokeMethod(fresh, "shutdownWriter");
         }
     }
 

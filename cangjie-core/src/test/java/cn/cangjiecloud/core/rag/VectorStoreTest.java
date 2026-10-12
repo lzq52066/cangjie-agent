@@ -275,6 +275,50 @@ class VectorStoreTest {
             return RetrievalResult.builder().paragraphId(paragraphId).documentId(documentId).build();
         }
 
+        private static RetrievalResult vectorHit(String paragraphId, String documentId, double score) {
+            return hit(paragraphId, documentId).toBuilder().vectorScore(score).build();
+        }
+
+        private static RetrievalResult textHit(String paragraphId, String documentId, double score) {
+            return hit(paragraphId, documentId).toBuilder().fullTextScore(score).build();
+        }
+
+        @Test
+        void vectorDefaultShouldRankAcrossKnowledgeBasesInsteadOfPerLibraryOrder() {
+            AbstractOnlyStore store = new AbstractOnlyStore();
+            // 每个库各自排好序，简单拼接会让 kb-1 的低分段落压在 kb-2 的高分段落前面
+            store.vector.put("kb-1", List.of(vectorHit("p1", "doc1", 0.30)));
+            store.vector.put("kb-2", List.of(vectorHit("p2", "doc2", 0.95), vectorHit("p3", "doc3", 0.60)));
+
+            assertThat(store.search(VECTOR, List.of("kb-1", "kb-2"), 5))
+                    .extracting(RetrievalResult::getParagraphId)
+                    .containsExactly("p2", "p3", "p1");
+        }
+
+        @Test
+        void vectorDefaultShouldDedupeParagraphAndTrimToTopK() {
+            AbstractOnlyStore store = new AbstractOnlyStore();
+            store.vector.put("kb-1", List.of(vectorHit("shared", "doc1", 0.40)));
+            store.vector.put("kb-2", List.of(vectorHit("shared", "doc2", 0.80), vectorHit("p3", "doc3", 0.20)));
+
+            List<RetrievalResult> merged = store.search(VECTOR, List.of("kb-1", "kb-2"), 1);
+
+            // 同一段落落在两个库里只留高分那条，超出 topK 的裁掉
+            assertThat(merged).singleElement().extracting(RetrievalResult::getParagraphId).isEqualTo("shared");
+            assertThat(merged.get(0).getVectorScore()).isEqualTo(0.80);
+        }
+
+        @Test
+        void fullTextDefaultShouldRankByScoreAcrossKnowledgeBases() {
+            AbstractOnlyStore store = new AbstractOnlyStore();
+            store.fullText.put("kb-1", List.of(textHit("p1", "doc1", 1.0)));
+            store.fullText.put("kb-2", List.of(textHit("p2", "doc2", 9.0), textHit("p3", "doc3", 5.0)));
+
+            assertThat(store.fullTextSearch("q", List.of("kb-1", "kb-2"), null, 2))
+                    .extracting(RetrievalResult::getParagraphId)
+                    .containsExactly("p2", "p3");
+        }
+
         @Test
         void vectorDefaultShouldWalkKnowledgeBasesInScopeOrder() {
             AbstractOnlyStore store = new AbstractOnlyStore();

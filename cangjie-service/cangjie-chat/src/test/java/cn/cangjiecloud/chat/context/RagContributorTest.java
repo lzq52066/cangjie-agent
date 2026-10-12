@@ -167,9 +167,52 @@ class RagContributorTest {
             assertThat(fragment.getMessages().get(0).getContent()).contains("doc-9");
         }
 
+        /**
+         * 检索侧降级（某一路通道挂了）必须在留痕里看得见。
+         * <p>
+         * 单路召回仍然是「查到东西了」，状态照旧 success；但只有全文、没有向量意味着
+         * 相似度阈值根本没生效，这条证据要能在链路里读到，否则报告与链路都把它当正常召回。
+         */
         @Test
-        void shouldReturnEmptyWhenRetrieverReturnsNoResults() {
+        void shouldSurfaceDegradedChannelInTraceWithoutFailingTheTurn() {
+            RetrievalResult degraded = result("正文", "doc-1", "产品手册").toBuilder()
+                    .metadata(Map.of(RetrievalResult.META_FAILED_CHANNELS, List.of("vector")))
+                    .build();
             when(hybridRetriever.retrieve(anyString(), any(RetrievalOptions.class)))
+                    .thenReturn(List.of(degraded));
+
+            ContextFragment fragment = contributor.contribute(request("simple"));
+
+            assertThat(fragment.isEmpty()).isFalse();
+            ArgumentCaptor<TraceSpan> captor = ArgumentCaptor.forClass(TraceSpan.class);
+            verify(traceCollector).record(captor.capture());
+            TraceSpan span = captor.getValue();
+            assertThat(span.getStatus()).isEqualTo("success");
+            assertThat(span.getMessage()).contains("降级").contains("全文");
+            assertThat(span.getMetadata()).containsEntry("failedChannels", List.of("vector"));
+        }
+
+        /** 单段正文与片段总量都要封顶：一次长文档命中不该把整个上下文窗口占满 */
+        @Test
+        void shouldTruncateLongSnippetAndStopAtPromptBudget() {
+            ReflectionTestUtils.setField(contributor, "maxSnippetChars", 100);
+            ReflectionTestUtils.setField(contributor, "maxPromptBudgetChars", 260);
+            String body = "长".repeat(500);
+            when(hybridRetriever.retrieve(anyString(), any(RetrievalOptions.class)))
+                    .thenReturn(List.of(
+                            result(body, "doc-1", "手册一"),
+                            result(body, "doc-2", "手册二"),
+                            result(body, "doc-3", "手册三")));
+
+            String prompt = contributor.contribute(request("simple")).getMessages().get(0).getContent();
+
+            assertThat(prompt).contains("...[truncated]");
+            // 超预算的片段直接不进 prompt，否则会一路撑到模型上下文上限
+            assertThat(prompt).doesNotContain("手册三");
+        }
+
+        @Test
+        void shouldReturnEmptyWhenRetrieverReturnsNoResults() {            when(hybridRetriever.retrieve(anyString(), any(RetrievalOptions.class)))
                     .thenReturn(List.of());
 
             assertThat(contributor.contribute(request("simple")).isEmpty()).isTrue();

@@ -48,7 +48,9 @@
 
     <div v-if="!loading && !inputRows.length && !hits.length && !outputText && !metaRows.length"
          class="empty-hint">
-      该 span 未记录输入 / 输出载荷（早于载荷留痕上线，或本次调用没有可留的中间量）
+      {{ loadFailed
+          ? '载荷拉取失败，收起后重新展开可重试'
+          : '该 span 未记录输入 / 输出载荷（早于载荷留痕上线，或本次调用没有可留的中间量）' }}
     </div>
   </div>
 </template>
@@ -71,6 +73,7 @@ const props = defineProps<{
 }>()
 
 const loading = ref(false)
+const loadFailed = ref(false)
 const record = computed<any>(() => props.cache[props.spanId] || {})
 
 function parse(json?: string): any {
@@ -113,9 +116,12 @@ onMounted(async () => {
   if (!props.spanId || props.cache[props.spanId]) return
   loading.value = true
   try {
-    props.cache[props.spanId] = await observabilityApi.traceSpanPayload(props.spanId) || {}
+    const payload = await observabilityApi.traceSpanPayload(props.spanId)
+    // 只缓存真有内容的载荷：空对象会被当成「已加载」，一次网络抖动就再也拉不回来
+    if (payload && Object.keys(payload).length) props.cache[props.spanId] = payload
+    else loadFailed.value = true
   } catch {
-    props.cache[props.spanId] = {}
+    loadFailed.value = true
   } finally {
     loading.value = false
   }

@@ -2,6 +2,8 @@
   <div class="llm-call-body" v-loading="loading">
     <el-alert v-if="record?.errorMessage" type="error" :closable="false" show-icon
               :title="record.errorMessage" style="margin-bottom:8px" />
+    <el-alert v-else-if="loadFailed" type="warning" :closable="false" show-icon
+              title="正文拉取失败，收起后重新展开可重试" style="margin-bottom:8px" />
     <div v-if="paramList.length" class="param-row">
       <span>调用参数</span>
       <el-tag v-for="p in paramList" :key="p.k" size="small" type="info" effect="plain">{{ p.k }}={{ p.v }}</el-tag>
@@ -30,6 +32,7 @@ const props = defineProps<{
 }>()
 
 const loading = ref(false)
+const loadFailed = ref(false)
 const record = computed(() => props.cache[props.traceId])
 
 /** 采样参数：调参与效果对不上号是排障常见卡点，光看 prompt 与 token 看不出是不是 temperature 拉高导致的跑偏 */
@@ -50,9 +53,12 @@ onMounted(async () => {
   if (record.value) return
   loading.value = true
   try {
-    props.cache[props.traceId] = await observabilityApi.llmTraceDetail(props.traceId)
+    const detail = await observabilityApi.llmTraceDetail(props.traceId)
+    // 只缓存真正文：空对象会被当成「已加载」，网络抖动一次这条调用就永远显示空白且不再重试
+    if (detail) props.cache[props.traceId] = detail
+    else loadFailed.value = true
   } catch {
-    props.cache[props.traceId] = {}
+    loadFailed.value = true
   } finally {
     loading.value = false
   }

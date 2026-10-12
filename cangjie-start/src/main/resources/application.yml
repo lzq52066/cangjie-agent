@@ -145,9 +145,12 @@ cangjie:
     metrics:
       enabled: true
     trace:
-      # span 保留天数，<=0 表示不清理。载荷三列只能靠物理删除回收空间，
-      # 不然 trace_record 会随对话量单调增长
-      retention-days: 30
+      # span 保留天数，<=0 表示不清理。**默认关**：这是一条物理 DELETE，老库升级后第一次调度
+      # 就会把保留期之前的历史链路全删掉，而升级的人不会预期「装新版本 = 删历史」。
+      # 载荷三列确实只能靠物理删除回收空间，确认历史可弃后再显式设成 30 之类
+      retention-days: 0
+      # span 写入缓冲容量：满了丢新来的并计数（独立线程池，不与业务线程池共抢）
+      write-queue-capacity: 2000
     # 检索载荷开关：是否把用户 query 与知识库正文写进 span 载荷。
     # 默认跟着模型载荷的 store-content 走 —— 同一套链路里不能留一条绕过闸门的写入路径
     trace-payload:
@@ -177,7 +180,10 @@ cangjie:
       # 内容最大存储长度（字符，0 表示不限制），超长自动截断
       max-content-length: 20000
       # 成功调用的采样率（0~1）：失败永远留档，采样只削成功的那部分。
-      # 0 不等于全丢，而是「只留失败」；高流量应用降到 0.1 就能把表写速降一个量级
+      # 0 不等于全丢，而是「只留失败」；高流量应用降到 0.1 就能把表写速降一个量级。
+      # 采样按 traceId 决定（同一条链路要么整条留、要么整条丢），不逐调用掷随机数，
+      # 否则链路视图会拼出残缺链路。注意被点踩的调用无法强制留档（点踩发生在写库之后），
+      # 所以坏 case 回流取的是会话消息侧，不依赖这里的采样结果
       sample-rate: 1.0
       # 异步批量落库：实体仍在请求线程组装（traceId/userId 靠 ThreadLocal），只把写库推到后台
       async:
@@ -187,8 +193,12 @@ cangjie:
         # 单批行数与定时冲刷间隔
         batch-size: 200
         flush-interval-ms: 2000
-      # 保留天数，<=0 表示不清理；与 agent_run 对齐，避免「有链路无正文」
-      retention-days: 30
+      # 保留天数，<=0 表示不清理。**默认关**（同 trace.retention-days：物理删除不可逆，
+      # 不该由升级动作顺带触发）；打开后与 agent_run 对齐，避免「有链路无正文」
+      retention-days: 0
+      # 正文关键词检索的 trgm 索引：启动完成后在后台线程 CONCURRENTLY 建（不在 Flyway 事务里，
+      # 那会锁写）。关掉只是让 promptKeyword / responseKeyword 回到顺序扫描，不影响功能
+      ensure-trgm-index: true
 
   eval:
     regress:

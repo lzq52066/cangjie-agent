@@ -110,7 +110,10 @@ public class OtlpHttpTraceExporter implements TraceExporter {
             log.error("otlp 出口已启用但未配置 endpoint，本次不启动导出（cangjie.observability.exporter.otlp.endpoint）");
             return;
         }
-        target = normalizeTarget(endpoint.trim());
+        target = normalizeTargetOrDisable(endpoint.trim());
+        if (target == null) {
+            return;
+        }
         httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(Math.max(200, timeoutMs)))
                 .build();
@@ -128,6 +131,14 @@ public class OtlpHttpTraceExporter implements TraceExporter {
     void destroy() {
         if (flusher != null) {
             flusher.shutdown();
+            try {
+                // 等在途的那一轮发完再补收尾，避免两边同时 drainTo 把一批拆成两次发送
+                if (!flusher.awaitTermination(5, TimeUnit.SECONDS)) {
+                    flusher.shutdownNow();
+                }
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
         }
         flushQuietly();
     }
@@ -143,22 +154,35 @@ public class OtlpHttpTraceExporter implements TraceExporter {
         }
     }
 
+    /**
+     * 定时冲刷。整个方法不允许抛出：它跑在 {@code scheduleWithFixedDelay} 上，
+     * 一次未捕获异常会让调度从此停止，出口就此静默不再发送。
+     */
     private void flushQuietly() {
-        if (httpClient == null || queue == null) {
-            return;
-        }
-        while (!queue.isEmpty()) {
-            List<ExportedSpan> batch = new ArrayList<>(Math.max(1, batchSize));
-            queue.drainTo(batch, Math.max(1, batchSize));
-            if (batch.isEmpty()) {
-                break;
+        try {
+            if (httpClient == null || queue == null) {
+                return;
             }
-            if (!send(toPayload(batch))) {
-                // 对端不通时接着抖只会把超时堆成一串，剩下的等下一轮
-                break;
+            while (!queue.isEmpty()) {
+                List<ExportedSpan> batch = new ArrayList<>(Math.max(1, batchSize));
+                queue.drainTo(batch, Math.max(1, batchSize));
+                if (batch.isEmpty()) {
+                    break;
+                }
+                if (!send(toPayload(batch))) {
+                    // 对端不通时接着抖只会把超时堆成一串，剩下的等下一轮
+                    break;
+                }
+            }
+        } catch (Throwable t) {
+            log.warn("otlp 出口冲刷异常（不影响后续调度）: {}", t.toString(), t);
+        } finally {
+            try {
+                reportDropped();
+            } catch (Exception ignored) {
+                // 计数上报失败不值得打断调度
             }
         }
-        reportDropped();
     }
 
     /** 一批一请求；返回 false 表示这批没送出去 */
@@ -261,34 +285,52 @@ public class OtlpHttpTraceExporter implements TraceExporter {
      * 主流的 LLM 观测面板开箱就能按模型和 token 切片。
      */
     List<Map<String, Object>> attributes(ExportedSpan span) {
-        List<Map<String, Object>> attributes = new ArrayList<>();
-        attributes.add(stringAttribute("cangjie.module", span.module()));
-        attributes.add(stringAttribute("cangjie.action", span.action()));
-        attributes.add(stringAttribute("cangjie.status", span.status()));
+        // 按 key 收口：OTLP 的 attributes 是数组，同 key 出现两次时「取哪个」由对端实现决定，
+        // 而 model / modelName / modelId 都会被翻成 gen_ai.request.model，一条 span 里挤三个同名键
+        // 等于给对端一个未定义读数。同名保留先到者，超出上限的维度直接不带（对端拿不到维度不致命，
+        // 一个无界的 metadata 把出口体积撑爆才致命）。
+        Map<String, Map<String, Object>> byKey = new LinkedHashMap<>();
+        putAttribute(byKey, "cangjie.module", span.module());
+        putAttribute(byKey, "cangjie.action", span.action());
+        putAttribute(byKey, "cangjie.status", span.status());
 
         String operation = operationName(span);
         if (operation != null) {
-            attributes.add(stringAttribute("gen_ai.operation.name", operation));
+            putAttribute(byKey, "gen_ai.operation.name", operation);
         }
 
         Map<String, Object> metadata = span.metadata();
         if (metadata != null) {
             metadata.forEach((key, value) -> {
                 if (!"input".equals(key) && !"output".equals(key)) {
-                    attributes.add(attribute(genAiKey(key), value));
+                    putAttribute(byKey, genAiKey(key), value);
                 }
             });
         }
 
         if (includePayload) {
             if (StringUtils.hasText(span.input())) {
-                attributes.add(stringAttribute("gen_ai.prompt", span.input()));
+                putAttribute(byKey, "gen_ai.prompt", span.input());
             }
             if (StringUtils.hasText(span.output())) {
-                attributes.add(stringAttribute("gen_ai.completion", span.output()));
+                putAttribute(byKey, "gen_ai.completion", span.output());
             }
         }
-        return attributes;
+        return new ArrayList<>(byKey.values());
+    }
+
+    /** 单条 span 最多带出去的属性数（超出丢弃并留一条日志线索，防止 metadata 无界膨胀） */
+    private static final int MAX_ATTRIBUTES = 64;
+
+    private void putAttribute(Map<String, Map<String, Object>> byKey, String key, Object value) {
+        if (byKey.containsKey(key)) {
+            return;
+        }
+        if (byKey.size() >= MAX_ATTRIBUTES) {
+            log.debug("otlp 属性超出上限，已丢弃: key={}", key);
+            return;
+        }
+        byKey.put(key, value instanceof String text ? stringAttribute(key, text) : attribute(key, value));
     }
 
     private static String operationName(ExportedSpan span) {
@@ -417,8 +459,31 @@ public class OtlpHttpTraceExporter implements TraceExporter {
 
     /** 补上 OTLP 的接口路径：给到 {@code http://host:4318} 也能用 */
     private static URI normalizeTarget(String configured) {
-        String url = configured.endsWith(TRACES_PATH) ? configured : configured + TRACES_PATH;
+        String url = configured.contains("://") ? configured : "http://" + configured;
+        url = url.endsWith(TRACES_PATH) ? url : url + TRACES_PATH;
         return URI.create(url);
+    }
+
+    /**
+     * 地址解析失败时把出口停在装配阶段，而不是让 {@code @PostConstruct} 抛异常。
+     * <p>
+     * 一个观测出口的 endpoint 写错，代价不该是整个应用起不来；这里选择「不导出 + 一条 error 日志」，
+     * 本地库里的链路数据照常完整。
+     */
+    private URI normalizeTargetOrDisable(String configured) {
+        URI uri;
+        try {
+            uri = normalizeTarget(configured);
+        } catch (Exception ex) {
+            log.error("otlp endpoint 无法解析，本次不启动导出: endpoint={}, {}", configured, ex.toString());
+            return null;
+        }
+        String scheme = uri.getScheme();
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+            log.error("otlp endpoint 必须是 http/https 地址（解析到 scheme={}），本次不启动导出: {}", scheme, configured);
+            return null;
+        }
+        return uri;
     }
 
     static Map<String, String> parseHeaders(String raw) {

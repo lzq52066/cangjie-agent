@@ -22,6 +22,7 @@ import java.util.Collection;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -218,9 +219,31 @@ class HybridRetrieverImplTest {
             assertThat(results.get(0).getVectorScore()).isEqualTo(0.9);
         }
 
+        /**
+         * 没有段落 ID 时按「文档 + 正文哈希」归并：旧写法用 identityHashCode，每次调用都生成新键，
+         * 两路命中的同一段落合不到一处 —— 既重复计分，排序也不可复现（同一 query 两次跑出不同名次）。
+         */
         @Test
-        void vectorFailureShouldFallBackToFullTextOnly() {
-            when(embeddingProvider.embed("q")).thenThrow(new RuntimeException("embedding down"));
+        void sameContentWithoutParagraphIdShouldMergeIntoOneCandidate() {
+            stubEmbed();
+            RetrievalResult byVector = RetrievalResult.builder()
+                    .documentId("doc-1").content("同一段正文").vectorScore(0.9).build();
+            RetrievalResult byFullText = RetrievalResult.builder()
+                    .documentId("doc-1").content("同一段正文").fullTextScore(5.0).build();
+            when(vectorStore.search(eq(QUERY_EMBEDDING), anyCollection(), eq(9)))
+                    .thenReturn(List.of(byVector));
+            when(vectorStore.fullTextSearch(eq("q"), anyCollection(), isNull(), eq(9)))
+                    .thenReturn(List.of(byFullText));
+
+            List<RetrievalResult> results = retriever.retrieve("q", simpleOptions(3, 0.0));
+
+            assertThat(results).hasSize(1);
+            assertThat(results.get(0).getFinalScore()).isCloseTo(RANK_1 * 2,
+                    org.assertj.core.data.Offset.offset(1e-12));
+        }
+
+        @Test
+        void vectorFailureShouldFallBackToFullTextOnly() {            when(embeddingProvider.embed("q")).thenThrow(new RuntimeException("embedding down"));
             when(vectorStore.fullTextSearch(eq("q"), anyCollection(), isNull(), eq(6)))
                     .thenReturn(List.of(fullTextResult("p1", 2.0)));
 
@@ -525,13 +548,30 @@ class HybridRetrieverImplTest {
         }
 
         @Test
-        void twoStageShouldReturnEmptyWhenEmbeddingFails() {
+        void twoStageShouldDegradeToFullTextOnlyWhenEmbeddingFails() {
             when(embeddingProvider.embed("q")).thenThrow(new RuntimeException("embedding down"));
+            when(vectorStore.fullTextSearch(eq("q"), anyCollection(), isNull(), eq(6)))
+                    .thenReturn(List.of(fullTextResult("p1", 6.0)));
 
             List<RetrievalResult> results = retriever.retrieve("q", twoStageOptions(2));
 
-            assertThat(results).isEmpty();
+            // 向量化失败只废掉向量那一路，全文不依赖向量：整次检索报错会把可用的一路也丢掉
+            assertThat(results).extracting(RetrievalResult::getParagraphId).containsExactly("p1");
+            assertThat(results.get(0).getMetadata().get(RetrievalResult.META_FAILED_CHANNELS))
+                    .isEqualTo(List.of("vector"));
             verify(vectorStore, never()).searchDocumentSummaries(any(), anyCollection(), anyInt());
+        }
+
+        @Test
+        void twoStageShouldThrowWhenEmbeddingAndFullTextBothFail() {
+            when(embeddingProvider.embed("q")).thenThrow(new RuntimeException("embedding down"));
+            when(vectorStore.fullTextSearch(eq("q"), anyCollection(), isNull(), eq(6)))
+                    .thenThrow(new RuntimeException("fulltext down"));
+
+            // 两路都没有才是真的坏了：静默返空会被上层当成「知识库里没这个东西」
+            assertThatThrownBy(() -> retriever.retrieve("q", twoStageOptions(2)))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("两路均失败");
         }
 
         @Test

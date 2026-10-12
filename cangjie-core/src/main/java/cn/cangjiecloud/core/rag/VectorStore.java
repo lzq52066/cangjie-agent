@@ -46,17 +46,24 @@ public interface VectorStore {
     List<RetrievalResult> fullTextSearch(String query, String knowledgeBaseId, int topK);
 
     /**
-     * 向量相似度检索（多知识库单查）。
+     * 向量相似度检索（多知识库）。
      * <p>
-     * 默认逐库循环再拼接，实现方应覆盖成一条 {@code IN (...)} 查询：
-     * 一方面省掉 N 次网络往返，另一方面拼接后名次会错乱（每个库各自从第 1 名开始）。
+     * 默认逐库循环后按相似度全局重排、按段落去重、截到 topK。实现方应覆盖成一条
+     * {@code IN (...)} 查询：省掉 N 次网络往返，且每条通道只取一次 topK，
+     * 而不是每个库各取 topK 再挑。
      */
     default List<RetrievalResult> search(float[] queryEmbedding, java.util.Collection<String> knowledgeBaseIds, int topK) {
-        List<RetrievalResult> merged = new java.util.ArrayList<>();
+        java.util.Map<String, RetrievalResult> byParagraph = new java.util.LinkedHashMap<>();
         for (String kbId : knowledgeBaseIds) {
-            merged.addAll(search(queryEmbedding, kbId, topK));
+            for (RetrievalResult r : search(queryEmbedding, kbId, topK)) {
+                byParagraph.merge(paragraphKey(r), r,
+                        (old, neu) -> neu.getVectorScore() > old.getVectorScore() ? neu : old);
+            }
         }
-        return merged;
+        return byParagraph.values().stream()
+                .sorted(java.util.Comparator.comparingDouble(RetrievalResult::getVectorScore).reversed())
+                .limit(topK)
+                .toList();
     }
 
     /**
@@ -65,19 +72,35 @@ public interface VectorStore {
      * documentIds 非空时只在这些文档内检索：two_stage 第二阶段靠它把候选文档下推到 SQL，
      * 而不是先全库检索再在内存里过滤（那样 topK 会被无关文档占满，范围内的命中反而进不来）。
      * documentIds 为 null / 空表示不限定文档。
+     * <p>
+     * 默认实现逐库循环后按全文分全局重排，避免各库各自从第 1 名开始导致的名次错乱。
      */
     default List<RetrievalResult> fullTextSearch(String query, java.util.Collection<String> knowledgeBaseIds,
                                                  java.util.Collection<String> documentIds, int topK) {
-        List<RetrievalResult> merged = new java.util.ArrayList<>();
+        java.util.Map<String, RetrievalResult> byParagraph = new java.util.LinkedHashMap<>();
         boolean restrict = documentIds != null && !documentIds.isEmpty();
         for (String kbId : knowledgeBaseIds) {
             for (RetrievalResult r : fullTextSearch(query, kbId, topK)) {
-                if (!restrict || documentIds.contains(r.getDocumentId())) {
-                    merged.add(r);
+                if (restrict && !documentIds.contains(r.getDocumentId())) {
+                    continue;
                 }
+                byParagraph.merge(paragraphKey(r), r,
+                        (old, neu) -> neu.getFullTextScore() > old.getFullTextScore() ? neu : old);
             }
         }
-        return merged;
+        return byParagraph.values().stream()
+                .sorted(java.util.Comparator.comparingDouble(RetrievalResult::getFullTextScore).reversed())
+                .limit(topK)
+                .toList();
+    }
+
+    /** 段落归并键：没有段落 ID 时退到「文档 + 正文指纹」，保证同一内容在多次调用里映射到同一个键 */
+    private static String paragraphKey(RetrievalResult r) {
+        if (r.getParagraphId() != null) {
+            return r.getParagraphId();
+        }
+        String content = r.getContent();
+        return r.getDocumentId() + "#" + (content == null ? 0 : Integer.toHexString(content.hashCode()));
     }
 
     /**
@@ -115,15 +138,11 @@ public interface VectorStore {
      * 检索文档级摘要（多知识库）：默认逐库循环，实现方可覆盖为单查。
      */
     default List<String> searchDocumentSummaries(float[] queryEmbedding, java.util.Collection<String> knowledgeBaseIds, int topK) {
-        List<String> merged = new java.util.ArrayList<>();
+        java.util.Set<String> merged = new java.util.LinkedHashSet<>();
         for (String kbId : knowledgeBaseIds) {
-            for (String docId : searchDocumentSummaries(queryEmbedding, kbId, topK)) {
-                if (!merged.contains(docId)) {
-                    merged.add(docId);
-                }
-            }
+            merged.addAll(searchDocumentSummaries(queryEmbedding, kbId, topK));
         }
-        return merged;
+        return List.copyOf(merged);
     }
 
     /**

@@ -43,6 +43,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
@@ -58,6 +60,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
@@ -619,6 +622,60 @@ class EvalRunServiceImplTest {
             // 失败的那条不出分，均值只按出分的用例算，不会被 0 分拖低
             assertThat(summary.get("avgRecall")).isEqualTo("1.0000");
             assertThat(summary.get("recallCases")).isEqualTo(1);
+        }
+
+        /**
+         * 线程池拒收时必须把登记状态退回去。
+         * <p>
+         * 提交前就 activeRuns.add()，拒绝后不清的话，这个 id 会一直顶着「本进程在跑」——
+         * 删不掉、取消不了，前端永远看到一条卡死的 pending。
+         */
+        @Test
+        void runShouldReleaseStateAndRejectWhenExecutorRefuses() {
+            when(datasetService.getById("ds1")).thenReturn(dataset("ds1", "kb1", "回归集"));
+            when(caseService.listByDataset("ds1")).thenReturn(List.of(evalCase("c1", "q1", "[\"doc1\"]")));
+
+            EvalRunServiceImpl saturated = spy(new EvalRunServiceImpl(datasetService, caseService, hybridRetriever,
+                    modelService, resultService, metricRegistry, task -> {
+                throw new RejectedExecutionException("queue full");
+            }));
+            // save 要回写主键：登记与释放都按 runId 走，ID 为空时在 add() 里就 NPE 了
+            doAnswer(invocation -> {
+                ((EvalRunEntity) invocation.getArgument(0)).setId("r-saturated");
+                return true;
+            }).when(saturated).save(any(EvalRunEntity.class));
+
+            assertThatThrownBy(() -> saturated.run("ds1", new HashMap<>()))
+                    .isInstanceOf(ApiException.class)
+                    .hasMessageContaining("队列已满");
+            assertThat(activeRunsOf(saturated)).isEmpty();
+        }
+
+        /**
+         * buildPlan 抛异常也要把 run 收到终态并释放登记。
+         * <p>
+         * 它会查库（检索模式回落、模型解析），旧写法在 try 之前调用：一炸 run 就永远停在 pending，
+         * 而且因为 id 还在登记表里连删都删不掉。
+         */
+        @Test
+        void executeRunShouldReachTerminalStateWhenPlanBuildFails() {
+            when(datasetService.getById("ds1")).thenReturn(dataset("ds1", "kb1", "回归集"));
+            when(caseService.listByDataset("ds1")).thenReturn(List.of(evalCase("c1", "q1", "[\"doc1\"]")));
+            EvalMetricRegistry broken = mock(EvalMetricRegistry.class);
+            when(broken.resolve(any())).thenThrow(new RuntimeException("指标库不可用"));
+            service = newService(broken);
+            doReturn(true).when(service).updateById(any(EvalRunEntity.class));
+
+            EvalRunEntity run = service.run("ds1", new HashMap<>());
+            executePendingTask();
+
+            assertThat(run.getStatus()).isNotIn("pending", "running");
+            assertThat(activeRunsOf(service)).isEmpty();
+        }
+
+        @SuppressWarnings("unchecked")
+        private static Set<String> activeRunsOf(EvalRunServiceImpl target) {
+            return (Set<String>) ReflectionTestUtils.getField(target, "activeRuns");
         }
 
         /** 删除运行时级联删明细，否则孤儿行会一直混进按数据集的聚合统计 */

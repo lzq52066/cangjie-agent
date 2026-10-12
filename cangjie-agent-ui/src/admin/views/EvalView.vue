@@ -503,7 +503,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, MoreFilled, Clock } from '@element-plus/icons-vue'
 import DataPager from '@admin/components/DataPager.vue'
@@ -864,8 +864,12 @@ function onExpandResult(row: any, expanded?: any) {
   if (details[key] || detailLoading[key]) return
   detailLoading[key] = true
   evalApi.runResultDetail(report.value?.id || row.runId, row.id)
-    .then(data => { details[key] = data || {} })
-    .catch(() => { details[key] = {} })
+    .then(data => {
+      if (data) details[key] = data
+    })
+    .catch(() => {
+      // 失败不写缓存：把空对象当「已加载」存下来，这一行就永远空白，收起再展开也不会重试
+    })
     .finally(() => { delete detailLoading[key] })
 }
 
@@ -1117,6 +1121,15 @@ onMounted(async () => {
   if (m.status === 'fulfilled') models.value = m.value
   if (k.status === 'fulfilled') knowledgeBases.value = k.value
   if (a.status === 'fulfilled') applications.value = a.value
+})
+
+/**
+ * 轮询是递归 setTimeout，不随组件销毁：离开页面后它仍在后台按 runId 拉运行报告，
+ * 一路把已卸载组件的响应式对象往上写，切几次评测页就攒下几条这样的链。
+ */
+onUnmounted(() => {
+  if (pollTimer) clearTimeout(pollTimer)
+  pollTimer = null
 })
 </script>
 

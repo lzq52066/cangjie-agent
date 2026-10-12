@@ -24,6 +24,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -165,7 +167,12 @@ class ConversationSourceImplTest {
     @Nested
     class SearchSamples {
 
-        /** 批量只查一次用户消息：逐条查会变成 N+1，一次点击几百条查询把回流做成压测 */
+        /**
+         * 批量只查一次用户消息：逐条查会变成 N+1，一次点击几百条查询把回流做成压测。
+         * <p>
+         * 这一批只取定序需要的三列（id / session_id / create_time），正文等命中哪条之后按 ID 回捞 ——
+         * 会话历史整段读进内存是白读，命中问题最多也就样本数那么多条。
+         */
         @Test
         void shouldLoadQuestionsInOneBatch() {
             ChatMessageEntity first = answer("m1", LocalDateTime.of(2026, 10, 9, 10, 5));
@@ -173,10 +180,12 @@ class ConversationSourceImplTest {
             second.setSessionId("s2");
             ChatMessageEntity q2 = message("q2", "user", "问题二", LocalDateTime.of(2026, 10, 9, 9, 0));
             q2.setSessionId("s2");
+            List<ChatMessageEntity> questions = List.of(
+                    message("q1", "user", "问题一", LocalDateTime.of(2026, 10, 9, 10, 0)), q2);
             when(chatMessageService.list(any(Wrapper.class)))
                     .thenReturn(List.of(first, second))
-                    .thenReturn(List.of(
-                            message("q1", "user", "问题一", LocalDateTime.of(2026, 10, 9, 10, 0)), q2));
+                    .thenReturn(questions);
+            when(chatMessageService.listByIds(anyCollection())).thenReturn(questions);
             ArgumentCaptor<Wrapper<ChatMessageEntity>> captor = ArgumentCaptor.forClass(Wrapper.class);
 
             List<ConversationSample> samples = source.searchSamples(ConversationFilter.of(10));
@@ -194,17 +203,22 @@ class ConversationSourceImplTest {
         @Test
         void shouldPickNearestQuestionAtOrBeforeAnswer() {
             ChatMessageEntity reply = answer("m1", LocalDateTime.of(2026, 10, 9, 10, 0));
+            List<ChatMessageEntity> questions = List.of(
+                    message("q1", "user", "最早的问题", LocalDateTime.of(2026, 10, 9, 9, 0)),
+                    message("q2", "user", "这一轮的问题", LocalDateTime.of(2026, 10, 9, 10, 0)),
+                    message("q3", "user", "更晚的问题", LocalDateTime.of(2026, 10, 9, 11, 0)));
             when(chatMessageService.list(any(Wrapper.class)))
                     .thenReturn(List.of(reply))
-                    .thenReturn(List.of(
-                            message("q1", "user", "最早的问题", LocalDateTime.of(2026, 10, 9, 9, 0)),
-                            message("q2", "user", "这一轮的问题", LocalDateTime.of(2026, 10, 9, 10, 0)),
-                            message("q3", "user", "更晚的问题", LocalDateTime.of(2026, 10, 9, 11, 0))));
+                    .thenReturn(questions);
+            when(chatMessageService.listByIds(anyCollection()))
+                    .thenReturn(List.of(questions.get(1)));
 
             List<ConversationSample> samples = source.searchSamples(ConversationFilter.of(10));
 
             assertThat(samples).singleElement()
                     .extracting(ConversationSample::question).isEqualTo("这一轮的问题");
+            // 回捞只取命中的那一条，没命中的历史正文根本不进内存
+            verify(chatMessageService).listByIds(argThat(ids -> ids.size() == 1));
         }
 
         /** 会话里没有更早的用户消息时照样出样本，由评测侧按「不可用」计数报出 */

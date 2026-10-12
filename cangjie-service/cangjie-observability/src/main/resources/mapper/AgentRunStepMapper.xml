@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.cangjiecloud.observability.mapper.AgentRunStepMapper">
+
+    <!-- 按保留期分批物理删除步骤明细（绕过逻辑删除） -->
+    <delete id="purgeBatch">
+        DELETE FROM agent_run_step WHERE id IN (
+            SELECT id FROM agent_run_step WHERE create_time &lt; #{cutoff} LIMIT #{batchSize}
+        )
+    </delete>
+
+</mapper>

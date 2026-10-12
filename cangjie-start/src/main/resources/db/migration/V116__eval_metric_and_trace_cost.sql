@@ -19,8 +19,11 @@
 -- 3) model_config 补 input_price / output_price（元/千 token）。
 --    没有单价，看板上的 token 数就只是数字，回答不了「这次评测/这轮对话花了多少钱」。
 --
--- 另外：promptKeyword / responseKeyword 是 LIKE '%…%' 全表扫描，补 pg_trgm GIN 索引。
--- pg_trgm 在部分精简镜像里没装，用 DO 块兜住：装不上就跳过索引，绝不阻断启动。
+-- 另外：promptKeyword / responseKeyword 是 LIKE '%…%' 全表扫描，需要 pg_trgm GIN 索引。
+-- 这里只补扩展、不建索引：迁移跑在事务里，而事务内不允许 CREATE INDEX CONCURRENTLY；
+-- 不带 CONCURRENTLY 建则持 SHARE 锁，大表上等于在升级期间把对话写入整段停掉。
+-- 索引由 observability 的 LlmTraceIndexBootstrap 在启动完成后的后台线程 CONCURRENTLY 建，
+-- 建不上也只影响关键词检索速度，不影响功能。
 -- ----------------------------
 
 -- ==================== 1. 用例：片段级 ground truth 与来源 =====
@@ -63,16 +66,15 @@ ALTER TABLE "public"."model_config" ADD COLUMN IF NOT EXISTS "output_price" nume
 COMMENT ON COLUMN "public"."model_config"."input_price" IS '输入单价（元 / 千 token），未填则成本不估算';
 COMMENT ON COLUMN "public"."model_config"."output_price" IS '输出单价（元 / 千 token），未填则成本不估算';
 
--- ==================== 4. 正文关键词检索走 GIN ====================
+-- ==================== 4. 正文关键词检索：只补 pg_trgm 扩展 ====================
 
 DO $$
 BEGIN
     CREATE EXTENSION IF NOT EXISTS pg_trgm;
-    CREATE INDEX IF NOT EXISTS "llm_trace_prompt_trgm_idx"
-        ON "public"."llm_trace" USING gin ("prompt_content" gin_trgm_ops);
-    CREATE INDEX IF NOT EXISTS "llm_trace_response_trgm_idx"
-        ON "public"."llm_trace" USING gin ("response_content" gin_trgm_ops);
 EXCEPTION WHEN OTHERS THEN
-    -- 精简镜像里没有 pg_trgm 共享库：跳过索引，SQL 本身仍可跑（只是回到顺序扫描）
-    RAISE NOTICE 'pg_trgm 索引跳过: %', SQLERRM;
+    -- 精简镜像里没有 pg_trgm 共享库：跳过，SQL 本身仍可跑（只是回到顺序扫描）
+    RAISE NOTICE 'pg_trgm 扩展跳过: %', SQLERRM;
 END $$;
+
+-- GIN 索引不在这里建，见文件头说明（事务内无法 CONCURRENTLY，普通建法会锁写）。
+-- 已被更早版本建过索引的库不受影响：bootstrap 用的是 IF NOT EXISTS。

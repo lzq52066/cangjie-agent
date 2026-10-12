@@ -76,6 +76,8 @@ public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
      * <p>
      * 不采样时全量写：高流量应用一周就能把 llm_trace 养成几十 GB（prompt/response 是整张表
      * 最占空间的两列）；而把错误一起采掉的可观测性只剩下「一切正常」，等于没有。
+     * <p>
+     * 采样按 traceId 决定整条链路的去留（见 {@link #sampled(String, String)}）。
      */
     @Value("${cangjie.observability.llm-trace.sample-rate:1.0}")
     private double sampleRate;
@@ -129,6 +131,14 @@ public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
     void destroy() {
         if (flusher != null) {
             flusher.shutdown();
+            try {
+                // 等正在写的那一轮结束再补一次收尾冲刷：两边同时 drainTo 会把同一批数据拆成两次写
+                if (!flusher.awaitTermination(5, TimeUnit.SECONDS)) {
+                    flusher.shutdownNow();
+                }
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
         }
         // 退出前把内存里剩下的 trace 落下去：正在排障的那几条丢不得
         flushQuietly();
@@ -145,12 +155,13 @@ public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
     }
 
     private void save(LlmTraceRecord record, String status, String errorMessage) {
-        if (!sampled(status)) {
+        String traceId = resolveTraceId(record);
+        if (!sampled(status, traceId)) {
             return;
         }
         try {
             LlmTraceEntity trace = new LlmTraceEntity();
-            trace.setTraceId(resolveTraceId(record));
+            trace.setTraceId(traceId);
             trace.setRunId(record.getRunId());
             trace.setRequestId(record.getRequestId());
             trace.setAppId(record.getAppId());
@@ -196,15 +207,43 @@ public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
      * 要不要留这一条。
      * <p>
      * 采样率配成 0 / 负数相当于「只留失败」而不是全留：配错一个数不该让表重新长回去。
+     * <p>
+     * 采样决定按 traceId 取，不逐调用掷随机数：一次对话本来就是 2~5 条调用组成的同一条链路，
+     * 逐调用采样会随机留下其中几条，链路视图（{@code /traces/{traceId}/llm-calls}）拼出来永远残缺，
+     * 而 trace_record 侧不采样、两侧永久对不上。按 traceId 决定则要么整条留、要么整条丢。
+     * <p>
+     * 注意「被点踩的调用强制留档」在写时采样下做不到：点踩是回答落库之后才发生的，
+     * 那几条调用来不及回头改判。所以坏 case 回流（feedback → eval_case）取的是会话消息侧
+     * （{@code ConversationSourceImpl}），不依赖这里的 llm_trace 有没有被采掉。
      */
-    private boolean sampled(String status) {
+    private boolean sampled(String status, String traceId) {
         if (STATUS_FAIL.equals(status) || sampleRate >= 1.0) {
             return true;
         }
         if (sampleRate <= 0.0) {
             return false;
         }
-        return ThreadLocalRandom.current().nextDouble() < sampleRate;
+        return traceBucket(traceId) < sampleRate;
+    }
+
+    /**
+     * traceId → [0,1) 的稳定桶位。同一时刻同一 traceId 恒得同一值（含其它 JVM），
+     * 多实例部署时也不会出现「同一条链路在 A 实例留、在 B 实例丢」。
+     */
+    private static double traceBucket(String traceId) {
+        // 没有 traceId 的行不能全落进同一个桶（那会变成「全留」或「全丢」二选一）：
+        // 这种调用本就无链路可归，退回逐条随机
+        int hash = traceId == null || traceId.isBlank()
+                ? ThreadLocalRandom.current().nextInt()
+                : traceId.hashCode();
+        // 用 MurmurHash3 的 finalizer 打散低位：traceId 常带公共前缀，裸 hashCode 的低位分布不均
+        int h = hash;
+        h ^= h >>> 16;
+        h *= 0x7feb352d;
+        h ^= h >>> 15;
+        h *= 0x846ca68b;
+        h ^= h >>> 16;
+        return (h & 0x7fffffff) / (double) Integer.MAX_VALUE;
     }
 
     /**
@@ -227,28 +266,61 @@ public class LlmTraceRecorderImpl implements ILlmTraceRecorder {
         }
     }
 
-    /** 定时线程里把缓冲清完：一批一批写，写不进去就等下一轮，不堆积重试 */
+    /**
+     * 定时线程里把缓冲清完：一批一批写。
+     * <p>
+     * 整个方法不允许抛出：它跑在 {@code scheduleWithFixedDelay} 上，一次未捕获异常（含 Error）
+     * 会让周期任务从此不再调度，队列于是只进不出、静默全丢，且日志里一个字都不会有。
+     * 写失败的批次原样塞回队列等下一轮（塞不回才计成丢弃）：一次网络抖动不该让整批观测数据蒸发。
+     */
     private void flushQuietly() {
+        try {
+            flushBatches();
+        } catch (Throwable t) {
+            log.warn("llm_trace 冲刷任务异常（不影响后续调度）: {}", t.toString(), t);
+        } finally {
+            try {
+                reportDropped();
+            } catch (Exception ignored) {
+                // 计数上报失败不值得把调度打断
+            }
+        }
+    }
+
+    private void flushBatches() {
         BlockingQueue<LlmTraceEntity> buffer = queue;
         if (buffer == null) {
             return;
         }
+        int size = Math.max(1, batchSize);
         while (!buffer.isEmpty()) {
-            List<LlmTraceEntity> batch = new ArrayList<>(Math.max(1, batchSize));
-            buffer.drainTo(batch, Math.max(1, batchSize));
+            List<LlmTraceEntity> batch = new ArrayList<>(size);
+            buffer.drainTo(batch, size);
             if (batch.isEmpty()) {
                 break;
             }
             try {
                 llmTraceService.saveBatch(batch);
             } catch (Exception ex) {
-                writeFailures.addAndGet(batch.size());
-                log.warn("llm_trace 批量落库失败，本批 {} 条已丢弃: {}", batch.size(), ex.toString());
-                // 写失败说明库已经不行了，接着挖队列只会把失败放大成刷屏，剩下的等下一轮定时
+                // 逆序塞回：正序塞回会因为队列是 FIFO 把这批重新排到队尾，与后面的新数据交错
+                int requeued = 0;
+                for (int i = batch.size() - 1; i >= 0; i--) {
+                    if (buffer.offer(batch.get(i))) {
+                        requeued++;
+                    }
+                }
+                // 写失败按「批」计数：这一轮确实一次都没写进去；
+                // 退不回来的那几条才是真丢了，跟缓冲满的丢弃合并计数
+                writeFailures.incrementAndGet();
+                if (requeued < batch.size()) {
+                    dropped.addAndGet(batch.size() - requeued);
+                }
+                log.warn("llm_trace 批量落库失败，{} 条已退回缓冲等下一轮（{} 条无处可退回已丢弃）: {}",
+                        requeued, batch.size() - requeued, ex.toString());
+                // 库已经不行了，接着挖队列只会把失败放大成刷屏；下一轮定时再试
                 break;
             }
         }
-        reportDropped();
     }
 
     /** 丢弃只报增量：每轮重报同一个累计值会把日志顶成刷屏 */
